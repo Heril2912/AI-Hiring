@@ -1,7 +1,10 @@
 from fastapi import FastAPI, Response, status
+from app.api.resumes import router as resumes_router
 from app.database import check_database_connection
 
 app = FastAPI(title="AI-Driven Smart Hiring Platform")
+
+app.include_router(resumes_router)
 
 
 @app.get("/api/v1/health")
