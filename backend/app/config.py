@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     database_url: str
     max_resume_upload_bytes: int = 10485760
     max_resume_pages: int = 5
+    max_docx_expanded_bytes: int = 52428800
+    max_docx_archive_entries: int = 1000
+    max_docx_compression_ratio: int = 100
     resume_intake_directory: str = "backend/runtime/resume_intake"
     resume_quarantine_directory: str = "backend/runtime/quarantine"
 
