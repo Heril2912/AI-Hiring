@@ -9,7 +9,9 @@ ENV_PATH = REPO_ROOT / ".env"
 class Settings(BaseSettings):
     database_url: str
     max_resume_upload_bytes: int = 10485760
+    max_resume_pages: int = 5
     resume_intake_directory: str = "backend/runtime/resume_intake"
+    resume_quarantine_directory: str = "backend/runtime/quarantine"
 
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
@@ -18,6 +20,12 @@ class Settings(BaseSettings):
 
     def get_intake_path(self) -> Path:
         raw_path = Path(self.resume_intake_directory)
+        if raw_path.is_absolute():
+            return raw_path.resolve()
+        return (REPO_ROOT / raw_path).resolve()
+
+    def get_quarantine_path(self) -> Path:
+        raw_path = Path(self.resume_quarantine_directory)
         if raw_path.is_absolute():
             return raw_path.resolve()
         return (REPO_ROOT / raw_path).resolve()
