@@ -21,6 +21,7 @@ from app.models.resume import (
     ResumeArtifact,
 )
 from app.schemas.resume import ResumeUploadResponse
+from app.services.docx_validation import DOCXValidationError, validate_docx_file
 from app.services.pdf_validation import PDFValidationError, validate_pdf_file
 
 logger = logging.getLogger("ai_hiring.api.resumes")
@@ -132,8 +133,8 @@ def _cleanup_file(file_path: Path) -> None:
     summary="Upload Resume Document",
     description=(
         "Accepts a PDF or DOCX file, performs preliminary intake checks, streams the file into "
-        "intake storage, validates PDF structure, moves accepted files to quarantine, creates "
-        "ResumeArtifact and ProcessingJob persistence records atomically, and queues the document."
+        "intake storage, validates document structure and package safety, moves accepted files to quarantine, "
+        "creates ResumeArtifact and ProcessingJob persistence records atomically, and queues the document."
     ),
 )
 async def upload_resume(
@@ -282,6 +283,70 @@ async def upload_resume(
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={"code": "PDF_VALIDATION_UNAVAILABLE", "message": "PDF validation is currently unavailable."},
+            )
+
+    elif ext == ".docx":
+        try:
+            val_result = validate_docx_file(
+                file_path=destination_path,
+                max_docx_expanded_bytes=settings.max_docx_expanded_bytes,
+                max_docx_archive_entries=settings.max_docx_archive_entries,
+                max_docx_compression_ratio=settings.max_docx_compression_ratio,
+            )
+            detected_format = val_result.detected_format
+            validation_status = ArtifactValidationStatus.VALIDATED
+
+            # Quarantine directory setup
+            quarantine_base = settings.get_quarantine_path()
+            quarantine_docx_dir = quarantine_base / "docx"
+            _ensure_directory(quarantine_docx_dir)
+
+            quarantine_filename = f"{artifact_id}.docx"
+            quarantine_dest = (quarantine_docx_dir / quarantine_filename).resolve()
+
+            # Verify containment
+            if not str(quarantine_dest).startswith(str(quarantine_docx_dir)):
+                _cleanup_file(destination_path)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"code": "INTAKE_UNAVAILABLE", "message": "Quarantine path containment error."},
+                )
+
+            # Move intake file to quarantine (prevent overwriting)
+            if quarantine_dest.exists():
+                _cleanup_file(destination_path)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"code": "INTAKE_UNAVAILABLE", "message": "Quarantine destination conflict."},
+                )
+
+            try:
+                shutil.move(destination_path, quarantine_dest)
+                final_file_path = quarantine_dest
+                quarantine_key = f"docx/{quarantine_filename}"
+            except OSError as e:
+                _cleanup_file(destination_path)
+                _cleanup_file(quarantine_dest)
+                logger.error("Failed to move DOCX to quarantine", extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__})
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"code": "INTAKE_UNAVAILABLE", "message": "Failed to move document to quarantine."},
+                )
+
+        except DOCXValidationError as e:
+            _cleanup_file(destination_path)
+            raise HTTPException(
+                status_code=e.status_code,
+                detail={"code": e.code, "message": e.message},
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            _cleanup_file(destination_path)
+            logger.error("Unexpected DOCX validator failure", extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__})
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "DOCX_VALIDATION_UNAVAILABLE", "message": "DOCX validation is currently unavailable."},
             )
 
     # 5. Atomic persistence of ResumeArtifact and ProcessingJob

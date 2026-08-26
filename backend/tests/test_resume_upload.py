@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 from sqlalchemy.exc import SQLAlchemyError
 
+import zipfile
+
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.main import app
@@ -28,6 +30,44 @@ def _create_valid_pdf_bytes(page_count: int = 1) -> bytes:
         writer.add_blank_page(width=72, height=72)
     buf = io.BytesIO()
     writer.write(buf)
+    return buf.getvalue()
+
+
+MINIMAL_DOCX_CONTENT_TYPES = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>
+"""
+
+MINIMAL_DOCX_RELS = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>
+"""
+
+MINIMAL_DOCX_DOCUMENT_XML = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Confidential Candidate Resume</w:t></w:r></w:p>
+  </w:body>
+</w:document>
+"""
+
+
+def _create_valid_docx_bytes(extra_files: dict[str, bytes] = None) -> bytes:
+    buf = io.BytesIO()
+    files = {
+        "[Content_Types].xml": MINIMAL_DOCX_CONTENT_TYPES,
+        "_rels/.rels": MINIMAL_DOCX_RELS,
+        "word/document.xml": MINIMAL_DOCX_DOCUMENT_XML,
+    }
+    if extra_files:
+        files.update(extra_files)
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, content in files.items():
+            zf.writestr(name, content)
     return buf.getvalue()
 
 
@@ -158,16 +198,22 @@ def test_upload_pdf_success_and_quarantine(test_client):
 
 
 # 2. A small .docx upload with the official DOCX MIME returns 202.
-# 29. Existing DOCX intake tests remain unchanged.
-def test_upload_docx_success(test_client):
+# 27. Valid DOCX returns 202.
+# 28. Artifact format becomes DOCX.
+# 29. Artifact status becomes VALIDATED.
+# 30. Job remains QUEUED.
+# 31. Intake copy is removed.
+# 32. Opaque file appears under quarantine/docx.
+def test_upload_docx_success_and_quarantine(test_client):
     client, intake_dir, quarantine_dir, db_session, _ = test_client
-    content = b"PK\x03\x04 test generic docx bytes"
+    docx_bytes = _create_valid_docx_bytes()
+    expected_hash = hashlib.sha256(docx_bytes).hexdigest().lower()
     docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    orig_name = "candidate_doc.docx"
+    orig_name = "candidate_resume_confidential.docx"
 
     response = client.post(
         "/api/v1/resumes",
-        files={"file": (orig_name, io.BytesIO(content), docx_mime)},
+        files={"file": (orig_name, io.BytesIO(docx_bytes), docx_mime)},
     )
 
     assert response.status_code == 202
@@ -177,15 +223,107 @@ def test_upload_docx_success(test_client):
     assert data["status"] == "QUEUED"
 
     art_id_str = data["artifactId"]
-    # DOCX stays in intake as pending in this phase
-    saved_files = list(intake_dir.iterdir())
-    assert len(saved_files) == 1
-    assert saved_files[0].name == f"{art_id_str}.upload"
+    job_id_str = data["jobId"]
 
+    # Intake directory should have no lingering file
+    if intake_dir.exists():
+        assert len(list(intake_dir.iterdir())) == 0
+
+    # Quarantine directory should contain the moved file under docx/
+    quarantine_docx_dir = quarantine_dir / "docx"
+    assert quarantine_docx_dir.exists()
+    quarantined_files = list(quarantine_docx_dir.iterdir())
+    assert len(quarantined_files) == 1
+    quarantined_file = quarantined_files[0]
+
+    assert quarantined_file.name == f"{art_id_str}.docx"
+    assert orig_name not in quarantined_file.name
+    assert quarantined_file.read_bytes() == docx_bytes
+
+    # Database records verification
+    assert len(db_session.added_records) == 2
     artifact = next(r for r in db_session.added_records if isinstance(r, ResumeArtifact))
-    assert artifact.detected_format is None
-    assert artifact.validation_status == ArtifactValidationStatus.PENDING
-    assert artifact.quarantine_key == f"resume_intake/{art_id_str}.upload"
+    job = next(r for r in db_session.added_records if isinstance(r, ProcessingJob))
+
+    assert str(artifact.artifact_id) == art_id_str
+    assert artifact.original_filename == orig_name
+    assert artifact.declared_mime_type == docx_mime
+    assert artifact.detected_format == ArtifactFormat.docx
+    assert artifact.validation_status == ArtifactValidationStatus.VALIDATED
+    assert artifact.size_bytes == len(docx_bytes)
+    assert artifact.sha256_hash == expected_hash
+    assert artifact.quarantine_key == f"docx/{art_id_str}.docx"
+
+    assert str(job.job_id) == job_id_str
+    assert str(job.artifact_id) == art_id_str
+    assert job.status == ProcessingJobStatus.QUEUED
+    assert job.attempt_count == 0
+
+    assert db_session.committed is True
+    assert db_session.closed is True
+
+
+# 33. Invalid DOCX leaves no file or database records.
+def test_invalid_signature_docx_returns_415(test_client):
+    client, intake_dir, quarantine_dir, db_session, _ = test_client
+    fake_content = b"NOT_A_ZIP_HEADER"
+    docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    response = client.post(
+        "/api/v1/resumes",
+        files={"file": ("fake.docx", io.BytesIO(fake_content), docx_mime)},
+    )
+
+    assert response.status_code == 415
+    detail = response.json().get("detail", {})
+    assert detail.get("code") == "INVALID_DOCX_SIGNATURE"
+    if intake_dir.exists():
+        assert list(intake_dir.iterdir()) == []
+    if quarantine_dir.exists():
+        assert list(quarantine_dir.rglob("*.*")) == []
+    assert len(db_session.added_records) == 0
+
+
+def test_unsafe_content_docx_returns_422(test_client):
+    client, intake_dir, quarantine_dir, db_session, _ = test_client
+    unsafe_content = _create_valid_docx_bytes(extra_files={"word/vbaProject.bin": b"VBA_BINARY"})
+    docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    response = client.post(
+        "/api/v1/resumes",
+        files={"file": ("macro.docx", io.BytesIO(unsafe_content), docx_mime)},
+    )
+
+    assert response.status_code == 422
+    detail = response.json().get("detail", {})
+    assert detail.get("code") == "UNSAFE_DOCX_CONTENT"
+    if intake_dir.exists():
+        assert list(intake_dir.iterdir()) == []
+    if quarantine_dir.exists():
+        assert list(quarantine_dir.rglob("*.*")) == []
+    assert len(db_session.added_records) == 0
+
+
+# 34. Database failure removes the quarantined DOCX.
+def test_db_failure_deletes_quarantined_docx(test_client):
+    client, intake_dir, quarantine_dir, db_session, _ = test_client
+    db_session.should_fail_commit = True
+    docx_bytes = _create_valid_docx_bytes()
+    docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    response = client.post(
+        "/api/v1/resumes",
+        files={"file": ("resume.docx", io.BytesIO(docx_bytes), docx_mime)},
+    )
+
+    assert response.status_code == 503
+    detail = response.json().get("detail", {})
+    assert detail.get("code") == "INTAKE_UNAVAILABLE"
+    assert db_session.rolled_back is True
+    if intake_dir.exists():
+        assert list(intake_dir.iterdir()) == []
+    if quarantine_dir.exists():
+        assert list(quarantine_dir.rglob("*.*")) == []
 
 
 # 3. Successful JSON contains only artifactId, jobId and status.

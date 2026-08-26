@@ -1,1 +1,43 @@
-# Services package marker
+from app.services.docx_validation import (
+    DOCXArchiveLimitExceededError,
+    DOCXValidationError,
+    DOCXValidationResult,
+    EncryptedDOCXError,
+    InvalidDOCXSignatureError,
+    InvalidDOCXStructureError,
+    MalformedDOCXError,
+    UnsafeDOCXContentError,
+    validate_docx_file,
+)
+from app.services.pdf_validation import (
+    EmptyPDFError,
+    EncryptedPDFError,
+    InvalidPDFSignatureError,
+    MalformedPDFError,
+    PDFPageLimitExceededError,
+    PDFValidationError,
+    PDFValidationResult,
+    UnsafePDFContentError,
+    validate_pdf_file,
+)
+
+__all__ = [
+    "DOCXArchiveLimitExceededError",
+    "DOCXValidationError",
+    "DOCXValidationResult",
+    "EncryptedDOCXError",
+    "InvalidDOCXSignatureError",
+    "InvalidDOCXStructureError",
+    "MalformedDOCXError",
+    "UnsafeDOCXContentError",
+    "validate_docx_file",
+    "EmptyPDFError",
+    "EncryptedPDFError",
+    "InvalidPDFSignatureError",
+    "MalformedPDFError",
+    "PDFPageLimitExceededError",
+    "PDFValidationError",
+    "PDFValidationResult",
+    "UnsafePDFContentError",
+    "validate_pdf_file",
+]

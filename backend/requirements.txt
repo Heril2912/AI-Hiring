@@ -8,3 +8,4 @@ pydantic-settings
 alembic
 python-multipart
 pypdf
+defusedxml
