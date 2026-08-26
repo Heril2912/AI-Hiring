@@ -1,9 +1,22 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
+from app.database import check_database_connection
 
 app = FastAPI(title="AI-Driven Smart Hiring Platform")
 
 
 @app.get("/api/v1/health")
-def health_check():
-    """Confirms the API process is running."""
-    return {"status": "healthy", "service": "ai-hiring-backend"}
+def health_check(response: Response):
+    """Confirms the API process is running and checks database connectivity."""
+    if check_database_connection():
+        return {
+            "status": "healthy",
+            "service": "ai-hiring-backend",
+            "database": "connected",
+        }
+
+    response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return {
+        "status": "degraded",
+        "service": "ai-hiring-backend",
+        "database": "disconnected",
+    }
