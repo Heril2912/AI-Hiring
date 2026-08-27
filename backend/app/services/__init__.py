@@ -24,6 +24,17 @@ from app.services.job_lifecycle import (
     start_job,
     succeed_job,
 )
+from app.services.pdf_text_extraction import (
+    ArtifactIntegrityError,
+    PDFDirectExtractionResult,
+    PDFDirectTextUnavailableError,
+    PDFExtractionError,
+    PDFExtractionFailedError,
+    PDFTextLimitExceededError,
+    PageAssessment,
+    PageClassification,
+    extract_pdf_direct_text,
+)
 from app.services.pdf_validation import (
     EmptyPDFError,
     EncryptedPDFError,
@@ -66,4 +77,13 @@ __all__ = [
     "ExtractionAlreadyExists",
     "InvalidExtractionResult",
     "persist_extraction",
+    "PageClassification",
+    "PageAssessment",
+    "PDFDirectExtractionResult",
+    "PDFExtractionError",
+    "ArtifactIntegrityError",
+    "PDFTextLimitExceededError",
+    "PDFExtractionFailedError",
+    "PDFDirectTextUnavailableError",
+    "extract_pdf_direct_text",
 ]

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     max_docx_compression_ratio: int = 100
     resume_intake_directory: str = "backend/runtime/resume_intake"
     resume_quarantine_directory: str = "backend/runtime/quarantine"
+    min_pdf_direct_text_chars: int = 30
+    max_pdf_extracted_chars: int = 500000
 
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
