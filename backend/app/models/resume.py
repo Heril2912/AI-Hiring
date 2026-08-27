@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -16,9 +16,12 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.extraction import ResumeExtraction
 
 
 class ArtifactFormat(str, enum.Enum):
@@ -113,6 +116,15 @@ class ResumeArtifact(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    extraction: Mapped[Optional["ResumeExtraction"]] = relationship(
+        "ResumeExtraction",
+        back_populates="artifact",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
