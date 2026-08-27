@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     resume_quarantine_directory: str = "backend/runtime/quarantine"
     min_pdf_direct_text_chars: int = 30
     max_pdf_extracted_chars: int = 500000
+    max_docx_extracted_chars: int = 500000
 
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,

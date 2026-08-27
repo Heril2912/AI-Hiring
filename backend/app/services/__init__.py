@@ -1,3 +1,12 @@
+from app.services.docx_text_extraction import (
+    DOCXExtractionError,
+    DOCXExtractionFailedError,
+    DOCXExtractionOutcome,
+    DOCXExtractionQualityFacts,
+    DOCXTextLimitExceededError,
+    DOCXTextUnavailableError,
+    extract_docx_text,
+)
 from app.services.docx_validation import (
     DOCXArchiveLimitExceededError,
     DOCXValidationError,
@@ -57,6 +66,13 @@ __all__ = [
     "MalformedDOCXError",
     "UnsafeDOCXContentError",
     "validate_docx_file",
+    "DOCXExtractionError",
+    "DOCXTextLimitExceededError",
+    "DOCXExtractionFailedError",
+    "DOCXTextUnavailableError",
+    "DOCXExtractionQualityFacts",
+    "DOCXExtractionOutcome",
+    "extract_docx_text",
     "EmptyPDFError",
     "EncryptedPDFError",
     "InvalidPDFSignatureError",
@@ -87,3 +103,4 @@ __all__ = [
     "PDFDirectTextUnavailableError",
     "extract_pdf_direct_text",
 ]
+
