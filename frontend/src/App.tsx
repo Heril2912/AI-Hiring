@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ResumeUpload } from "./components/ResumeUpload";
 
 type HealthResponse = {
   status: string;
@@ -48,8 +49,11 @@ export function App() {
 
   return (
     <div className="container">
-      <h1>AI-Driven Smart Hiring Platform</h1>
-      <p className="description">Evidence-based resume parsing and candidate profiling</p>
+      <header className="app-header">
+        <h1>AI-Driven Smart Hiring Platform</h1>
+        <p className="description">Evidence-based resume parsing and candidate profiling</p>
+      </header>
+
       <div className="status-card">
         <p className="status-label">System foundation</p>
         <div className="status-indicator-wrapper">
@@ -61,6 +65,10 @@ export function App() {
           </span>
         </div>
       </div>
+
+      <main className="app-main">
+        <ResumeUpload />
+      </main>
     </div>
   );
 }
