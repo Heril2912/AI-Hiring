@@ -9,6 +9,14 @@ from app.services.docx_validation import (
     UnsafeDOCXContentError,
     validate_docx_file,
 )
+from app.services.job_lifecycle import (
+    InvalidJobTransition,
+    SafeProcessingErrorCode,
+    fail_job,
+    retry_job,
+    start_job,
+    succeed_job,
+)
 from app.services.pdf_validation import (
     EmptyPDFError,
     EncryptedPDFError,
@@ -40,4 +48,10 @@ __all__ = [
     "PDFValidationResult",
     "UnsafePDFContentError",
     "validate_pdf_file",
+    "InvalidJobTransition",
+    "SafeProcessingErrorCode",
+    "start_job",
+    "succeed_job",
+    "fail_job",
+    "retry_job",
 ]

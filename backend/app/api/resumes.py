@@ -5,9 +5,10 @@ import shutil
 import urllib.parse
 from pathlib import Path
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -20,7 +21,7 @@ from app.models.resume import (
     ProcessingJobStatus,
     ResumeArtifact,
 )
-from app.schemas.resume import ResumeUploadResponse
+from app.schemas.resume import ResumeStatusResponse, ResumeUploadResponse
 from app.services.docx_validation import DOCXValidationError, validate_docx_file
 from app.services.pdf_validation import PDFValidationError, validate_pdf_file
 
@@ -396,3 +397,70 @@ async def upload_resume(
         job_id=job_id,
         status=ProcessingJobStatus.QUEUED,
     )
+
+
+@router.get(
+    "/{artifact_id}/status",
+    response_model=ResumeStatusResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Resume Processing Status",
+    description=(
+        "Returns the privacy-safe processing status of a resume artifact and its associated job. "
+        "Excludes filenames, hashes, paths, and document content."
+    ),
+)
+async def get_resume_status(
+    artifact_id: UUID,
+    db: Session = Depends(get_db),
+) -> ResumeStatusResponse:
+    # NOTE: This status endpoint is local-development-only for Phase 1B.
+    # Object-level authorization (tenant/user ownership checks) must be added when authentication is introduced.
+    try:
+        stmt_artifact = select(ResumeArtifact).where(ResumeArtifact.artifact_id == artifact_id)
+        artifact = db.execute(stmt_artifact).scalar_one_or_none()
+
+        if artifact is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "RESUME_NOT_FOUND", "message": "Resume artifact or processing job not found."},
+            )
+
+        stmt_job = select(ProcessingJob).where(ProcessingJob.artifact_id == artifact_id)
+        job = db.execute(stmt_job).scalar_one_or_none()
+
+        if job is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "RESUME_NOT_FOUND", "message": "Resume artifact or processing job not found."},
+            )
+
+        return ResumeStatusResponse(
+            artifact_id=artifact.artifact_id,
+            job_id=job.job_id,
+            detected_format=artifact.detected_format,
+            validation_status=artifact.validation_status,
+            processing_status=job.status,
+            attempt_count=job.attempt_count,
+            safe_error_code=job.safe_error_code,
+        )
+
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.error(
+            "Database error querying resume status",
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Database service is currently unavailable."},
+        )
+    except Exception as e:
+        logger.error(
+            "Unexpected error querying resume status",
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Service is currently unavailable."},
+        )
