@@ -82,6 +82,10 @@ class MockDBSession:
     def add(self, instance):
         self.added_records.append(instance)
 
+    def flush(self):
+        if self.should_fail_commit:
+            raise SQLAlchemyError("Simulated database failure")
+
     def commit(self):
         if self.should_fail_commit:
             raise SQLAlchemyError("Simulated database failure")

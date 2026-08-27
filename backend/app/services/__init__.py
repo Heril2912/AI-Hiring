@@ -9,6 +9,13 @@ from app.services.docx_validation import (
     UnsafeDOCXContentError,
     validate_docx_file,
 )
+from app.services.extraction_persistence import (
+    ArtifactNotValidated,
+    ExtractionAlreadyExists,
+    ExtractionPersistenceError,
+    InvalidExtractionResult,
+    persist_extraction,
+)
 from app.services.job_lifecycle import (
     InvalidJobTransition,
     SafeProcessingErrorCode,
@@ -54,4 +61,9 @@ __all__ = [
     "succeed_job",
     "fail_job",
     "retry_job",
+    "ExtractionPersistenceError",
+    "ArtifactNotValidated",
+    "ExtractionAlreadyExists",
+    "InvalidExtractionResult",
+    "persist_extraction",
 ]

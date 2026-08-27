@@ -373,6 +373,7 @@ async def upload_resume(
 
     try:
         db.add(artifact)
+        db.flush()
         db.add(job)
         db.commit()
     except SQLAlchemyError as e:
