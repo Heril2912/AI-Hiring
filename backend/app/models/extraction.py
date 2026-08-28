@@ -41,7 +41,6 @@ class BlockType(str, enum.Enum):
 class ExtractionMethod(str, enum.Enum):
     PDF_TEXT = "PDF_TEXT"
     DOCX_TEXT = "DOCX_TEXT"
-    OCR = "OCR"
 
 
 class ResumeExtraction(Base):

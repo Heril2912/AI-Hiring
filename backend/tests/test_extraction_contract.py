@@ -117,7 +117,7 @@ def test_invalid_confidence_or_missing_locator_rejected():
             block_type=BlockType.PARAGRAPH,
             raw_text="test",
             normalized_text="test",
-            extraction_method=ExtractionMethod.OCR,
+            extraction_method=ExtractionMethod.PDF_TEXT,
             confidence=Decimal("1.05"),
         )
     assert "confidence" in str(exc.value)
@@ -130,7 +130,7 @@ def test_invalid_confidence_or_missing_locator_rejected():
             block_type=BlockType.PARAGRAPH,
             raw_text="test",
             normalized_text="test",
-            extraction_method=ExtractionMethod.OCR,
+            extraction_method=ExtractionMethod.PDF_TEXT,
             confidence=Decimal("-0.1"),
         )
     assert "confidence" in str(exc.value)
