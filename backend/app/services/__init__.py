@@ -85,6 +85,17 @@ from app.services.date_extraction import (
     parse_as_of_date,
     parse_single_date,
 )
+from app.services.education_project_certification_extraction import (
+    EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION,
+    extract_certification_records,
+    extract_education_projects_certifications_languages,
+    extract_education_records,
+    extract_language_records,
+    extract_project_records,
+)
+from app.services.education_project_certification_rules import (
+    EDUCATION_PROJECT_CERTIFICATION_RULES_VERSION,
+)
 from app.services.employment_extraction import (
     EMPLOYMENT_PARSER_VERSION,
     extract_employment_records,
@@ -190,5 +201,13 @@ __all__ = [
     "parse_single_date",
     "EMPLOYMENT_PARSER_VERSION",
     "extract_employment_records",
+    "EDUCATION_PROJECT_CERTIFICATION_RULES_VERSION",
+    "EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION",
+    "extract_education_records",
+    "extract_project_records",
+    "extract_certification_records",
+    "extract_language_records",
+    "extract_education_projects_certifications_languages",
 ]
+
 
