@@ -34,6 +34,55 @@ class ResumeStatusResponse(BaseModel):
     )
 
 
+class ResumeProcessResponse(BaseModel):
+    artifact_id: UUID
+    job_id: UUID
+    extraction_id: UUID
+    processing_status: ProcessingJobStatus = Field(default=ProcessingJobStatus.SUCCEEDED)
+    review_required: bool
+    block_count: int
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+
+class ResumeExtractionBlockResponse(BaseModel):
+    block_id: UUID
+    sequence_index: int
+    page_number: Optional[int] = None
+    structural_location: Optional[str] = None
+    block_type: str
+    extraction_method: str
+    raw_text: str
+    normalized_text: str
+    confidence: Optional[float] = None
+    review_required: bool
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+
+class ResumeExtractionResponse(BaseModel):
+    artifact_id: UUID
+    extraction_id: UUID
+    extractor_version: str
+    review_required: bool
+    block_count: int
+    blocks: list[ResumeExtractionBlockResponse]
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+
 class ResumeUploadErrorDetail(BaseModel):
     code: str
     message: str
