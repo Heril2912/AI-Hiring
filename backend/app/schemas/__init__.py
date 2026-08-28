@@ -1,3 +1,12 @@
+from app.schemas.employment import (
+    DatePrecision,
+    EmploymentExtractionResult,
+    EmploymentWarning,
+    EmploymentWarningCode,
+    ExtractedDateInterval,
+    ExtractedEmploymentRecord,
+    NormalizedDate,
+)
 from app.schemas.extraction import (
     ExtractionBlockData,
     ExtractionResult,
@@ -48,5 +57,12 @@ __all__ = [
     "ProfessionalSummaryResult",
     "ProfessionalHeadlineResult",
     "SkillAndSummaryExtractionResult",
+    "DatePrecision",
+    "EmploymentWarningCode",
+    "EmploymentWarning",
+    "NormalizedDate",
+    "ExtractedDateInterval",
+    "ExtractedEmploymentRecord",
+    "EmploymentExtractionResult",
 ]
 
