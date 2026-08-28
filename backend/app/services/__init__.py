@@ -77,6 +77,16 @@ from app.services.text_normalization import (
     normalize_extraction_result,
 )
 
+from app.services.identity_extraction import (
+    IDENTITY_PARSER_VERSION,
+    extract_identity_and_contacts,
+)
+from app.services.section_detection import (
+    SECTION_PARSER_VERSION,
+    detect_sections_from_blocks,
+    match_heading_candidate,
+)
+
 __all__ = [
     "DOCXArchiveLimitExceededError",
     "DOCXValidationError",
@@ -139,5 +149,10 @@ __all__ = [
     "ExtractionUnavailableError",
     "OrchestrationSuccess",
     "orchestrate_resume_extraction",
+    "SECTION_PARSER_VERSION",
+    "detect_sections_from_blocks",
+    "match_heading_candidate",
+    "IDENTITY_PARSER_VERSION",
+    "extract_identity_and_contacts",
 ]
 
