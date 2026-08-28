@@ -21,7 +21,7 @@ PDF_DIRECT_EXTRACTOR_VERSION = "pdf-direct-text-v1.0"
 class PageClassification(str, enum.Enum):
     TEXT = "TEXT"
     MIXED = "MIXED"
-    OCR_REQUIRED = "OCR_REQUIRED"
+    IMAGE_ONLY = "IMAGE_ONLY"
     EMPTY = "EMPTY"
     UNREADABLE = "UNREADABLE"
 
@@ -51,7 +51,10 @@ class PDFExtractionFailedError(PDFExtractionError):
 
 
 class PDFDirectTextUnavailableError(PDFExtractionError):
-    def __init__(self, message: str = "No direct text could be extracted from the document."):
+    def __init__(
+        self,
+        message: str = "No readable digital text was found. Please upload a text-based PDF or DOCX document.",
+    ):
         super().__init__(code="PDF_DIRECT_TEXT_UNAVAILABLE", message=message)
 
 
@@ -63,7 +66,6 @@ class PageAssessment:
     printable_character_ratio: float
     replacement_character_count: int
     has_visual_content: bool
-    requires_ocr: bool
     review_required: bool
 
 
@@ -72,7 +74,6 @@ class PDFDirectExtractionResult:
     extractor_version: str
     blocks: List[ExtractionBlockData]
     pages: List[PageAssessment]
-    requires_ocr: bool
     review_required: bool
     total_character_count: int
     extraction_result: Optional[ExtractionResult]
@@ -210,7 +211,7 @@ def _split_text_into_blocks(
     page_number: int,
     start_sequence_index: int,
 ) -> List[ExtractionBlockData]:
-    """
+    r"""
     Splits page text into conservative paragraph-like blocks.
     - Normalizes line endings to \n.
     - Splits at blank-line boundaries (\n\s*\n+).
@@ -260,7 +261,7 @@ def extract_pdf_direct_text(
     Bounded, direct-text PDF extractor for validated and quarantined PDF artifacts.
 
     Reads a trusted PDF page-by-page, produces ordered PDF_TEXT blocks, computes
-    safe page-quality signals, and classifies each page (TEXT, MIXED, OCR_REQUIRED, EMPTY, UNREADABLE).
+    safe page-quality signals, and classifies each page (TEXT, MIXED, IMAGE_ONLY, EMPTY, UNREADABLE).
     """
     if settings is None:
         settings = Settings()
@@ -297,7 +298,6 @@ def extract_pdf_direct_text(
     all_blocks: List[ExtractionBlockData] = []
     page_assessments: List[PageAssessment] = []
     total_extracted_chars = 0
-    any_page_requires_ocr = False
     any_page_review_required = False
 
     # 3. Process pages in original order
@@ -316,7 +316,7 @@ def extract_pdf_direct_text(
                 "Page extraction failed on page",
                 extra={"artifact_id": str(artifact.artifact_id), "page_number": page_number, "error_type": type(e).__name__},
             )
-            # Mark page as UNREADABLE and requires OCR / review
+            # Mark page as UNREADABLE and requires review
             page_assessments.append(
                 PageAssessment(
                     page_number=page_number,
@@ -325,11 +325,9 @@ def extract_pdf_direct_text(
                     printable_character_ratio=0.0,
                     replacement_character_count=0,
                     has_visual_content=True,
-                    requires_ocr=True,
                     review_required=True,
                 )
             )
-            any_page_requires_ocr = True
             any_page_review_required = True
             continue
 
@@ -355,37 +353,29 @@ def extract_pdf_direct_text(
 
         # Classify page
         page_review = False
-        page_requires_ocr = False
 
         if extracted_len >= min_text_chars:
             # Significant direct text
             if replacement_count > 10 or printable_ratio < 0.85:
                 # Poor quality direct text -> unreadable/corrupt font encoding
                 classification = PageClassification.UNREADABLE
-                page_requires_ocr = has_visual
                 page_review = True
             elif has_visual:
                 classification = PageClassification.MIXED
-                page_requires_ocr = False
             else:
                 classification = PageClassification.TEXT
-                page_requires_ocr = False
         else:
             # Low or no direct text (< min_text_chars)
             if has_visual:
-                classification = PageClassification.OCR_REQUIRED
-                page_requires_ocr = True
+                classification = PageClassification.IMAGE_ONLY
+                page_review = True
             elif extracted_len > 0:
                 # Some slight text, no visual
                 classification = PageClassification.TEXT
-                page_requires_ocr = False
                 page_review = True  # Flag for review due to very low character count
             else:
                 classification = PageClassification.EMPTY
-                page_requires_ocr = False
 
-        if page_requires_ocr:
-            any_page_requires_ocr = True
         if page_review:
             any_page_review_required = True
 
@@ -396,7 +386,6 @@ def extract_pdf_direct_text(
             printable_character_ratio=printable_ratio,
             replacement_character_count=replacement_count,
             has_visual_content=has_visual,
-            requires_ocr=page_requires_ocr,
             review_required=page_review,
         )
         page_assessments.append(assessment)
@@ -411,29 +400,27 @@ def extract_pdf_direct_text(
             all_blocks.extend(page_blocks)
             total_extracted_chars += extracted_len
 
-    # If all pages are EMPTY or no blocks extracted and no OCR required
-    if not all_blocks and not any_page_requires_ocr:
-        # Document contains only blank pages or unusable text without images
+    # If no readable digital text was found across the document:
+    if not all_blocks:
         logger.info(
-            "PDF document contains no usable text or visual content",
+            "PDF document contains no usable text",
             extra={"artifact_id": str(artifact.artifact_id)},
         )
+        raise PDFDirectTextUnavailableError()
 
-    # If all blocks exist and NO OCR is required, construct shared ExtractionResult
-    shared_extraction_result: Optional[ExtractionResult] = None
-    if all_blocks and not any_page_requires_ocr:
-        shared_extraction_result = ExtractionResult(
-            extractor_version=PDF_DIRECT_EXTRACTOR_VERSION,
-            review_required=any_page_review_required,
-            blocks=all_blocks,
-        )
+    # Construct shared ExtractionResult when blocks exist
+    shared_extraction_result = ExtractionResult(
+        extractor_version=PDF_DIRECT_EXTRACTOR_VERSION,
+        review_required=any_page_review_required,
+        blocks=all_blocks,
+    )
 
     return PDFDirectExtractionResult(
         extractor_version=PDF_DIRECT_EXTRACTOR_VERSION,
         blocks=all_blocks,
         pages=page_assessments,
-        requires_ocr=any_page_requires_ocr,
         review_required=any_page_review_required,
         total_character_count=total_extracted_chars,
         extraction_result=shared_extraction_result,
     )
+

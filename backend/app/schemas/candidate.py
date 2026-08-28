@@ -29,7 +29,6 @@ class EvidenceSpan(StrictSchema):
     character_end: int
     original_text: str = Field(min_length=1)
     extraction_method: str = Field(min_length=1)
-    ocr_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_location_and_span(self) -> "EvidenceSpan":

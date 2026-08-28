@@ -196,17 +196,14 @@ def test_digital_multipage_pdf_extraction(tmp_path):
     result = extract_pdf_direct_text(artifact, settings)
 
     assert isinstance(result, PDFDirectExtractionResult)
-    assert result.requires_ocr is False
     assert result.review_required is False
     assert len(result.pages) == 2
 
     assert result.pages[0].classification == PageClassification.TEXT
     assert result.pages[0].page_number == 1
-    assert result.pages[0].requires_ocr is False
 
     assert result.pages[1].classification == PageClassification.TEXT
     assert result.pages[1].page_number == 2
-    assert result.pages[1].requires_ocr is False
 
     # Blocks validation
     assert len(result.blocks) == 4
@@ -234,10 +231,10 @@ def test_digital_multipage_pdf_extraction(tmp_path):
 
 
 # =========================================================================
-# 2. Blank pages are classified without creating fake text
+# 2. Blank pages are classified without creating fake text and raise unavailable
 # =========================================================================
 
-def test_blank_pages_classified_without_fake_text(tmp_path):
+def test_blank_pages_raise_direct_text_unavailable(tmp_path):
     writer = PdfWriter()
     writer.add_blank_page(width=612, height=792)
     writer.add_blank_page(width=612, height=792)
@@ -247,47 +244,32 @@ def test_blank_pages_classified_without_fake_text(tmp_path):
 
     artifact, settings = _setup_quarantined_pdf(tmp_path, pdf_bytes)
 
-    result = extract_pdf_direct_text(artifact, settings)
+    with pytest.raises(PDFExtractionFailedError if False else Exception) as exc:
+        extract_pdf_direct_text(artifact, settings)
 
-    assert result.requires_ocr is False
-    assert result.review_required is False
-    assert len(result.blocks) == 0
-    assert len(result.pages) == 2
-
-    for p in result.pages:
-        assert p.classification == PageClassification.EMPTY
-        assert p.extracted_character_count == 0
-        assert p.requires_ocr is False
-        assert p.has_visual_content is False
-
-    assert result.extraction_result is None  # No blocks, cannot form valid completed ExtractionResult
+    assert "No readable digital text was found" in str(exc.value)
 
 
 # =========================================================================
-# 3. A low-text visual page is marked for OCR
+# 3. An image-only PDF raises PDFDirectTextUnavailableError
 # =========================================================================
 
-def test_low_text_visual_page_marked_for_ocr(tmp_path):
+def test_image_only_pdf_raises_direct_text_unavailable(tmp_path):
     # Page with an image and only 4 characters (below min threshold of 30)
     pdf_bytes = _generate_pdf_with_image_and_text(text="Scan", add_image=True)
     artifact, settings = _setup_quarantined_pdf(tmp_path, pdf_bytes)
 
-    result = extract_pdf_direct_text(artifact, settings)
+    with pytest.raises(Exception) as exc:
+        extract_pdf_direct_text(artifact, settings)
 
-    assert len(result.pages) == 1
-    page = result.pages[0]
-    assert page.has_visual_content is True
-    assert page.classification == PageClassification.OCR_REQUIRED
-    assert page.requires_ocr is True
-    assert result.requires_ocr is True
-    assert result.extraction_result is None  # Not completed, requires OCR in 1C.4
+    assert "No readable digital text was found" in str(exc.value)
 
 
 # =========================================================================
-# 4. A readable page with a logo/image is not rejected solely because it is mixed
+# 4. A readable page with a logo/image is mixed and supported
 # =========================================================================
 
-def test_readable_page_with_logo_is_mixed_and_not_requiring_ocr(tmp_path):
+def test_readable_page_with_logo_is_mixed_and_supported(tmp_path):
     rich_text = (
         "ACME Corporation Senior Director\n"
         "Managed engineering teams of 50+ developers across multiple global offices.\n"
@@ -302,10 +284,48 @@ def test_readable_page_with_logo_is_mixed_and_not_requiring_ocr(tmp_path):
     page = result.pages[0]
     assert page.has_visual_content is True
     assert page.classification == PageClassification.MIXED
-    assert page.requires_ocr is False
-    assert result.requires_ocr is False
     assert len(result.blocks) > 0
     assert result.extraction_result is not None
+
+
+# =========================================================================
+# 4b. A partially readable PDF retains direct blocks and requires review
+# =========================================================================
+
+def test_partially_readable_pdf_retains_direct_blocks_and_requires_review(tmp_path):
+    page1_text = (
+        "Jane Doe\n"
+        "Senior Software Engineer with extensive experience in Python and cloud systems."
+    )
+    # Page 1 has sufficient text; Page 2 has only an image without text
+    writer = PdfWriter()
+    
+    # Page 1: normal text
+    p1_bytes = _generate_pdf_bytes([page1_text])
+    r1 = pypdf.PdfReader(io.BytesIO(p1_bytes))
+    writer.add_page(r1.pages[0])
+
+    # Page 2: image only
+    p2_bytes = _generate_pdf_with_image_and_text(text="", add_image=True)
+    r2 = pypdf.PdfReader(io.BytesIO(p2_bytes))
+    writer.add_page(r2.pages[0])
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    pdf_bytes = buf.getvalue()
+
+    artifact, settings = _setup_quarantined_pdf(tmp_path, pdf_bytes)
+    result = extract_pdf_direct_text(artifact, settings)
+
+    assert result.review_required is True
+    assert len(result.pages) == 2
+    assert result.pages[0].classification == PageClassification.TEXT
+    assert result.pages[1].classification == PageClassification.IMAGE_ONLY
+    assert len(result.blocks) == 1
+    assert result.blocks[0].raw_text.startswith("Jane Doe")
+    assert result.extraction_result is not None
+    assert result.extraction_result.review_required is True
+
 
 
 # =========================================================================

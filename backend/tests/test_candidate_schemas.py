@@ -143,7 +143,7 @@ def test_evidence_span_requiring_page_or_block_location():
         character_start=0,
         character_end=10,
         original_text="Jane Doe",
-        extraction_method="ocr",
+        extraction_method="docx_text",
     )
     assert span_block.page_number is None
     assert span_block.block_number == 0

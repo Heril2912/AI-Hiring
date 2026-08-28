@@ -56,6 +56,16 @@ from app.services.pdf_validation import (
     validate_pdf_file,
 )
 
+from app.services.text_normalization import (
+    NormalizationOutcome,
+    NormalizationPolicy,
+    NormalizationQualityFacts,
+    NormalizationWarningCode,
+    NormalizedTextUnavailableError,
+    TextNormalizationError,
+    normalize_extraction_result,
+)
+
 __all__ = [
     "DOCXArchiveLimitExceededError",
     "DOCXValidationError",
@@ -102,5 +112,12 @@ __all__ = [
     "PDFExtractionFailedError",
     "PDFDirectTextUnavailableError",
     "extract_pdf_direct_text",
+    "NormalizationOutcome",
+    "NormalizationPolicy",
+    "NormalizationQualityFacts",
+    "NormalizationWarningCode",
+    "NormalizedTextUnavailableError",
+    "TextNormalizationError",
+    "normalize_extraction_result",
 ]
 
