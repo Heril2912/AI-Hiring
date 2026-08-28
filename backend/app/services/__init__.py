@@ -77,6 +77,18 @@ from app.services.text_normalization import (
     normalize_extraction_result,
 )
 
+from app.services.date_extraction import (
+    DATE_RULES_VERSION,
+    calculate_interval_duration_months,
+    calculate_total_experience_months,
+    extract_date_range_matches,
+    parse_as_of_date,
+    parse_single_date,
+)
+from app.services.employment_extraction import (
+    EMPLOYMENT_PARSER_VERSION,
+    extract_employment_records,
+)
 from app.services.identity_extraction import (
     IDENTITY_PARSER_VERSION,
     extract_identity_and_contacts,
@@ -170,5 +182,13 @@ __all__ = [
     "SkillDefinition",
     "SKILL_SUMMARY_PARSER_VERSION",
     "extract_skills_and_summary",
+    "DATE_RULES_VERSION",
+    "calculate_interval_duration_months",
+    "calculate_total_experience_months",
+    "extract_date_range_matches",
+    "parse_as_of_date",
+    "parse_single_date",
+    "EMPLOYMENT_PARSER_VERSION",
+    "extract_employment_records",
 ]
 
