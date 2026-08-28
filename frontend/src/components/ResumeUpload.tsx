@@ -1,11 +1,30 @@
 import { useState, useRef, ChangeEvent, FormEvent } from "react";
+import { ExtractionReview, ExtractionResultData } from "./ExtractionReview";
 
-type UploadState = "idle" | "selected" | "uploading" | "queued" | "rejected" | "failed";
+type UploadState =
+  | "idle"
+  | "selected"
+  | "uploading"
+  | "queued"
+  | "processing"
+  | "extracted"
+  | "rejected"
+  | "failed"
+  | "processing_failed";
 
 type UploadResponseData = {
   artifactId: string;
   jobId: string;
   status: string;
+};
+
+type ProcessResponseData = {
+  artifactId: string;
+  jobId: string;
+  extractionId: string;
+  processingStatus: string;
+  reviewRequired: boolean;
+  blockCount: number;
 };
 
 type StatusResponseData = {
@@ -39,11 +58,20 @@ const ERROR_MESSAGES: Record<string, string> = {
   PDF_VALIDATION_UNAVAILABLE: "The service is temporarily unavailable. Please try again.",
   DOCX_VALIDATION_UNAVAILABLE: "The service is temporarily unavailable. Please try again.",
   RESUME_NOT_FOUND: "Resume artifact or processing job not found.",
+  DIRECT_TEXT_UNAVAILABLE: "No readable digital text was found. Please upload a text-based PDF or DOCX document.",
+  ARTIFACT_INTEGRITY_FAILED: "The stored document could not be verified.",
+  RESOURCE_LIMIT_EXCEEDED: "The document exceeded the safe extraction limits.",
+  UNSUPPORTED_DOCUMENT_CONTENT: "The document contains unsupported or unreadable content.",
+  EXTRACTION_UNAVAILABLE: "The extraction service is currently unavailable.",
+  JOB_ALREADY_RUNNING: "A processing job is already running for this document.",
+  EXTRACTION_ALREADY_EXISTS: "An extraction already exists for this document.",
 };
 
 const SAFE_PROCESSING_ERROR_MESSAGES: Record<string, string> = {
+  DIRECT_TEXT_UNAVAILABLE: "No readable digital text was found. Please upload a text-based PDF or DOCX document.",
   DOCUMENT_READ_FAILED: "The document could not be read during processing.",
   RESOURCE_LIMIT_EXCEEDED: "The document exceeded processing resource limits.",
+  ARTIFACT_INTEGRITY_FAILED: "The stored document could not be verified.",
   PROCESSING_TIMEOUT: "The document processing timed out.",
   INTERNAL_PROCESSING_ERROR: "An internal error occurred during processing.",
 };
@@ -62,6 +90,7 @@ export function ResumeUpload() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadResponseData | null>(null);
   const [statusResult, setStatusResult] = useState<StatusResponseData | null>(null);
+  const [extractionResult, setExtractionResult] = useState<ExtractionResultData | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState<boolean>(false);
   const [statusError, setStatusError] = useState<string | null>(null);
 
@@ -107,6 +136,7 @@ export function ResumeUpload() {
     setErrorMessage(null);
     setUploadResult(null);
     setStatusResult(null);
+    setExtractionResult(null);
     setStatusError(null);
   };
 
@@ -120,6 +150,7 @@ export function ResumeUpload() {
     setErrorMessage(null);
     setUploadResult(null);
     setStatusResult(null);
+    setExtractionResult(null);
     setStatusError(null);
 
     const formData = new FormData();
@@ -160,6 +191,52 @@ export function ResumeUpload() {
     }
   };
 
+  const handleExtractText = async () => {
+    if (!uploadResult?.artifactId || uploadState === "processing") {
+      return;
+    }
+
+    setUploadState("processing");
+    setErrorMessage(null);
+    setStatusError(null);
+
+    try {
+      // 1. Trigger extraction
+      const processResponse = await fetch(`/api/v1/resumes/${uploadResult.artifactId}/process`, {
+        method: "POST",
+      });
+
+      if (processResponse.ok) {
+        // 2. Fetch full extraction blocks
+        const extResponse = await fetch(`/api/v1/resumes/${uploadResult.artifactId}/extraction`);
+        if (extResponse.ok) {
+          const extData: ExtractionResultData = await extResponse.json();
+          setExtractionResult(extData);
+          setUploadState("extracted");
+          return;
+        }
+      }
+
+      // Handle failure
+      const errorJson = await processResponse.json().catch(() => null);
+      const detail = errorJson?.detail;
+      const code = typeof detail === "object" ? detail?.code : null;
+      const message = typeof detail === "object" ? detail?.message : null;
+
+      setUploadState("processing_failed");
+      if (code && ERROR_MESSAGES[code]) {
+        setErrorMessage(ERROR_MESSAGES[code]);
+      } else if (message) {
+        setErrorMessage(message);
+      } else {
+        setErrorMessage("Text extraction failed. Please check the document and try again.");
+      }
+    } catch {
+      setUploadState("processing_failed");
+      setErrorMessage("The extraction service is temporarily unavailable. Please try again.");
+    }
+  };
+
   const handleCheckStatus = async () => {
     if (!uploadResult?.artifactId || isCheckingStatus) {
       return;
@@ -196,22 +273,28 @@ export function ResumeUpload() {
     setErrorMessage(null);
     setUploadResult(null);
     setStatusResult(null);
+    setExtractionResult(null);
     setStatusError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
+  // Render ExtractionReview directly if extraction succeeded
+  if (uploadState === "extracted" && extractionResult) {
+    return <ExtractionReview extraction={extractionResult} onReset={handleReset} />;
+  }
+
   return (
     <section className="upload-card" aria-labelledby="resume-upload-title">
       <h2 id="resume-upload-title" className="upload-card-title">
-        Resume Document Intake
+        Resume Document Intake &amp; Extraction
       </h2>
       <p className="upload-card-notice">
-        Upload only a resume you own or have permission to process. Supported formats: PDF (.pdf) and DOCX (.docx) up to 10 MB.
+        Upload only a resume you own or have permission to process. Supported formats: text-based PDF (.pdf) and native DOCX (.docx) up to 10 MB.
       </p>
 
-      {uploadState !== "queued" && (
+      {uploadState !== "queued" && uploadState !== "processing" && uploadState !== "processing_failed" && (
         <form onSubmit={handleUpload} className="upload-form">
           <div className="form-group">
             <label htmlFor="resume-file-input" className="file-input-label">
@@ -260,22 +343,35 @@ export function ResumeUpload() {
           <p className="feedback-text info">Streaming document to secure intake storage...</p>
         )}
 
-        {(uploadState === "rejected" || uploadState === "failed") && errorMessage && (
+        {(uploadState === "rejected" || uploadState === "failed" || uploadState === "processing_failed") && errorMessage && (
           <div className="feedback-box error" role="alert">
             <p className="feedback-text error">{errorMessage}</p>
-            <button type="button" onClick={handleReset} className="btn btn-secondary btn-sm">
-              Choose another file
-            </button>
+            <div className="action-row">
+              {uploadState === "processing_failed" && (
+                <button
+                  type="button"
+                  onClick={handleExtractText}
+                  className="btn btn-primary btn-sm"
+                >
+                  Retry extraction
+                </button>
+              )}
+              <button type="button" onClick={handleReset} className="btn btn-secondary btn-sm">
+                Choose another file
+              </button>
+            </div>
           </div>
         )}
 
-        {uploadState === "queued" && uploadResult && (
+        {(uploadState === "queued" || uploadState === "processing") && uploadResult && (
           <div className="feedback-box success">
             <h3 className="success-header">Resume accepted for processing.</h3>
             <div className="success-details">
               <div className="detail-row">
                 <span className="detail-label">Status:</span>
-                <span className="detail-value badge-queued">{uploadResult.status}</span>
+                <span className="detail-value badge-queued">
+                  {uploadState === "processing" ? "RUNNING" : uploadResult.status}
+                </span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Artifact ID:</span>
@@ -290,13 +386,27 @@ export function ResumeUpload() {
             <div className="action-row">
               <button
                 type="button"
+                onClick={handleExtractText}
+                disabled={uploadState === "processing"}
+                className="btn btn-primary"
+                aria-busy={uploadState === "processing"}
+              >
+                {uploadState === "processing" ? "Extracting resume text…" : "Extract text"}
+              </button>
+              <button
+                type="button"
                 onClick={handleCheckStatus}
-                disabled={isCheckingStatus}
-                className="btn btn-primary btn-sm"
+                disabled={isCheckingStatus || uploadState === "processing"}
+                className="btn btn-secondary btn-sm"
               >
                 {isCheckingStatus ? "Checking..." : "Check current status"}
               </button>
-              <button type="button" onClick={handleReset} className="btn btn-secondary btn-sm">
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={uploadState === "processing"}
+                className="btn btn-secondary btn-sm"
+              >
                 Choose another file
               </button>
             </div>

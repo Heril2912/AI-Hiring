@@ -10,10 +10,11 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import Settings, get_settings
 from app.database import get_db
+from app.models.extraction import ResumeExtraction
 from app.models.resume import (
     ArtifactFormat,
     ArtifactValidationStatus,
@@ -21,8 +22,18 @@ from app.models.resume import (
     ProcessingJobStatus,
     ResumeArtifact,
 )
-from app.schemas.resume import ResumeStatusResponse, ResumeUploadResponse
+from app.schemas.resume import (
+    ResumeExtractionBlockResponse,
+    ResumeExtractionResponse,
+    ResumeProcessResponse,
+    ResumeStatusResponse,
+    ResumeUploadResponse,
+)
 from app.services.docx_validation import DOCXValidationError, validate_docx_file
+from app.services.extraction_orchestration import (
+    OrchestrationError,
+    orchestrate_resume_extraction,
+)
 from app.services.pdf_validation import PDFValidationError, validate_pdf_file
 
 logger = logging.getLogger("ai_hiring.api.resumes")
@@ -459,6 +470,137 @@ async def get_resume_status(
     except Exception as e:
         logger.error(
             "Unexpected error querying resume status",
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Service is currently unavailable."},
+        )
+
+
+@router.post(
+    "/{artifact_id}/process",
+    response_model=ResumeProcessResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Process Resume Artifact",
+    description=(
+        "Synchronously runs text extraction, normalization, and persistence for a validated resume artifact. "
+        "Claims QUEUED job, runs format-specific direct text extraction, normalizes results, persists extraction blocks, "
+        "and marks job SUCCEEDED. Idempotently returns existing extraction for SUCCEEDED jobs."
+    ),
+)
+async def process_resume(
+    artifact_id: UUID,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+) -> ResumeProcessResponse:
+    # NOTE: Processing endpoint is local-development-only until authentication
+    # and object-level authorization (tenant/user ownership) are implemented.
+    try:
+        outcome = orchestrate_resume_extraction(
+            artifact_id=artifact_id,
+            db=db,
+            settings=settings,
+        )
+
+        return ResumeProcessResponse(
+            artifact_id=outcome.artifact_id,
+            job_id=outcome.job_id,
+            extraction_id=outcome.extraction_id,
+            processing_status=outcome.processing_status,
+            review_required=outcome.review_required,
+            block_count=outcome.block_count,
+        )
+
+    except OrchestrationError as e:
+        raise HTTPException(
+            status_code=e.status_code,
+            detail={"code": e.code, "message": e.message},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "Unexpected failure in resume processing endpoint",
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "EXTRACTION_UNAVAILABLE", "message": "The extraction service is currently unavailable."},
+        )
+
+
+@router.get(
+    "/{artifact_id}/extraction",
+    response_model=ResumeExtractionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Resume Extraction Results",
+    description=(
+        "Returns the complete evidence-addressable extraction blocks and quality metadata for a processed resume artifact. "
+        "Excludes filenames, hashes, paths, and document internals."
+    ),
+)
+async def get_resume_extraction(
+    artifact_id: UUID,
+    db: Session = Depends(get_db),
+) -> ResumeExtractionResponse:
+    # NOTE: Extraction retrieval endpoint is local-development-only until authentication
+    # and object-level authorization (tenant/user ownership) are implemented.
+    try:
+        stmt = (
+            select(ResumeExtraction)
+            .options(selectinload(ResumeExtraction.blocks))
+            .where(ResumeExtraction.artifact_id == artifact_id)
+        )
+        extraction = db.execute(stmt).scalar_one_or_none()
+
+        if extraction is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "EXTRACTION_NOT_FOUND", "message": "No extraction found for this resume artifact."},
+            )
+
+        block_responses = [
+            ResumeExtractionBlockResponse(
+                block_id=b.block_id,
+                sequence_index=b.sequence_index,
+                page_number=b.page_number,
+                structural_location=b.structural_location,
+                block_type=b.block_type.value,
+                extraction_method=b.extraction_method.value,
+                raw_text=b.raw_text,
+                normalized_text=b.normalized_text,
+                confidence=float(b.confidence) if b.confidence is not None else None,
+                review_required=b.review_required,
+            )
+            for b in extraction.blocks
+        ]
+
+        return ResumeExtractionResponse(
+            artifact_id=extraction.artifact_id,
+            extraction_id=extraction.extraction_id,
+            extractor_version=extraction.extractor_version,
+            review_required=extraction.review_required,
+            block_count=len(block_responses),
+            blocks=block_responses,
+        )
+
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.error(
+            "Database error querying resume extraction",
+            exc_info=True,
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Database service is currently unavailable."},
+        )
+    except Exception as e:
+        logger.error(
+            "Unexpected error querying resume extraction",
+            exc_info=True,
             extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
         )
         raise HTTPException(

@@ -56,6 +56,17 @@ from app.services.pdf_validation import (
     validate_pdf_file,
 )
 
+from app.services.extraction_orchestration import (
+    DirectTextUnavailableOrchestrationError,
+    ExtractionStateConflictError,
+    ExtractionUnavailableError,
+    JobAlreadyRunningError,
+    OrchestrationError,
+    OrchestrationSuccess,
+    ResumeNotFoundError,
+    UnsupportedDocumentContentError,
+    orchestrate_resume_extraction,
+)
 from app.services.text_normalization import (
     NormalizationOutcome,
     NormalizationPolicy,
@@ -119,5 +130,14 @@ __all__ = [
     "NormalizedTextUnavailableError",
     "TextNormalizationError",
     "normalize_extraction_result",
+    "OrchestrationError",
+    "ResumeNotFoundError",
+    "JobAlreadyRunningError",
+    "ExtractionStateConflictError",
+    "DirectTextUnavailableOrchestrationError",
+    "UnsupportedDocumentContentError",
+    "ExtractionUnavailableError",
+    "OrchestrationSuccess",
+    "orchestrate_resume_extraction",
 ]
 
