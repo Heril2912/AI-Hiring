@@ -86,6 +86,16 @@ from app.services.section_detection import (
     detect_sections_from_blocks,
     match_heading_candidate,
 )
+from app.services.skill_catalog import (
+    DEFAULT_SKILL_CATALOG,
+    SKILL_CATALOG_VERSION,
+    SkillCatalog,
+    SkillDefinition,
+)
+from app.services.skill_summary_extraction import (
+    SKILL_SUMMARY_PARSER_VERSION,
+    extract_skills_and_summary,
+)
 
 __all__ = [
     "DOCXArchiveLimitExceededError",
@@ -154,5 +164,11 @@ __all__ = [
     "match_heading_candidate",
     "IDENTITY_PARSER_VERSION",
     "extract_identity_and_contacts",
+    "SKILL_CATALOG_VERSION",
+    "DEFAULT_SKILL_CATALOG",
+    "SkillCatalog",
+    "SkillDefinition",
+    "SKILL_SUMMARY_PARSER_VERSION",
+    "extract_skills_and_summary",
 ]
 

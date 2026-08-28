@@ -163,12 +163,19 @@ def detect_sections_from_blocks(
         # Strategy A: Full block match
         match_result = match_heading_candidate(norm_text)
 
-        # Strategy B: If not full block, check first line if block is multiline
+        # Strategy B: If not full block, check first line if block is multiline or has colon prefix
         first_line = norm_text.split("\n")[0].strip() if "\n" in norm_text else ""
         if not match_result and first_line:
             first_line_match = match_heading_candidate(first_line)
             if first_line_match:
                 match_result = first_line_match
+
+        # Strategy C: Check prefix before colon if present in single-line block (e.g. "Skills: Python, TypeScript")
+        if not match_result and ":" in norm_text:
+            colon_prefix = norm_text.split(":")[0].strip()
+            prefix_match = match_heading_candidate(colon_prefix)
+            if prefix_match:
+                match_result = prefix_match
 
         if match_result:
             sec_type, matched_norm, conf = match_result
