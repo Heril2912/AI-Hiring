@@ -1,10 +1,6 @@
 from app.models.base import Base
-from app.models.extraction import (
-    BlockType,
-    ExtractionBlock,
-    ExtractionMethod,
-    ResumeExtraction,
-)
+from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
+from app.models.extraction import BlockType, ExtractionBlock, ExtractionMethod, ResumeExtraction
 from app.models.resume import (
     ArtifactFormat,
     ArtifactValidationStatus,
@@ -15,13 +11,15 @@ from app.models.resume import (
 
 __all__ = [
     "Base",
-    "ResumeArtifact",
-    "ProcessingJob",
-    "ResumeExtraction",
-    "ExtractionBlock",
     "ArtifactFormat",
     "ArtifactValidationStatus",
     "ProcessingJobStatus",
+    "ResumeArtifact",
+    "ProcessingJob",
     "BlockType",
     "ExtractionMethod",
+    "ResumeExtraction",
+    "ExtractionBlock",
+    "CandidateIdentityRecord",
+    "CandidateProfileRecord",
 ]

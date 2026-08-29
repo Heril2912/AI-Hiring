@@ -1,5 +1,6 @@
 import { useState, useRef, ChangeEvent, FormEvent } from "react";
 import { ExtractionReview, ExtractionResultData } from "./ExtractionReview";
+import { CandidateProfileReview, CandidateProfileData } from "./CandidateProfileReview";
 
 type UploadState =
   | "idle"
@@ -11,6 +12,8 @@ type UploadState =
   | "rejected"
   | "failed"
   | "processing_failed";
+
+type ActiveTab = "profile" | "raw_blocks";
 
 type UploadResponseData = {
   artifactId: string;
@@ -91,6 +94,8 @@ export function ResumeUpload() {
   const [uploadResult, setUploadResult] = useState<UploadResponseData | null>(null);
   const [statusResult, setStatusResult] = useState<StatusResponseData | null>(null);
   const [extractionResult, setExtractionResult] = useState<ExtractionResultData | null>(null);
+  const [profileResult, setProfileResult] = useState<CandidateProfileData | null>(null);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("profile");
   const [isCheckingStatus, setIsCheckingStatus] = useState<boolean>(false);
   const [statusError, setStatusError] = useState<string | null>(null);
 
@@ -137,6 +142,7 @@ export function ResumeUpload() {
     setUploadResult(null);
     setStatusResult(null);
     setExtractionResult(null);
+    setProfileResult(null);
     setStatusError(null);
   };
 
@@ -151,6 +157,7 @@ export function ResumeUpload() {
     setUploadResult(null);
     setStatusResult(null);
     setExtractionResult(null);
+    setProfileResult(null);
     setStatusError(null);
 
     const formData = new FormData();
@@ -201,7 +208,7 @@ export function ResumeUpload() {
     setStatusError(null);
 
     try {
-      // 1. Trigger extraction
+      // 1. Trigger extraction & profile assembly
       const processResponse = await fetch(`/api/v1/resumes/${uploadResult.artifactId}/process`, {
         method: "POST",
       });
@@ -212,7 +219,19 @@ export function ResumeUpload() {
         if (extResponse.ok) {
           const extData: ExtractionResultData = await extResponse.json();
           setExtractionResult(extData);
+        }
+
+        // 3. Fetch assembled CandidateProfile
+        const profResponse = await fetch(`/api/v1/resumes/${uploadResult.artifactId}/profile`);
+        if (profResponse.ok) {
+          const profData: CandidateProfileData = await profResponse.json();
+          setProfileResult(profData);
           setUploadState("extracted");
+          setActiveTab("profile");
+          return;
+        } else if (extResponse.ok) {
+          setUploadState("extracted");
+          setActiveTab("raw_blocks");
           return;
         }
       }
@@ -261,7 +280,7 @@ export function ResumeUpload() {
         }
       }
     } catch {
-      setStatusError("The service is temporarily unavailable. Please try again.");
+      setStatusError("Failed to fetch resume status. Service unavailable.");
     } finally {
       setIsCheckingStatus(false);
     }
@@ -274,15 +293,50 @@ export function ResumeUpload() {
     setUploadResult(null);
     setStatusResult(null);
     setExtractionResult(null);
+    setProfileResult(null);
     setStatusError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
-  // Render ExtractionReview directly if extraction succeeded
-  if (uploadState === "extracted" && extractionResult) {
-    return <ExtractionReview extraction={extractionResult} onReset={handleReset} />;
+  if (uploadState === "extracted" && (profileResult || extractionResult)) {
+    return (
+      <div className="review-tabs-container">
+        <div className="review-tabs-header">
+          {profileResult && (
+            <button
+              type="button"
+              className={`tab-btn ${activeTab === "profile" ? "active" : ""}`}
+              onClick={() => setActiveTab("profile")}
+            >
+              Candidate Profile Review
+            </button>
+          )}
+          {extractionResult && (
+            <button
+              type="button"
+              className={`tab-btn ${activeTab === "raw_blocks" ? "active" : ""}`}
+              onClick={() => setActiveTab("raw_blocks")}
+            >
+              Raw Extraction Review ({extractionResult.blockCount} blocks)
+            </button>
+          )}
+        </div>
+
+        {activeTab === "profile" && profileResult && (
+          <CandidateProfileReview
+            profile={profileResult}
+            extraction={extractionResult}
+            onReset={handleReset}
+          />
+        )}
+
+        {activeTab === "raw_blocks" && extractionResult && (
+          <ExtractionReview extraction={extractionResult} onReset={handleReset} />
+        )}
+      </div>
+    );
   }
 
   return (

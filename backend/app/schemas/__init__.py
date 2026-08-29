@@ -18,6 +18,12 @@ from app.schemas.education_project_certification import (
     ProjectWarning,
     ProjectWarningCode,
 )
+from app.schemas.profile_assembly import (
+    CandidateProfileResponse,
+    ProfileAssemblyResult,
+    ProfileAssemblyWarning,
+    ProfileAssemblyWarningCode,
+)
 from app.schemas.employment import (
     DatePrecision,
     EmploymentExtractionResult,
@@ -102,6 +108,11 @@ __all__ = [
     "CertificationExtractionResult",
     "LanguageExtractionResult",
     "Phase1D4ExtractionResult",
+    "ProfileAssemblyWarningCode",
+    "ProfileAssemblyWarning",
+    "ProfileAssemblyResult",
+    "CandidateProfileResponse",
 ]
+
 
 

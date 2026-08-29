@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import Settings
 from app.models.extraction import ExtractionBlock, ResumeExtraction
+from app.schemas.extraction import ExtractionBlockData
 from app.models.resume import (
     ArtifactFormat,
     ArtifactValidationStatus,
@@ -309,6 +310,41 @@ def orchestrate_resume_extraction(
             result=normalized_extraction,
         )
 
+        # Assemble and persist CandidateProfile (Phase 1D.5)
+        blocks_data = [
+            ExtractionBlockData(
+                block_id=b.block_id,
+                sequence_index=b.sequence_index,
+                page_number=b.page_number,
+                structural_location=b.structural_location,
+                block_type=b.block_type,
+                raw_text=b.raw_text,
+                normalized_text=b.normalized_text,
+                extraction_method=b.extraction_method,
+                confidence=b.confidence,
+                review_required=b.review_required,
+            )
+            for b in persisted_extraction.blocks
+        ]
+
+        from app.services.profile_assembly import (
+            assemble_candidate_profile,
+            persist_candidate_profile,
+        )
+
+        assembled_profile = assemble_candidate_profile(
+            blocks=blocks_data,
+            artifact_id=str(artifact_locked.artifact_id),
+            extraction_review_required=persisted_extraction.review_required,
+        )
+
+        persist_candidate_profile(
+            session=db,
+            artifact_id=artifact_locked.artifact_id,
+            extraction_id=persisted_extraction.extraction_id,
+            assembled_profile=assembled_profile,
+        )
+
         # Transition job RUNNING -> SUCCEEDED
         succeed_job(job_locked)
 
@@ -319,7 +355,7 @@ def orchestrate_resume_extraction(
             job_id=job_locked.job_id,
             extraction_id=persisted_extraction.extraction_id,
             processing_status=job_locked.status,
-            review_required=persisted_extraction.review_required,
+            review_required=persisted_extraction.review_required or assembled_profile.review_required,
             block_count=len(persisted_extraction.blocks),
         )
 
@@ -329,7 +365,9 @@ def orchestrate_resume_extraction(
     except Exception as e:
         logger.error(
             "Database commit failed during extraction persistence",
+            exc_info=True,
             extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
         )
         _fail_job_transaction(db, artifact_id, SafeProcessingErrorCode.INTERNAL_PROCESSING_ERROR)
         raise ExtractionUnavailableError("Failed to persist extraction result.") from e
+
