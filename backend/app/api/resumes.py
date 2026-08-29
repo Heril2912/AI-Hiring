@@ -22,6 +22,7 @@ from app.models.resume import (
     ProcessingJobStatus,
     ResumeArtifact,
 )
+from app.schemas.profile_assembly import CandidateProfileResponse
 from app.schemas.resume import (
     ResumeExtractionBlockResponse,
     ResumeExtractionResponse,
@@ -607,3 +608,141 @@ async def get_resume_extraction(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "INTAKE_UNAVAILABLE", "message": "Service is currently unavailable."},
         )
+
+
+@router.get(
+    "/{artifact_id}/profile",
+    response_model=CandidateProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Candidate Profile",
+    description=(
+        "Returns the structured CandidateProfile v1, evidence spans, review requirements, "
+        "and separated identity details for a processed resume artifact."
+    ),
+)
+async def get_candidate_profile(
+    artifact_id: UUID,
+    db: Session = Depends(get_db),
+) -> CandidateProfileResponse:
+    try:
+        # Check artifact exists
+        stmt_art = select(ResumeArtifact).where(ResumeArtifact.artifact_id == artifact_id)
+        artifact = db.execute(stmt_art).scalar_one_or_none()
+        if artifact is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "RESUME_NOT_FOUND", "message": "Resume artifact not found."},
+            )
+
+        # Check candidate profile record
+        from app.models.candidate import CandidateProfileRecord
+        stmt_prof = (
+            select(CandidateProfileRecord)
+            .options(selectinload(CandidateProfileRecord.identity))
+            .where(CandidateProfileRecord.artifact_id == artifact_id)
+            .order_by(CandidateProfileRecord.created_at.desc())
+        )
+        profile_rec = db.execute(stmt_prof).scalar_one_or_none()
+
+        if profile_rec is None:
+            # Check if extraction exists to assemble profile idempotently on-demand
+            stmt_ext = (
+                select(ResumeExtraction)
+                .options(selectinload(ResumeExtraction.blocks))
+                .where(ResumeExtraction.artifact_id == artifact_id)
+            )
+            extraction = db.execute(stmt_ext).scalar_one_or_none()
+
+            if extraction is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "PROFILE_NOT_READY",
+                        "message": "Candidate profile is not ready. The document has not been extracted yet.",
+                    },
+                )
+
+            # Assemble and persist profile on-demand
+            from app.schemas.extraction import ExtractionBlockData
+            from app.services.profile_assembly import (
+                assemble_candidate_profile,
+                persist_candidate_profile,
+            )
+
+            blocks_data = [
+                ExtractionBlockData(
+                    block_id=b.block_id,
+                    sequence_index=b.sequence_index,
+                    page_number=b.page_number,
+                    structural_location=b.structural_location,
+                    block_type=b.block_type,
+                    raw_text=b.raw_text,
+                    normalized_text=b.normalized_text,
+                    extraction_method=b.extraction_method,
+                    confidence=b.confidence,
+                    review_required=b.review_required,
+                )
+                for b in extraction.blocks
+            ]
+
+            assembled = assemble_candidate_profile(
+                blocks=blocks_data,
+                artifact_id=str(artifact_id),
+                extraction_review_required=extraction.review_required,
+            )
+
+            profile_rec = persist_candidate_profile(
+                session=db,
+                artifact_id=artifact_id,
+                extraction_id=extraction.extraction_id,
+                assembled_profile=assembled,
+            )
+            db.commit()
+
+            # Reload with identity
+            profile_rec = db.execute(stmt_prof).scalar_one()
+
+        identity_payload = profile_rec.identity.identity_payload
+        from app.schemas.candidate import (
+            CandidateIdentity,
+            CandidateProfessionalProfile,
+            EvidenceSpan,
+        )
+        from app.schemas.profile_assembly import ProfileAssemblyWarning
+
+        return CandidateProfileResponse(
+            artifact_id=str(profile_rec.artifact_id),
+            profile_id=str(profile_rec.profile_id),
+            profile_version=profile_rec.profile_version,
+            schema_version=profile_rec.schema_version,
+            parser_pipeline_version=profile_rec.parser_pipeline_version,
+            review_required=profile_rec.review_required,
+            warnings=[ProfileAssemblyWarning.model_validate(w) for w in profile_rec.warning_metadata],
+            identity=CandidateIdentity.model_validate(identity_payload),
+            professional_profile=CandidateProfessionalProfile.model_validate(profile_rec.professional_profile),
+            evidence=[EvidenceSpan.model_validate(ev) for ev in profile_rec.evidence_spans],
+        )
+
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.error(
+            "Database error querying candidate profile",
+            exc_info=True,
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Database service is currently unavailable."},
+        )
+    except Exception as e:
+        logger.error(
+            "Unexpected error querying candidate profile",
+            exc_info=True,
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Service is currently unavailable."},
+        )
+

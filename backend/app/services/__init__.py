@@ -96,6 +96,11 @@ from app.services.education_project_certification_extraction import (
 from app.services.education_project_certification_rules import (
     EDUCATION_PROJECT_CERTIFICATION_RULES_VERSION,
 )
+from app.services.profile_assembly import (
+    PROFILE_PIPELINE_VERSION,
+    assemble_candidate_profile,
+    persist_candidate_profile,
+)
 from app.services.employment_extraction import (
     EMPLOYMENT_PARSER_VERSION,
     extract_employment_records,
@@ -208,6 +213,10 @@ __all__ = [
     "extract_certification_records",
     "extract_language_records",
     "extract_education_projects_certifications_languages",
+    "PROFILE_PIPELINE_VERSION",
+    "assemble_candidate_profile",
+    "persist_candidate_profile",
 ]
+
 
 

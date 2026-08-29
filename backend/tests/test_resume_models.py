@@ -18,7 +18,15 @@ def test_models_exported_and_tables_registered():
     """Verify Base is a DeclarativeBase and tables are registered upon import."""
     assert issubclass(Base, DeclarativeBase)
     table_names = set(Base.metadata.tables.keys())
-    assert table_names == {"resume_artifacts", "processing_jobs", "resume_extractions", "extraction_blocks"}
+    assert table_names == {
+        "resume_artifacts",
+        "processing_jobs",
+        "resume_extractions",
+        "extraction_blocks",
+        "candidate_identities",
+        "candidate_profiles",
+    }
+
 
 
 def test_resume_artifacts_table_structure_and_constraints():
