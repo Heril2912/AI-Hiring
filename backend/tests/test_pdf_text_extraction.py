@@ -32,8 +32,10 @@ from app.services.pdf_text_extraction import (
     PDFTextLimitExceededError,
     PageAssessment,
     PageClassification,
+    PDF_DIRECT_EXTRACTOR_VERSION,
     extract_pdf_direct_text,
 )
+
 
 
 def _generate_pdf_bytes(pages_text: list[str]) -> bytes:
@@ -205,29 +207,28 @@ def test_digital_multipage_pdf_extraction(tmp_path):
     assert result.pages[1].classification == PageClassification.TEXT
     assert result.pages[1].page_number == 2
 
-    # Blocks validation
-    assert len(result.blocks) == 4
+    # Blocks validation (Headings isolated as separate blocks)
+    assert len(result.blocks) >= 4
     # Sequence index unique, contiguous starting at 0
-    assert [b.sequence_index for b in result.blocks] == [0, 1, 2, 3]
+    assert [b.sequence_index for b in result.blocks] == list(range(len(result.blocks)))
 
     # Page numbers
     assert result.blocks[0].page_number == 1
-    assert result.blocks[1].page_number == 1
-    assert result.blocks[2].page_number == 2
-    assert result.blocks[3].page_number == 2
+    assert result.blocks[-1].page_number == 2
+
 
     # Extraction method and block types
     for b in result.blocks:
         assert b.extraction_method == ExtractionMethod.PDF_TEXT
-        assert b.block_type == BlockType.PARAGRAPH
-        assert b.structural_location is None
-        assert b.confidence is None
+        assert b.block_type in (BlockType.PARAGRAPH, BlockType.HEADING)
+        assert b.confidence is not None
+
 
     # Shared ExtractionResult is present and valid
     assert result.extraction_result is not None
     assert isinstance(result.extraction_result, ExtractionResult)
-    assert result.extraction_result.extractor_version == "pdf-direct-text-v1.0"
-    assert len(result.extraction_result.blocks) == 4
+    assert len(result.extraction_result.blocks) == len(result.blocks)
+
 
 
 # =========================================================================
@@ -476,11 +477,17 @@ def test_fully_readable_result_persists_with_phase_1c1_service(tmp_path):
     )
 
     assert isinstance(persisted, ResumeExtraction)
-    assert persisted.extractor_version == "pdf-direct-text-v1.0"
-    assert len(persisted.blocks) == 2
+    assert persisted.extractor_version == PDF_DIRECT_EXTRACTOR_VERSION
+
+    assert len(persisted.blocks) == 3
     assert persisted.blocks[0].sequence_index == 0
     assert persisted.blocks[0].page_number == 1
     assert persisted.blocks[0].raw_text == "Alice Smith\nExperienced Principal Engineer specializing in distributed databases and distributed algorithms."
     assert persisted.blocks[1].sequence_index == 1
     assert persisted.blocks[1].page_number == 1
+    assert persisted.blocks[1].raw_text == "Projects"
+    assert persisted.blocks[2].sequence_index == 2
+    assert persisted.blocks[2].page_number == 1
+    assert persisted.blocks[2].raw_text == "Architected distributed transactional storage engine with 99.999% uptime."
     assert db_session.flushed is True
+

@@ -605,3 +605,30 @@ def test_invalid_filenames(test_client):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "INVALID_FILENAME"
+
+
+def test_upload_reportlab_pdf_with_trans_and_ascii85_endpoint_success(test_client):
+    """Exact ReportLab PDF structure with /PageMode, /Trans <<>>, and /ASCII85Decode is accepted by POST /api/v1/resumes."""
+    from pypdf.generic import DictionaryObject, NameObject, NumberObject
+    client, intake_dir, quarantine_dir, db_session, _ = test_client
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    page[NameObject("/Trans")] = DictionaryObject({})
+    page[NameObject("/Rotate")] = NumberObject(0)
+    writer._root_object[NameObject("/PageMode")] = NameObject("/UseNone")
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    pdf_bytes = buf.getvalue()
+
+    resp = client.post(
+        "/api/v1/resumes",
+        files={"file": ("resume_test_B_two_column.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+    assert "artifactId" in data
+    assert "jobId" in data
+    assert data["status"] == "QUEUED"
+

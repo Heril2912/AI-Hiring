@@ -89,6 +89,7 @@ class ExperienceRecord(StrictSchema):
 
 class EducationRecord(StrictSchema):
     degree: ExtractedField
+    field_of_study: ExtractedField | None = None
     institution: ExtractedField
     start_date: ExtractedField
     end_date: ExtractedField
@@ -106,6 +107,8 @@ class CertificationRecord(StrictSchema):
     name: ExtractedField
     issuer: ExtractedField
     issued_date: ExtractedField
+    expiry_date: ExtractedField | None = None
+    credential_id: ExtractedField | None = None
     credential_url: ExtractedField
 
 

@@ -67,7 +67,15 @@ from app.services.education_project_certification_rules import (
 
 logger = logging.getLogger("ai_hiring.services.education_project_certification_extraction")
 
-EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION = "ed-proj-cert-lang-extract-v1.0"
+EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION = "ed-proj-cert-lang-extract-v1.1"
+
+_ACTION_VERBS = {
+    "developed", "built", "created", "managed", "designed", "led", "architected",
+    "engineered", "integrated", "maintained", "implemented", "containerized",
+    "wrote", "provided", "performed", "analyzed", "assisted", "collaborated",
+    "delivered", "supported", "automated", "configured", "deployed", "spearheaded",
+    "orchestrated", "optimized", "monitored", "refactored", "troubleshot", "tested",
+}
 
 
 def _create_evidence_span(
@@ -129,7 +137,7 @@ def _build_extracted_field(
 
 
 # =============================================================================
-# 1. EDUCATION EXTRACTION SERVICE
+# 1. EDUCATION EXTRACTION SERVICE (STATE MACHINE)
 # =============================================================================
 
 def extract_education_records(
@@ -139,10 +147,10 @@ def extract_education_records(
     as_of_date: Optional[str] = None,
 ) -> EducationExtractionResult:
     """
-    Extracts education records strictly from detected EDUCATION sections.
-    - Accurately captures degree, normalized degree level, field of study, institution, dates, grade.
+    Extracts education records strictly from detected EDUCATION sections using a pending-record state machine.
+    - Assembles multi-line/multi-block items (degree, field of study, institution, dates, grade) into unified records.
     - Excludes non-degree certification courses.
-    - Attaches exact evidence spans and tracks ambiguities with warning codes.
+    - Produces warnings only for finalized logical records.
     """
     education_sections = [
         s for s in sections_result.sections if s.section_type == SectionType.EDUCATION
@@ -162,8 +170,7 @@ def extract_education_records(
 
     block_map: Dict[int, ExtractionBlockData] = {b.sequence_index: b for b in blocks}
 
-    for sec_idx, section in enumerate(education_sections):
-        # Collect blocks in section
+    for section in education_sections:
         sec_blocks: List[ExtractionBlockData] = []
         for idx in range(section.start_sequence_index, section.end_sequence_index + 1):
             if idx in block_map:
@@ -172,267 +179,306 @@ def extract_education_records(
                     continue
                 sec_blocks.append(blk)
 
-        # Parse records per block or group of lines
-        for b_idx, block in enumerate(sec_blocks):
-            raw_text = block.raw_text.strip()
-            if not raw_text:
-                continue
+        if not sec_blocks:
+            continue
 
-            lines = [l.strip() for l in block.raw_text.splitlines() if l.strip()]
-            if not lines:
-                continue
+        # Extract ordered lines across the section
+        LineEntry = Tuple[ExtractionBlockData, str, int, int]
+        all_lines: List[LineEntry] = []
+        for blk in sec_blocks:
+            lines = blk.normalized_text.split("\n")
+            curr_off = 0
+            for line in lines:
+                line_str = line.strip()
+                line_len = len(line)
+                line_start = blk.normalized_text.find(line, curr_off)
+                if line_start == -1:
+                    line_start = curr_off
+                line_end = line_start + len(line_str)
+                curr_off = line_start + line_len + 1
+                if line_str:
+                    all_lines.append((blk, line_str, line_start, line_end))
 
-            # Check if block is disqualified as a certification course
-            lower_raw = raw_text.lower()
-            if any(dq in lower_raw for dq in DISQUALIFYING_EDUCATION_KEYWORDS):
-                # Verify if it has formal degree. If not, ignore or warn
-                has_formal_degree = False
-                for deg_re, _, _ in DEGREE_DEFINITIONS:
-                    if deg_re.search(raw_text):
-                        has_formal_degree = True
-                        break
-                if not has_formal_degree:
+        # State machine pending record state
+        class PendingEducation:
+            def __init__(self):
+                self.degree_val: Optional[str] = None
+                self.norm_degree_level: Optional[DegreeLevel] = None
+                self.degree_spans: List[EvidenceSpan] = []
+                self.field_of_study_val: Optional[str] = None
+                self.field_spans: List[EvidenceSpan] = []
+                self.inst_val: Optional[str] = None
+                self.inst_spans: List[EvidenceSpan] = []
+                self.date_interval: Optional[ExtractedDateInterval] = None
+                self.start_date_field: Optional[ExtractedField] = None
+                self.end_date_field: Optional[ExtractedField] = None
+                self.grade_val: Optional[str] = None
+                self.grade_spans: List[EvidenceSpan] = []
+                self.warnings: List[EducationWarning] = []
+
+        pending_records: List[PendingEducation] = []
+        current: Optional[PendingEducation] = None
+
+        def finalize_pending():
+            nonlocal current
+            if current and (current.degree_val or current.inst_val):
+                if not current.degree_val and not current.inst_val:
+                    current.warnings.append(EducationWarning(
+                        code=EducationWarningCode.EDUCATION_RECORD_AMBIGUOUS,
+                        record_index=len(pending_records),
+                    ))
+                elif not current.degree_val:
+                    current.warnings.append(EducationWarning(
+                        code=EducationWarningCode.EDUCATION_DEGREE_MISSING,
+                        record_index=len(pending_records),
+                        field_name="degree",
+                    ))
+                elif not current.inst_val:
+                    current.warnings.append(EducationWarning(
+                        code=EducationWarningCode.EDUCATION_INSTITUTION_MISSING,
+                        record_index=len(pending_records),
+                        field_name="institution",
+                    ))
+                pending_records.append(current)
+            current = None
+
+        for blk, line_str, l_start, l_end in all_lines:
+            lower_line = line_str.lower()
+
+            # Check if disqualified non-degree course
+            if any(dq in lower_line for dq in DISQUALIFYING_EDUCATION_KEYWORDS):
+                has_formal = any(deg_re.search(line_str) for deg_re, _, _ in DEGREE_DEFINITIONS)
+                if not has_formal:
                     continue
 
-            # Process record in block (or multiple items if separated by empty lines/bullet structure)
-            # Find degree match
-            degree_val: Optional[str] = None
-            norm_degree_level: Optional[DegreeLevel] = None
-            degree_spans: List[EvidenceSpan] = []
+            # Detect degree
+            matched_deg: Optional[str] = None
+            matched_level: Optional[DegreeLevel] = None
+            matched_deg_span: Optional[EvidenceSpan] = None
 
-            for deg_re, deg_level, canonical_name in DEGREE_DEFINITIONS:
-                match = deg_re.search(block.raw_text)
-                if match:
-                    degree_val = match.group(0).strip()
-                    norm_degree_level = deg_level
-                    c_start = match.start()
-                    c_end = match.end()
-                    span = _create_evidence_span(artifact_id, block, c_start, c_end)
-                    degree_spans.append(span)
-                    all_evidence.append(span)
+            for deg_re, deg_level, _ in DEGREE_DEFINITIONS:
+                m = deg_re.search(line_str)
+                if m:
+                    matched_deg = m.group(0).strip()
+                    matched_level = deg_level
+                    c_start = blk.raw_text.find(matched_deg, l_start)
+                    if c_start == -1:
+                        c_start = l_start + m.start()
+                    c_end = c_start + len(matched_deg)
+                    matched_deg_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
+                    all_evidence.append(matched_deg_span)
                     break
 
-            # Find Field of Study
-            field_of_study_val: Optional[str] = None
-            field_spans: List[EvidenceSpan] = []
-            fos_match = FIELD_OF_STUDY_PREFIX_RE.search(block.raw_text)
-            if fos_match:
-                # Capture group 1 is the major name
-                field_of_study_val = fos_match.group(1).strip(" ,;|\n\t")
-                c_start = fos_match.start(1)
-                c_end = fos_match.start(1) + len(field_of_study_val)
-                if c_end > c_start:
-                    f_span = _create_evidence_span(artifact_id, block, c_start, c_end)
-                    field_spans.append(f_span)
-                    all_evidence.append(f_span)
+            # If a degree is found and current pending record already has a degree, finalize previous record
+            if matched_deg:
+                if current and current.degree_val:
+                    finalize_pending()
+                if current is None:
+                    current = PendingEducation()
+                current.degree_val = matched_deg
+                current.norm_degree_level = matched_level
+                if matched_deg_span:
+                    current.degree_spans.append(matched_deg_span)
 
-            # Find Institution
-            inst_val: Optional[str] = None
-            inst_spans: List[EvidenceSpan] = []
-            
-            # Line-by-line inspection for institution indicators
-            for line in lines:
-                line_lower = line.lower()
-                # Check for institution keywords
-                words = [w.strip(".,:;/-()") for w in line_lower.split()]
-                if any(w in INSTITUTION_INDICATORS for w in words):
-                    # Clean line from dates or degrees if present
-                    inst_line = line.strip(" •·-*–—\t")
-                    # If degree is on the same line (e.g. "B.Tech from Stanford University"), isolate institution
-                    if " from " in inst_line.lower():
-                        from_idx = inst_line.lower().find(" from ")
-                        inst_line = inst_line[from_idx + 6:].strip()
-                    elif " at " in inst_line.lower():
-                        at_idx = inst_line.lower().find(" at ")
-                        inst_line = inst_line[at_idx + 4:].strip()
-                    elif "|" in inst_line:
-                        parts = inst_line.split("|")
-                        for p in parts:
-                            p_words = [w.strip(".,:;/-()") for w in p.lower().split()]
-                            if any(w in INSTITUTION_INDICATORS for w in p_words):
-                                inst_line = p.strip()
-                                break
+            # Detect field of study
+            fos_m = FIELD_OF_STUDY_PREFIX_RE.search(line_str)
+            if fos_m:
+                fos_val = fos_m.group(1).strip(" ,;|\n\t")
+                if current is None:
+                    current = PendingEducation()
+                if not current.field_of_study_val and fos_val:
+                    current.field_of_study_val = fos_val
+                    c_start = blk.raw_text.find(fos_val, l_start)
+                    if c_start == -1:
+                        c_start = l_start + fos_m.start(1)
+                    c_end = c_start + len(fos_val)
+                    if c_end > c_start:
+                        f_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
+                        all_evidence.append(f_span)
+                        current.field_spans.append(f_span)
 
-                    c_start = block.raw_text.find(inst_line)
-                    if c_start != -1:
-                        c_end = c_start + len(inst_line)
-                        span = _create_evidence_span(artifact_id, block, c_start, c_end)
-                        inst_spans.append(span)
-                        all_evidence.append(span)
-                        inst_val = inst_line
-                        break
+            # Detect dates (range or single year)
+            date_ranges = extract_date_range_matches(line_str)
+            single_date = parse_single_date(line_str) if not date_ranges else None
+            is_date_line = bool(date_ranges) or bool(single_date)
 
-            # If institution not found via indicator words, check fallback (e.g. 2nd line or after |)
-            if not inst_val and len(lines) > 1:
-                # If first line has degree, second line is often institution
-                potential_inst = lines[1].strip(" •·-*–—\t")
-                # Ensure it's not just a date or grade
-                if not GRADE_RE.search(potential_inst) and not extract_date_range_matches(potential_inst) and not parse_single_date(potential_inst):
-                    c_start = block.raw_text.find(potential_inst)
-                    if c_start != -1:
-                        c_end = c_start + len(potential_inst)
-                        span = _create_evidence_span(artifact_id, block, c_start, c_end)
-                        inst_spans.append(span)
-                        all_evidence.append(span)
-                        inst_val = potential_inst
+            if is_date_line:
+                if date_ranges:
+                    c_start, c_end, full_str, raw_start, raw_end = date_ranges[0]
+                    abs_start = blk.raw_text.find(full_str, l_start)
+                    if abs_start == -1:
+                        abs_start = l_start + c_start
+                    abs_end = abs_start + len(full_str)
+                    d_span = _create_evidence_span(artifact_id, blk, abs_start, abs_end)
+                    all_evidence.append(d_span)
 
-            # Find Dates (ranges or single graduation year)
-            date_ranges = extract_date_range_matches(block.raw_text)
-            date_interval: Optional[ExtractedDateInterval] = None
-            start_date_field: ExtractedField
-            end_date_field: ExtractedField
+                    norm_start = parse_single_date(raw_start)
+                    norm_end = parse_single_date(raw_end)
 
-            if date_ranges:
-                c_start, c_end, full_str, raw_start, raw_end = date_ranges[0]
-                d_span = _create_evidence_span(artifact_id, block, c_start, c_end)
-                all_evidence.append(d_span)
+                    if current is None:
+                        current = PendingEducation()
+                    if not current.date_interval:
+                        current.date_interval = ExtractedDateInterval(
+                            raw_text=full_str,
+                            start_date=norm_start,
+                            end_date=norm_end,
+                            is_current=bool(norm_end and norm_end.is_current),
+                            duration_months=None,
+                            evidence_ids=[d_span.evidence_id],
+                            confidence=0.95,
+                        )
+                        current.start_date_field = _build_extracted_field(
+                            raw_start,
+                            normalized_value=f"{norm_start.year:04d}" if (norm_start and norm_start.year) else raw_start,
+                            confidence=0.95,
+                            evidence_spans=[d_span],
+                            field_name="start_date",
+                        )
+                        current.end_date_field = _build_extracted_field(
+                            raw_end,
+                            normalized_value=f"{norm_end.year:04d}" if (norm_end and norm_end.year) else raw_end,
+                            confidence=0.95,
+                            evidence_spans=[d_span],
+                            field_name="end_date",
+                        )
+                elif single_date:
+                    abs_start = blk.raw_text.find(line_str, l_start)
+                    if abs_start == -1:
+                        abs_start = l_start
+                    abs_end = abs_start + len(line_str)
+                    d_span = _create_evidence_span(artifact_id, blk, abs_start, abs_end)
+                    all_evidence.append(d_span)
 
-                norm_start = parse_single_date(raw_start)
-                norm_end = parse_single_date(raw_end)
+                    if current is None:
+                        current = PendingEducation()
+                    if not current.date_interval:
+                        current.date_interval = ExtractedDateInterval(
+                            raw_text=line_str,
+                            start_date=None,
+                            end_date=single_date,
+                            is_current=False,
+                            duration_months=None,
+                            evidence_ids=[d_span.evidence_id],
+                            confidence=0.90,
+                        )
+                        current.start_date_field = _build_extracted_field(None, field_name="start_date")
+                        current.end_date_field = _build_extracted_field(
+                            line_str,
+                            normalized_value=f"{single_date.year:04d}" if single_date.year else line_str,
+                            confidence=0.90,
+                            evidence_spans=[d_span],
+                            field_name="end_date",
+                        )
+                continue
 
-                date_interval = ExtractedDateInterval(
-                    raw_text=full_str,
-                    start_date=norm_start,
-                    end_date=norm_end,
-                    is_current=bool(norm_end and norm_end.is_current),
-                    duration_months=None,
-                    evidence_ids=[d_span.evidence_id],
-                    confidence=0.95,
-                )
+            # Detect grade / GPA
+            grade_m = GRADE_RE.search(line_str)
+            if grade_m:
+                g_val = grade_m.group(1).strip(" ,;|\n\t") if grade_m.lastindex else grade_m.group(0).strip(" ,;|\n\t")
+                if current is None:
+                    current = PendingEducation()
+                if not current.grade_val and g_val:
+                    current.grade_val = g_val
+                    c_start = blk.raw_text.find(g_val, l_start)
+                    if c_start == -1:
+                        c_start = l_start + grade_m.start()
+                    c_end = c_start + len(g_val)
+                    g_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
+                    all_evidence.append(g_span)
+                    current.grade_spans.append(g_span)
 
-                start_date_field = _build_extracted_field(
-                    raw_start,
-                    normalized_value=norm_start.raw_text if norm_start else raw_start,
-                    confidence=0.95,
-                    evidence_spans=[d_span],
-                    field_name="start_date",
-                )
-                end_date_field = _build_extracted_field(
-                    raw_end,
-                    normalized_value=norm_end.raw_text if norm_end else raw_end,
-                    confidence=0.95,
-                    evidence_spans=[d_span],
-                    field_name="end_date",
-                )
-            else:
-                # Check for single year or single date (e.g. Graduation Year: 2021)
-                # Look through lines
-                single_date_found = None
-                for line in lines:
-                    single_d = parse_single_date(line)
-                    if single_d:
-                        c_start = block.raw_text.find(line)
-                        if c_start != -1:
-                            c_end = c_start + len(line)
-                            d_span = _create_evidence_span(artifact_id, block, c_start, c_end)
-                            all_evidence.append(d_span)
-                            single_date_found = (line, single_d, d_span)
+            # Detect institution
+            words = [w.strip(".,:;/-()") for w in lower_line.split()]
+            has_inst_word = any(w in INSTITUTION_INDICATORS for w in words)
+            if not is_date_line and (has_inst_word or (not matched_deg and len(line_str) < 80 and not fos_m and not grade_m)):
+                inst_cand = line_str.strip(" •·-*–—\t")
+                if " from " in inst_cand.lower():
+                    from_idx = inst_cand.lower().find(" from ")
+                    inst_cand = inst_cand[from_idx + 6:].strip()
+                elif " at " in inst_cand.lower():
+                    at_idx = inst_cand.lower().find(" at ")
+                    inst_cand = inst_cand[at_idx + 4:].strip()
+                elif "|" in inst_cand:
+                    parts = inst_cand.split("|")
+                    for p in parts:
+                        p_words = [w.strip(".,:;/-()") for w in p.lower().split()]
+                        if any(w in INSTITUTION_INDICATORS for w in p_words):
+                            inst_cand = p.strip()
                             break
 
-                if single_date_found:
-                    raw_d_str, norm_d, d_span = single_date_found
-                    start_date_field = _build_extracted_field(None, field_name="start_date")
-                    end_date_field = _build_extracted_field(
-                        raw_d_str,
-                        normalized_value=norm_d.raw_text,
-                        confidence=0.90,
-                        evidence_spans=[d_span],
-                        field_name="end_date",
-                    )
-                else:
-                    start_date_field = _build_extracted_field(None, field_name="start_date")
-                    end_date_field = _build_extracted_field(None, field_name="end_date")
+                if current is None:
+                    current = PendingEducation()
+                if not current.inst_val and inst_cand:
+                    current.inst_val = inst_cand
+                    c_start = blk.raw_text.find(inst_cand, l_start)
+                    if c_start == -1:
+                        c_start = l_start
+                    c_end = c_start + len(inst_cand)
+                    i_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
+                    all_evidence.append(i_span)
+                    current.inst_spans.append(i_span)
 
-            # Find Grade / GPA
-            grade_val: Optional[str] = None
-            grade_spans: List[EvidenceSpan] = []
-            grade_match = GRADE_RE.search(block.raw_text)
-            if grade_match:
-                grade_val = grade_match.group(1).strip()
-                c_start = grade_match.start(1)
-                c_end = grade_match.start(1) + len(grade_val)
-                span = _create_evidence_span(artifact_id, block, c_start, c_end)
-                grade_spans.append(span)
-                all_evidence.append(span)
+        finalize_pending()
 
-            # Check for warnings & build fields
-            rec_warnings: List[EducationWarning] = []
-            if not degree_val:
-                rec_warnings.append(EducationWarning(
-                    code=EducationWarningCode.EDUCATION_DEGREE_MISSING,
-                    record_index=len(records),
-                    field_name="degree",
-                ))
-            if not inst_val:
-                rec_warnings.append(EducationWarning(
-                    code=EducationWarningCode.EDUCATION_INSTITUTION_MISSING,
-                    record_index=len(records),
-                    field_name="institution",
-                ))
-
-            # If both missing, it's ambiguous
-            if not degree_val and not inst_val:
-                rec_warnings.append(EducationWarning(
-                    code=EducationWarningCode.EDUCATION_RECORD_AMBIGUOUS,
-                    record_index=len(records),
-                ))
-
-            all_warnings.extend(rec_warnings)
+        # Build ExtractedEducationRecord list
+        for p in pending_records:
+            all_warnings.extend(p.warnings)
 
             deg_field = _build_extracted_field(
-                degree_val,
-                normalized_value=degree_val,
-                confidence=0.95 if degree_val else None,
-                evidence_spans=degree_spans,
+                p.degree_val,
+                normalized_value=p.degree_val,
+                confidence=0.95 if p.degree_val else None,
+                evidence_spans=p.degree_spans,
                 field_name="degree",
             )
             fos_field = _build_extracted_field(
-                field_of_study_val,
-                normalized_value=field_of_study_val,
-                confidence=0.90 if field_of_study_val else None,
-                evidence_spans=field_spans,
+                p.field_of_study_val,
+                normalized_value=p.field_of_study_val,
+                confidence=0.90 if p.field_of_study_val else None,
+                evidence_spans=p.field_spans,
                 field_name="field_of_study",
-            ) if field_of_study_val else None
-
+            ) if p.field_of_study_val else None
             inst_field = _build_extracted_field(
-                inst_val,
-                normalized_value=inst_val,
-                confidence=0.90 if inst_val else None,
-                evidence_spans=inst_spans,
+                p.inst_val,
+                normalized_value=p.inst_val,
+                confidence=0.90 if p.inst_val else None,
+                evidence_spans=p.inst_spans,
                 field_name="institution",
             )
             grade_field = _build_extracted_field(
-                grade_val,
-                normalized_value=grade_val,
-                confidence=0.95 if grade_val else None,
-                evidence_spans=grade_spans,
+                p.grade_val,
+                normalized_value=p.grade_val,
+                confidence=0.95 if p.grade_val else None,
+                evidence_spans=p.grade_spans,
                 field_name="grade",
             )
 
-            rec_evidence_ids = (
-                [s.evidence_id for s in degree_spans]
-                + [s.evidence_id for s in field_spans]
-                + [s.evidence_id for s in inst_spans]
-                + [s.evidence_id for s in grade_spans]
-            )
-            if date_interval:
-                rec_evidence_ids.extend(date_interval.evidence_ids)
+            start_field = p.start_date_field or _build_extracted_field(None, field_name="start_date")
+            end_field = p.end_date_field or _build_extracted_field(None, field_name="end_date")
 
-            # Compute overall record confidence
-            rec_conf = 0.95 if (degree_val and inst_val) else (0.75 if (degree_val or inst_val) else 0.40)
+            rec_evidence_ids = (
+                [s.evidence_id for s in p.degree_spans]
+                + [s.evidence_id for s in p.field_spans]
+                + [s.evidence_id for s in p.inst_spans]
+                + [s.evidence_id for s in p.grade_spans]
+            )
+            if p.date_interval:
+                rec_evidence_ids.extend(p.date_interval.evidence_ids)
+
+            rec_conf = 0.95 if (p.degree_val and p.inst_val) else (0.75 if (p.degree_val or p.inst_val) else 0.40)
 
             records.append(ExtractedEducationRecord(
                 degree=deg_field,
                 field_of_study=fos_field,
-                normalized_degree_level=norm_degree_level,
+                normalized_degree_level=p.norm_degree_level,
                 institution=inst_field,
-                start_date=start_date_field,
-                end_date=end_date_field,
+                start_date=start_field,
+                end_date=end_field,
                 grade=grade_field,
-                date_interval=date_interval,
+                date_interval=p.date_interval,
                 confidence=rec_conf,
                 evidence_ids=rec_evidence_ids,
-                warnings=rec_warnings,
+                warnings=p.warnings,
             ))
 
     return EducationExtractionResult(
@@ -444,7 +490,7 @@ def extract_education_records(
 
 
 # =============================================================================
-# 2. PROJECT EXTRACTION SERVICE
+# 2. PROJECT EXTRACTION SERVICE (STATE MACHINE)
 # =============================================================================
 
 def extract_project_records(
@@ -454,10 +500,9 @@ def extract_project_records(
     skill_occurrences: Optional[List[ExtractedSkillItem]] = None,
 ) -> ProjectExtractionResult:
     """
-    Extracts project records strictly from PROJECTS section blocks.
-    - Boundaries delimited by project headings, blank lines, bullets.
+    Extracts project records strictly from PROJECTS section blocks using a pending-record state machine.
+    - Boundaries delimited by project headings, blank lines, and non-action project title lines.
     - Only associates skills whose evidence spans fall strictly within the project's sequence/character range.
-    - Never uses an LLM to hallucinate or summarize.
     """
     project_sections = [
         s for s in sections_result.sections if s.section_type == SectionType.PROJECTS
@@ -489,192 +534,211 @@ def extract_project_records(
         if not sec_blocks:
             continue
 
-        # Group blocks into project items based on structure (e.g. HEADING blocks or bold lines or separate blocks)
-        # If each block is a project, or block has multiple lines starting with project titles
-        project_units: List[List[Tuple[ExtractionBlockData, List[str]]]] = []
-        curr_unit: List[Tuple[ExtractionBlockData, List[str]]] = []
+        class PendingProject:
+            def __init__(self):
+                self.name_val: Optional[str] = None
+                self.name_spans: List[EvidenceSpan] = []
+                self.desc_lines: List[str] = []
+                self.desc_spans: List[EvidenceSpan] = []
+                self.url_val: Optional[str] = None
+                self.url_spans: List[EvidenceSpan] = []
+                self.tech_lines: List[str] = []
+                self.participating_seqs: Set[int] = set()
+                self.warnings: List[ProjectWarning] = []
+
+        pending_projects: List[PendingProject] = []
+        current: Optional[PendingProject] = None
+
+        def finalize_pending_project():
+            nonlocal current
+            if current and (current.name_val or current.desc_lines or current.url_val):
+                if not current.name_val:
+                    current.warnings.append(ProjectWarning(
+                        code=ProjectWarningCode.PROJECT_NAME_MISSING,
+                        record_index=len(pending_projects),
+                        field_name="name",
+                    ))
+                pending_projects.append(current)
+            current = None
 
         for blk in sec_blocks:
             lines = [l.strip() for l in blk.raw_text.splitlines() if l.strip()]
             if not lines:
                 continue
 
-            # Check if block is a new project heading
-            if blk.block_type == BlockType.HEADING or (len(lines) > 0 and lines[0].startswith("Project:")):
-                if curr_unit:
-                    project_units.append(curr_unit)
-                    curr_unit = []
-                curr_unit.append((blk, lines))
-            elif not curr_unit:
-                curr_unit.append((blk, lines))
-            else:
-                # Check if first line of block looks like a new project title (not a bullet and capitalized)
-                first_line = lines[0]
-                is_bullet = first_line.startswith(("•", "-", "*", "·", "1.", "2.", "3."))
-                if not is_bullet and len(first_line) < 60 and not first_line.lower().startswith(("responsibilities:", "technologies:", "tech stack:", "tools:", "description:")):
-                    # Potential new project
-                    project_units.append(curr_unit)
-                    curr_unit = [(blk, lines)]
-                else:
-                    curr_unit.append((blk, lines))
+            for l_idx, line in enumerate(lines):
+                line_clean = line.strip(" •-*·\t")
+                if not line_clean:
+                    continue
 
-        if curr_unit:
-            project_units.append(curr_unit)
+                first_word = line_clean.split()[0].lower().strip(".,:;/-") if line_clean.split() else ""
+                is_action_verb = first_word in _ACTION_VERBS
+                is_bullet = line.strip().startswith(("•", "-", "*", "·", "1.", "2.", "3."))
+                has_label = bool(re.match(r"^Project(?:\s*Name)?\s*:\s*", line_clean, re.I))
 
-        # Now parse each project unit
-        for u_idx, unit in enumerate(project_units):
-            # First block / line contains project name and potential URL / date
-            first_blk, first_lines = unit[0]
-            name_line = first_lines[0]
+                is_tech_label = bool(re.match(r"^(?:Technologies|Tech Stack|Tools|Built with)\s*:\s*", line_clean, re.I))
 
-            # If the first line is a bullet point or starts with bullet chars without an explicit project label
-            is_bullet_item = name_line.strip().startswith(("•", "-", "*", "·", "1.", "2.", "3."))
-            has_project_label = bool(re.search(r"^Project\s*:\s*", name_line.strip(), re.IGNORECASE))
+                # Check if this line starts a NEW project
+                is_new_project_start = False
+                if has_label or blk.block_type == BlockType.HEADING:
+                    is_new_project_start = True
+                elif (
+                    not is_bullet
+                    and not is_action_verb
+                    and not is_tech_label
+                    and not PROJECT_URL_RE.match(line_clean)
+                    and len(line_clean) < 60
+                    and line_clean.lower() not in PROJECT_TITLE_DISQUALIFIERS
+                ):
+                    # Short title line that is not a bullet and not an action sentence
+                    # If current already has name and description, this is the start of the next project
+                    if current and current.name_val and (current.desc_lines or current.participating_seqs != {blk.sequence_index}):
+                        is_new_project_start = True
+                    elif current is None:
+                        is_new_project_start = True
 
-            # Remove prefixes like "Project:" or bullets
-            clean_name = re.sub(r"^(?:Project\s*:\s*|[•\-*·\d\.]+\s*)", "", name_line, flags=re.IGNORECASE).strip()
-            
-            # If name line contains URL or pipe (e.g. "Smart Hiring | https://github.com/..." or "Smart Hiring - Python, React")
-            url_match = PROJECT_URL_RE.search(name_line)
-            url_val = None
-            url_spans: List[EvidenceSpan] = []
-            if url_match:
-                url_val = url_match.group(0).rstrip(".,;:)")
-                u_start = first_blk.raw_text.find(url_val)
-                if u_start != -1:
-                    u_span = _create_evidence_span(artifact_id, first_blk, u_start, u_start + len(url_val))
-                    url_spans.append(u_span)
-                    all_evidence.append(u_span)
+                if is_new_project_start:
+                    if current:
+                        finalize_pending_project()
+                    current = PendingProject()
 
-            # Strip URL or pipe separators from name
-            if "|" in clean_name:
-                clean_name = clean_name.split("|")[0].strip()
-            elif " - " in clean_name:
-                clean_name = clean_name.split(" - ")[0].strip()
-            if url_val and url_val in clean_name:
-                clean_name = clean_name.replace(url_val, "").strip(" -:|")
+                    # Extract name
+                    clean_name = re.sub(r"^(?:Project(?:\s*Name)?\s*:\s*|[•\-*·\d\.]+\s*)", "", line_clean, flags=re.IGNORECASE).strip()
+                    url_m = PROJECT_URL_RE.search(clean_name)
+                    if url_m:
+                        current.url_val = url_m.group(0).rstrip(".,;:)")
+                        u_start = blk.raw_text.find(current.url_val)
+                        if u_start != -1:
+                            u_span = _create_evidence_span(artifact_id, blk, u_start, u_start + len(current.url_val))
+                            current.url_spans.append(u_span)
+                            all_evidence.append(u_span)
+                        clean_name = clean_name.replace(current.url_val, "").strip(" -:|")
 
-            # Check if name is valid or missing
-            name_spans: List[EvidenceSpan] = []
-            rec_warnings: List[ProjectWarning] = []
+                    if "|" in clean_name:
+                        clean_name = clean_name.split("|")[0].strip()
+                    elif " - " in clean_name:
+                        clean_name = clean_name.split(" - ")[0].strip()
 
-            # If it was a bullet point without explicit project title, or starts with common responsibility verbs
-            if is_bullet_item and not has_project_label:
-                clean_name = None
+                    current.name_val = clean_name
+                    c_start = blk.raw_text.find(clean_name)
+                    if c_start != -1:
+                        n_span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(clean_name))
+                        current.name_spans.append(n_span)
+                        all_evidence.append(n_span)
+                    current.participating_seqs.add(blk.sequence_index)
+                    continue
 
-            if not clean_name or clean_name.lower() in PROJECT_TITLE_DISQUALIFIERS:
-                rec_warnings.append(ProjectWarning(
-                    code=ProjectWarningCode.PROJECT_NAME_MISSING,
-                    record_index=len(records),
-                    field_name="name",
-                ))
-                clean_name = None
-            else:
-                n_start = first_blk.raw_text.find(clean_name)
-                if n_start != -1:
-                    n_span = _create_evidence_span(artifact_id, first_blk, n_start, n_start + len(clean_name))
-                    name_spans.append(n_span)
-                    all_evidence.append(n_span)
+                if current is None:
+                    current = PendingProject()
 
-            # Description: all remaining lines across all blocks in this unit
-            desc_lines: List[str] = []
-            desc_spans: List[EvidenceSpan] = []
+                current.participating_seqs.add(blk.sequence_index)
 
-            # First block remaining lines
-            if is_bullet_item and not has_project_label:
-                # All lines including first are part of description
-                for l in first_lines:
-                    desc_lines.append(l)
-            elif len(first_lines) > 1:
-                for l in first_lines[1:]:
-                    desc_lines.append(l)
-            # Other blocks
-            for blk, lines in unit[1:]:
-                for l in lines:
-                    desc_lines.append(l)
+                # Check for explicit tech label
+                if is_tech_label:
+                    tech_content = re.sub(r"^(?:Technologies|Tech Stack|Tools|Built with)\s*:\s*", "", line_clean, flags=re.IGNORECASE).strip()
+                    current.tech_lines.append(tech_content)
+                    current.desc_lines.append(line_clean)
+                    continue
 
-            desc_text = "\n".join(desc_lines).strip()
-            if desc_text:
-                # Find desc text or individual lines in their respective blocks
-                for blk, _ in unit:
-                    # Create evidence span for the whole block content if it participates
-                    b_start = 0
-                    b_end = len(blk.raw_text)
-                    if b_end > b_start:
-                        d_span = _create_evidence_span(artifact_id, blk, b_start, b_end)
-                        desc_spans.append(d_span)
-                        all_evidence.append(d_span)
+                # Check for URL
+                url_m = PROJECT_URL_RE.search(line_clean)
+                if url_m and not current.url_val:
+                    current.url_val = url_m.group(0).rstrip(".,;:)")
+                    u_start = blk.raw_text.find(current.url_val)
+                    if u_start != -1:
+                        u_span = _create_evidence_span(artifact_id, blk, u_start, u_start + len(current.url_val))
+                        current.url_spans.append(u_span)
+                        all_evidence.append(u_span)
 
-            # Technologies association: strictly within this project's blocks and char ranges
-            associated_tech_fields: List[ExtractedField] = []
-            unit_block_ids = {blk.sequence_index for blk, _ in unit}
+                # Otherwise attach as description line
+                current.desc_lines.append(line_clean)
+                c_start = blk.raw_text.find(line_clean)
+                if c_start != -1:
+                    d_span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
+                    current.desc_spans.append(d_span)
+                    all_evidence.append(d_span)
 
-            if skill_occurrences:
-                for skill_item in skill_occurrences:
-                    # Check if skill's evidence was found in one of the unit's blocks
-                    # A skill occurrence has raw_values and evidence_ids
-                    # We also search for exact skill canonical name / raw values in this unit's blocks
-                    for blk, _ in unit:
-                        for raw_val in skill_item.raw_values:
-                            # Match whole word
-                            pattern = r"\b" + re.escape(raw_val) + r"\b"
-                            match = re.search(pattern, blk.raw_text, re.IGNORECASE)
-                            if match:
-                                s_start = match.start()
-                                s_end = match.end()
-                                s_span = _create_evidence_span(artifact_id, blk, s_start, s_end)
-                                all_evidence.append(s_span)
-                                tech_field = _build_extracted_field(
-                                    raw_val,
-                                    normalized_value=skill_item.canonical_value,
-                                    confidence=0.95,
-                                    evidence_spans=[s_span],
-                                    field_name="technology",
-                                )
-                                associated_tech_fields.append(tech_field)
-                                break
+        finalize_pending_project()
 
-            # Build Fields
+        # Build records
+        for p in pending_projects:
+            all_warnings.extend(p.warnings)
+
             name_field = _build_extracted_field(
-                clean_name,
-                normalized_value=clean_name,
-                confidence=0.95 if clean_name else None,
-                evidence_spans=name_spans,
+                p.name_val,
+                normalized_value=p.name_val,
+                confidence=0.95 if p.name_val else None,
+                evidence_spans=p.name_spans,
                 field_name="name",
             )
+            desc_text = "\n".join(p.desc_lines).strip()
             desc_field = _build_extracted_field(
                 desc_text if desc_text else None,
                 normalized_value=desc_text if desc_text else None,
                 confidence=0.90 if desc_text else None,
-                evidence_spans=desc_spans,
+                evidence_spans=p.desc_spans,
                 field_name="description",
             )
             url_field = _build_extracted_field(
-                url_val,
-                normalized_value=url_val,
-                confidence=0.95 if url_val else None,
-                evidence_spans=url_spans,
+                p.url_val,
+                normalized_value=p.url_val,
+                confidence=0.95 if p.url_val else None,
+                evidence_spans=p.url_spans,
                 field_name="project_url",
             )
 
+            # Scoped technologies from skill occurrences
+            tech_fields: List[ExtractedField] = []
+            seen_techs: Set[str] = set()
+            if skill_occurrences:
+                for skill_item in skill_occurrences:
+                    for blk_seq in p.participating_seqs:
+                        blk = block_map[blk_seq]
+                        matched_val = None
+                        for raw_val in skill_item.raw_values:
+                            pattern = r"\b" + re.escape(raw_val) + r"\b"
+                            m = re.search(pattern, blk.raw_text, re.IGNORECASE)
+                            if m:
+                                matched_val = m.group(0)
+                                break
+                        if not matched_val:
+                            pattern = r"\b" + re.escape(skill_item.canonical_value) + r"\b"
+                            m = re.search(pattern, blk.raw_text, re.IGNORECASE)
+                            if m:
+                                matched_val = m.group(0)
+
+                        if matched_val and skill_item.canonical_value.lower() not in seen_techs:
+                            seen_techs.add(skill_item.canonical_value.lower())
+                            c_start = blk.raw_text.find(matched_val)
+                            c_end = c_start + len(matched_val)
+                            t_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
+                            all_evidence.append(t_span)
+                            tech_fields.append(_build_extracted_field(
+                                matched_val,
+                                normalized_value=skill_item.canonical_value,
+                                confidence=skill_item.confidence,
+                                evidence_spans=[t_span],
+                                field_name="technology",
+                            ))
+                            break
+
             rec_evidence_ids = (
-                [s.evidence_id for s in name_spans]
-                + [s.evidence_id for s in desc_spans]
-                + [s.evidence_id for s in url_spans]
-                + [ev for tf in associated_tech_fields for ev in tf.evidence_ids]
+                [s.evidence_id for s in p.name_spans]
+                + [s.evidence_id for s in p.desc_spans]
+                + [s.evidence_id for s in p.url_spans]
+                + [ev for tf in tech_fields for ev in tf.evidence_ids]
             )
 
-            rec_conf = 0.95 if clean_name else 0.50
-            all_warnings.extend(rec_warnings)
+            rec_conf = 0.95 if p.name_val else 0.50
 
             records.append(ExtractedProjectRecord(
                 name=name_field,
                 description=desc_field,
-                technologies=associated_tech_fields,
+                technologies=tech_fields,
                 project_url=url_field,
                 confidence=rec_conf,
                 evidence_ids=rec_evidence_ids,
-                warnings=rec_warnings,
+                warnings=p.warnings,
             ))
 
     return ProjectExtractionResult(
@@ -686,7 +750,7 @@ def extract_project_records(
 
 
 # =============================================================================
-# 3. CERTIFICATION EXTRACTION SERVICE
+# 3. CERTIFICATION EXTRACTION SERVICE (STATE MACHINE)
 # =============================================================================
 
 def extract_certification_records(
@@ -695,10 +759,9 @@ def extract_certification_records(
     artifact_id: str,
 ) -> CertificationExtractionResult:
     """
-    Extracts certifications strictly from CERTIFICATIONS section blocks.
-    - Captures name, issuer, issue date, expiry date, credential ID, credential URL.
-    - Reuses Phase 1D.3 date parser.
-    - Never fetches URLs.
+    Extracts certification records strictly from CERTIFICATIONS section blocks using a pending-record state machine.
+    - Captures certification name, issuer, issue date, expiry date, credential ID, credential URL.
+    - Labels like 'Issuer:', 'Issued:', 'Credential ID:' attach to the current pending certification record.
     """
     cert_sections = [
         s for s in sections_result.sections if s.section_type == SectionType.CERTIFICATIONS
@@ -727,206 +790,253 @@ def extract_certification_records(
                     continue
                 sec_blocks.append(blk)
 
-        for b_idx, block in enumerate(sec_blocks):
-            lines = [l.strip() for l in block.raw_text.splitlines() if l.strip()]
+        if not sec_blocks:
+            continue
+
+        class PendingCert:
+            def __init__(self):
+                self.name_val: Optional[str] = None
+                self.name_spans: List[EvidenceSpan] = []
+                self.issuer_val: Optional[str] = None
+                self.issuer_spans: List[EvidenceSpan] = []
+                self.issued_date_val: Optional[str] = None
+                self.issued_date_spans: List[EvidenceSpan] = []
+                self.expiry_date_val: Optional[str] = None
+                self.expiry_date_spans: List[EvidenceSpan] = []
+                self.cred_id_val: Optional[str] = None
+                self.cred_id_spans: List[EvidenceSpan] = []
+                self.cred_url_val: Optional[str] = None
+                self.cred_url_spans: List[EvidenceSpan] = []
+                self.warnings: List[CertificationWarning] = []
+
+        pending_certs: List[PendingCert] = []
+        current: Optional[PendingCert] = None
+
+        def finalize_pending_cert():
+            nonlocal current
+            if current and (current.name_val or current.issuer_val or current.cred_id_val):
+                if not current.name_val:
+                    current.warnings.append(CertificationWarning(
+                        code=CertificationWarningCode.CERTIFICATION_NAME_MISSING,
+                        record_index=len(pending_certs),
+                        field_name="name",
+                    ))
+                if not current.issuer_val:
+                    current.warnings.append(CertificationWarning(
+                        code=CertificationWarningCode.CERTIFICATION_ISSUER_AMBIGUOUS,
+                        record_index=len(pending_certs),
+                        field_name="issuer",
+                    ))
+                pending_certs.append(current)
+            current = None
+
+        for blk in sec_blocks:
+            lines = [l.strip() for l in blk.raw_text.splitlines() if l.strip()]
             if not lines:
                 continue
 
-            # Identify certification name
-            # Usually the first line or before labelled fields
-            first_line = lines[0].strip(" •-*·\t")
-            cert_name_val: Optional[str] = None
-            cert_name_spans: List[EvidenceSpan] = []
+            for line in lines:
+                line_clean = line.strip(" •-*·\t")
+                if not line_clean:
+                    continue
 
-            # Check if first line is just a label or actual name
-            if not any(pattern.search(first_line) for pattern in CERTIFICATION_LABEL_PATTERNS.values()):
-                cert_name_val = first_line
-                n_start = block.raw_text.find(cert_name_val)
-                if n_start != -1:
-                    span = _create_evidence_span(artifact_id, block, n_start, n_start + len(cert_name_val))
-                    cert_name_spans.append(span)
-                    all_evidence.append(span)
+                # Check if line is a metadata label
+                is_issuer_line = bool(CERTIFICATION_LABEL_PATTERNS["issuer"].search(line_clean))
+                is_issued_date_line = bool(CERTIFICATION_LABEL_PATTERNS["issued_date"].search(line_clean))
+                is_expiry_date_line = bool(CERTIFICATION_LABEL_PATTERNS["expiry_date"].search(line_clean))
+                is_cred_id_line = bool(CERTIFICATION_LABEL_PATTERNS["credential_id"].search(line_clean))
+                is_cred_url_line = bool(CERTIFICATION_LABEL_PATTERNS["credential_url"].search(line_clean))
 
-            # Issuer detection
-            issuer_val: Optional[str] = None
-            issuer_spans: List[EvidenceSpan] = []
-            issuer_match = CERTIFICATION_LABEL_PATTERNS["issuer"].search(block.raw_text)
-            if issuer_match:
-                issuer_val = issuer_match.group(1).strip()
-                c_start = issuer_match.start(1)
-                span = _create_evidence_span(artifact_id, block, c_start, c_start + len(issuer_val))
-                issuer_spans.append(span)
-                all_evidence.append(span)
-            else:
-                # Look for known cert issuers in the text
-                for kw, canonical_issuer in KNOWN_CERT_ISSUERS.items():
-                    pattern = r"\b" + re.escape(kw) + r"\b"
-                    match = re.search(pattern, block.raw_text, re.IGNORECASE)
-                    if match:
-                        matched_str = match.group(0)
-                        c_start = match.start()
-                        span = _create_evidence_span(artifact_id, block, c_start, c_start + len(matched_str))
-                        issuer_spans.append(span)
-                        all_evidence.append(span)
-                        issuer_val = canonical_issuer
-                        break
+                is_label_line = (
+                    is_issuer_line
+                    or is_issued_date_line
+                    or is_expiry_date_line
+                    or is_cred_id_line
+                    or is_cred_url_line
+                )
 
-            # Date detection (Issued date & Expiry date)
-            issued_date_val: Optional[str] = None
-            issued_date_spans: List[EvidenceSpan] = []
-            expiry_date_val: Optional[str] = None
-            expiry_date_spans: List[EvidenceSpan] = []
+                # Check if line is a new certification title
+                if not is_label_line:
+                    # Check if line is only a date
+                    date_matches = extract_date_range_matches(line_clean)
+                    is_date_only = bool(date_matches) or bool(parse_single_date(line_clean))
 
-            # Labelled dates
-            issued_match = CERTIFICATION_LABEL_PATTERNS["issued_date"].search(block.raw_text)
-            if issued_match:
-                raw_d = issued_match.group(1).strip()
-                norm_d = parse_single_date(raw_d)
-                if norm_d:
-                    c_start = issued_match.start(1)
-                    span = _create_evidence_span(artifact_id, block, c_start, c_start + len(raw_d))
-                    issued_date_spans.append(span)
-                    all_evidence.append(span)
-                    issued_date_val = raw_d
+                    if not is_date_only:
+                        # New certification title
+                        if current and current.name_val:
+                            finalize_pending_cert()
+                        if current is None:
+                            current = PendingCert()
 
-            expiry_match = CERTIFICATION_LABEL_PATTERNS["expiry_date"].search(block.raw_text)
-            if expiry_match:
-                raw_d = expiry_match.group(1).strip()
-                norm_d = parse_single_date(raw_d)
-                if norm_d:
-                    c_start = expiry_match.start(1)
-                    span = _create_evidence_span(artifact_id, block, c_start, c_start + len(raw_d))
-                    expiry_date_spans.append(span)
-                    all_evidence.append(span)
-                    expiry_date_val = raw_d
+                        current.name_val = line_clean
+                        c_start = blk.raw_text.find(line_clean)
+                        if c_start != -1:
+                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
+                            current.name_spans.append(span)
+                            all_evidence.append(span)
+                        continue
 
-            # If unlabelled date range
-            if not issued_date_val and not expiry_date_val:
-                date_ranges = extract_date_range_matches(block.raw_text)
-                if date_ranges:
-                    c_start, c_end, full_str, raw_start, raw_end = date_ranges[0]
-                    d_span = _create_evidence_span(artifact_id, block, c_start, c_end)
-                    all_evidence.append(d_span)
-                    issued_date_val = raw_start
-                    issued_date_spans.append(d_span)
-                    expiry_date_val = raw_end
-                    expiry_date_spans.append(d_span)
-                else:
-                    # Single unlabelled date
-                    for line in lines:
-                        s_d = parse_single_date(line)
-                        if s_d:
-                            c_start = block.raw_text.find(line)
+                if current is None:
+                    current = PendingCert()
+
+                # Process labels on the current certification
+                if is_issuer_line:
+                    m = CERTIFICATION_LABEL_PATTERNS["issuer"].search(line_clean)
+                    if m:
+                        val = m.group(1).strip()
+                        current.issuer_val = val
+                        c_start = blk.raw_text.find(val)
+                        if c_start != -1:
+                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
+                            current.issuer_spans.append(span)
+                            all_evidence.append(span)
+                    continue
+
+                if is_issued_date_line:
+                    m = CERTIFICATION_LABEL_PATTERNS["issued_date"].search(line_clean)
+                    if m:
+                        val = m.group(1).strip()
+                        current.issued_date_val = val
+                        c_start = blk.raw_text.find(val)
+                        if c_start != -1:
+                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
+                            current.issued_date_spans.append(span)
+                            all_evidence.append(span)
+                    continue
+
+                if is_expiry_date_line:
+                    m = CERTIFICATION_LABEL_PATTERNS["expiry_date"].search(line_clean)
+                    if m:
+                        val = m.group(1).strip()
+                        current.expiry_date_val = val
+                        c_start = blk.raw_text.find(val)
+                        if c_start != -1:
+                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
+                            current.expiry_date_spans.append(span)
+                            all_evidence.append(span)
+                    continue
+
+                if is_cred_id_line:
+                    m = CERTIFICATION_LABEL_PATTERNS["credential_id"].search(line_clean)
+                    if m:
+                        val = m.group(1).strip()
+                        current.cred_id_val = val
+                        c_start = blk.raw_text.find(val)
+                        if c_start != -1:
+                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
+                            current.cred_id_spans.append(span)
+                            all_evidence.append(span)
+                    continue
+
+                if is_cred_url_line:
+                    m = CERTIFICATION_LABEL_PATTERNS["credential_url"].search(line_clean)
+                    if m:
+                        val = m.group(1).strip()
+                        current.cred_url_val = val
+                        c_start = blk.raw_text.find(val)
+                        if c_start != -1:
+                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
+                            current.cred_url_spans.append(span)
+                            all_evidence.append(span)
+                    continue
+
+                # Fallback issuer matching
+                if not current.issuer_val:
+                    for kw, canonical_issuer in KNOWN_CERT_ISSUERS.items():
+                        pattern = r"\b" + re.escape(kw) + r"\b"
+                        match = re.search(pattern, line_clean, re.IGNORECASE)
+                        if match:
+                            matched_str = match.group(0)
+                            c_start = blk.raw_text.find(matched_str)
                             if c_start != -1:
-                                d_span = _create_evidence_span(artifact_id, block, c_start, c_start + len(line))
+                                span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(matched_str))
+                                current.issuer_spans.append(span)
+                                all_evidence.append(span)
+                            current.issuer_val = canonical_issuer
+                            break
+
+                # Fallback unlabelled date matching
+                if not current.issued_date_val:
+                    date_ranges = extract_date_range_matches(line_clean)
+                    if date_ranges:
+                        c_start, c_end, full_str, raw_start, raw_end = date_ranges[0]
+                        d_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
+                        all_evidence.append(d_span)
+                        current.issued_date_val = raw_start
+                        current.issued_date_spans.append(d_span)
+                        current.expiry_date_val = raw_end
+                        current.expiry_date_spans.append(d_span)
+                    else:
+                        s_d = parse_single_date(line_clean)
+                        if s_d:
+                            c_start = blk.raw_text.find(line_clean)
+                            if c_start != -1:
+                                d_span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
                                 all_evidence.append(d_span)
-                                issued_date_val = line
-                                issued_date_spans.append(d_span)
-                                break
+                                current.issued_date_val = line_clean
+                                current.issued_date_spans.append(d_span)
 
-            # Credential ID
-            cred_id_val: Optional[str] = None
-            cred_id_spans: List[EvidenceSpan] = []
-            cred_id_match = CERTIFICATION_LABEL_PATTERNS["credential_id"].search(block.raw_text)
-            if cred_id_match:
-                cred_id_val = cred_id_match.group(1).strip()
-                c_start = cred_id_match.start(1)
-                span = _create_evidence_span(artifact_id, block, c_start, c_start + len(cred_id_val))
-                cred_id_spans.append(span)
-                all_evidence.append(span)
+        finalize_pending_cert()
 
-            # Credential URL
-            cred_url_val: Optional[str] = None
-            cred_url_spans: List[EvidenceSpan] = []
-            cred_url_match = CERTIFICATION_LABEL_PATTERNS["credential_url"].search(block.raw_text)
-            if cred_url_match:
-                cred_url_val = cred_url_match.group(1).strip()
-                c_start = cred_url_match.start(1)
-                span = _create_evidence_span(artifact_id, block, c_start, c_start + len(cred_url_val))
-                cred_url_spans.append(span)
-                all_evidence.append(span)
-            else:
-                # Generic URL search
-                url_m = PROJECT_URL_RE.search(block.raw_text)
-                if url_m:
-                    cred_url_val = url_m.group(0).rstrip(".,;:)")
-                    c_start = url_m.start()
-                    span = _create_evidence_span(artifact_id, block, c_start, c_start + len(cred_url_val))
-                    cred_url_spans.append(span)
-                    all_evidence.append(span)
-
-            # Warnings & validation
-            rec_warnings: List[CertificationWarning] = []
-            if not cert_name_val:
-                rec_warnings.append(CertificationWarning(
-                    code=CertificationWarningCode.CERTIFICATION_NAME_MISSING,
-                    record_index=len(records),
-                    field_name="name",
-                ))
-            if not issuer_val:
-                rec_warnings.append(CertificationWarning(
-                    code=CertificationWarningCode.CERTIFICATION_ISSUER_AMBIGUOUS,
-                    record_index=len(records),
-                    field_name="issuer",
-                ))
-
-            all_warnings.extend(rec_warnings)
+        # Build records
+        for p in pending_certs:
+            all_warnings.extend(p.warnings)
 
             name_field = _build_extracted_field(
-                cert_name_val,
-                normalized_value=cert_name_val,
-                confidence=0.95 if cert_name_val else None,
-                evidence_spans=cert_name_spans,
+                p.name_val,
+                normalized_value=p.name_val,
+                confidence=0.95 if p.name_val else None,
+                evidence_spans=p.name_spans,
                 field_name="name",
             )
             issuer_field = _build_extracted_field(
-                issuer_val,
-                normalized_value=issuer_val,
-                confidence=0.90 if issuer_val else None,
-                evidence_spans=issuer_spans,
+                p.issuer_val,
+                normalized_value=p.issuer_val,
+                confidence=0.90 if p.issuer_val else None,
+                evidence_spans=p.issuer_spans,
                 field_name="issuer",
             )
             issued_date_field = _build_extracted_field(
-                issued_date_val,
-                normalized_value=issued_date_val,
-                confidence=0.90 if issued_date_val else None,
-                evidence_spans=issued_date_spans,
+                p.issued_date_val,
+                normalized_value=p.issued_date_val,
+                confidence=0.90 if p.issued_date_val else None,
+                evidence_spans=p.issued_date_spans,
                 field_name="issued_date",
             )
             expiry_date_field = _build_extracted_field(
-                expiry_date_val,
-                normalized_value=expiry_date_val,
-                confidence=0.90 if expiry_date_val else None,
-                evidence_spans=expiry_date_spans,
+                p.expiry_date_val,
+                normalized_value=p.expiry_date_val,
+                confidence=0.90 if p.expiry_date_val else None,
+                evidence_spans=p.expiry_date_spans,
                 field_name="expiry_date",
-            ) if expiry_date_val else None
+            ) if p.expiry_date_val else None
 
             cred_id_field = _build_extracted_field(
-                cred_id_val,
-                normalized_value=cred_id_val,
-                confidence=0.95 if cred_id_val else None,
-                evidence_spans=cred_id_spans,
+                p.cred_id_val,
+                normalized_value=p.cred_id_val,
+                confidence=0.95 if p.cred_id_val else None,
+                evidence_spans=p.cred_id_spans,
                 field_name="credential_id",
-            ) if cred_id_val else None
+            ) if p.cred_id_val else None
 
             cred_url_field = _build_extracted_field(
-                cred_url_val,
-                normalized_value=cred_url_val,
-                confidence=0.95 if cred_url_val else None,
-                evidence_spans=cred_url_spans,
+                p.cred_url_val,
+                normalized_value=p.cred_url_val,
+                confidence=0.95 if p.cred_url_val else None,
+                evidence_spans=p.cred_url_spans,
                 field_name="credential_url",
             )
 
             rec_evidence_ids = (
-                [s.evidence_id for s in cert_name_spans]
-                + [s.evidence_id for s in issuer_spans]
-                + [s.evidence_id for s in issued_date_spans]
-                + [s.evidence_id for s in expiry_date_spans]
-                + [s.evidence_id for s in cred_id_spans]
-                + [s.evidence_id for s in cred_url_spans]
+                [s.evidence_id for s in p.name_spans]
+                + [s.evidence_id for s in p.issuer_spans]
+                + [s.evidence_id for s in p.issued_date_spans]
+                + [s.evidence_id for s in p.expiry_date_spans]
+                + [s.evidence_id for s in p.cred_id_spans]
+                + [s.evidence_id for s in p.cred_url_spans]
             )
 
-            rec_conf = 0.95 if (cert_name_val and issuer_val) else (0.70 if cert_name_val else 0.40)
+            rec_conf = 0.95 if (p.name_val and p.issuer_val) else (0.70 if p.name_val else 0.40)
 
             records.append(ExtractedCertificationRecord(
                 name=name_field,
@@ -937,7 +1047,7 @@ def extract_certification_records(
                 credential_url=cred_url_field,
                 confidence=rec_conf,
                 evidence_ids=rec_evidence_ids,
-                warnings=rec_warnings,
+                warnings=p.warnings,
             ))
 
     return CertificationExtractionResult(
@@ -960,7 +1070,7 @@ def extract_language_records(
     """
     Extracts natural languages strictly from LANGUAGES section blocks.
     - Strictly filters out programming languages (Python, Java, etc.).
-    - Extracts natural language names and stated proficiency levels.
+    - Extracts natural language names and stated proficiency levels (separated by —, –, -, :, or parentheses).
     - Does not assume proficiency if not explicitly written.
     """
     lang_sections = [
@@ -991,18 +1101,15 @@ def extract_language_records(
                 sec_blocks.append(blk)
 
         for block in sec_blocks:
-            # Handle comma separated items or line by line
             raw_text = block.raw_text.strip()
             if not raw_text:
                 continue
 
-            # Split into items by newline or semicolon or comma
             lines = [l.strip(" •-*·\t") for l in block.raw_text.splitlines() if l.strip()]
 
             items: List[str] = []
             for l in lines:
                 if "," in l:
-                    # Split on comma, but avoid splitting inside parentheses
                     parts = re.split(r",(?![^(]*\))", l)
                     for p in parts:
                         p_str = p.strip(" •-*·\t")
@@ -1016,15 +1123,14 @@ def extract_language_records(
                 if not item_clean:
                     continue
 
-                # Check if item is a programming language
+                # Check if programming language
                 words = [w.strip(".,:;()/-").lower() for w in item_clean.split()]
                 if any(w in PROGRAMMING_LANGUAGES_REJECT_LIST for w in words):
-                    warn = LanguageWarning(
+                    all_warnings.append(LanguageWarning(
                         code=LanguageWarningCode.NON_NATURAL_LANGUAGE_REJECTED,
                         record_index=len(records),
                         field_name="language",
-                    )
-                    all_warnings.append(warn)
+                    ))
                     continue
 
                 # Search for known natural language name
@@ -1038,7 +1144,6 @@ def extract_language_records(
                     if match:
                         matched_lang_name = match.group(0)
                         matched_canonical = l_canonical
-                        # Find span in block
                         c_start = block.raw_text.find(item_clean)
                         if c_start != -1:
                             offset = item_clean.find(matched_lang_name)
@@ -1049,14 +1154,13 @@ def extract_language_records(
                         break
 
                 if not matched_lang_name:
-                    # Entry is ambiguous / unclassified
                     all_warnings.append(LanguageWarning(
                         code=LanguageWarningCode.LANGUAGE_ENTRY_AMBIGUOUS,
                         record_index=len(records),
                     ))
                     continue
 
-                # Detect proficiency
+                # Detect proficiency (supporting —, –, -, :, or parens)
                 raw_prof: Optional[str] = None
                 norm_prof: Optional[str] = None
                 prof_span: Optional[EvidenceSpan] = None
@@ -1065,7 +1169,7 @@ def extract_language_records(
                 for prof_re, norm_level in PROFICIENCY_MAPPINGS:
                     m = prof_re.search(item_clean)
                     if m:
-                        raw_prof = m.group(0)
+                        raw_prof = m.group(0).strip()
                         norm_prof = norm_level
                         c_start = block.raw_text.find(item_clean)
                         if c_start != -1:
@@ -1076,12 +1180,11 @@ def extract_language_records(
                             all_evidence.append(prof_span)
                         break
 
-                # If proficiency text exists (like in parentheses or after colon) but didn't match known mappings
                 if not raw_prof:
-                    # Check if there is colon or parentheses: e.g. "English (B2)" or "Spanish: Conversational"
-                    paren_m = re.search(r"[\(:\-–—]\s*([A-Za-z0-9\s]+)[\)]?", item_clean)
-                    if paren_m:
-                        candidate_prof = paren_m.group(1).strip()
+                    # Check for separator and trailing text (e.g. "English — Working proficiency" or "Hindi: Fluent")
+                    sep_m = re.search(r"[—–\-:\(]\s*([A-Za-z0-9\s]+)[\)]?$", item_clean)
+                    if sep_m:
+                        candidate_prof = sep_m.group(1).strip()
                         if candidate_prof.lower() != matched_lang_name.lower():
                             raw_prof = candidate_prof
                             norm_prof = None
@@ -1099,7 +1202,7 @@ def extract_language_records(
 
                 lang_field = _build_extracted_field(
                     matched_lang_name,
-                    normalized_value=matched_canonical,
+                    normalized_value=norm_prof if norm_prof else (raw_prof if raw_prof else matched_canonical),
                     confidence=0.95,
                     evidence_spans=[lang_span] if lang_span else [],
                     field_name="language",

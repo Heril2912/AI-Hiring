@@ -58,7 +58,7 @@ from app.services.skill_summary_extraction import (
 logger = logging.getLogger("ai_hiring.services.profile_assembly")
 
 PROFILE_PIPELINE_VERSION = (
-    f"pipeline-v1.0[{SECTION_PARSER_VERSION}+{IDENTITY_PARSER_VERSION}+"
+    f"pipeline-v1.1[{SECTION_PARSER_VERSION}+{IDENTITY_PARSER_VERSION}+"
     f"{SKILL_SUMMARY_PARSER_VERSION}+{EMPLOYMENT_PARSER_VERSION}+"
     f"{EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION}]"
 )
@@ -399,6 +399,7 @@ def assemble_candidate_profile(
         education_records.append(
             EducationRecord(
                 degree=ed.degree,
+                field_of_study=ed.field_of_study,
                 institution=ed.institution,
                 start_date=ed.start_date,
                 end_date=ed.end_date,
@@ -426,6 +427,8 @@ def assemble_candidate_profile(
                 name=cr.name,
                 issuer=cr.issuer,
                 issued_date=cr.issued_date,
+                expiry_date=cr.expiry_date,
+                credential_id=cr.credential_id,
                 credential_url=cr.credential_url,
             )
         )
@@ -555,10 +558,15 @@ def persist_candidate_profile(
         identity_record.identity_payload = identity_dict
         session.flush()
 
-    # 3. Create CandidateProfileRecord
+    # 3. Create CandidateProfileRecord with incrementing profile_version
+    from sqlalchemy import func
+    stmt_max_v = select(func.max(CandidateProfileRecord.profile_version)).where(CandidateProfileRecord.artifact_id == artifact_id)
+    max_v = session.execute(stmt_max_v).scalar_one_or_none() or 0
+    next_profile_version = max_v + 1
+
     profile_record = CandidateProfileRecord(
         profile_id=uuid.uuid4(),
-        profile_version=1,
+        profile_version=next_profile_version,
         artifact_id=artifact_id,
         extraction_id=extraction_id,
         identity_id=identity_record.identity_id,
