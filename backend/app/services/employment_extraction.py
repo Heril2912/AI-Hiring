@@ -35,7 +35,7 @@ from app.services.date_extraction import (
 
 logger = logging.getLogger("ai_hiring.services.employment_extraction")
 
-EMPLOYMENT_PARSER_VERSION = "employment-extract-v1.0"
+EMPLOYMENT_PARSER_VERSION = "employment-extract-v1.1"
 
 _ROLE_INDICATORS = {
     "engineer", "developer", "architect", "lead", "specialist", "scientist",
@@ -49,7 +49,57 @@ _ORG_INDICATORS = {
     "group", "bank", "university", "institute", "hospital", "services",
 }
 
+_ACTION_VERBS = {
+    "developed", "built", "created", "managed", "designed", "led", "architected",
+    "engineered", "integrated", "maintained", "implemented", "containerized",
+    "wrote", "provided", "performed", "analyzed", "assisted", "collaborated",
+    "delivered", "supported", "automated", "configured", "deployed", "spearheaded",
+    "orchestrated", "optimized", "monitored", "refactored", "troubleshot",
+}
+
 _HEADER_SPLIT_RE = re.compile(r"\s*(?:[|•·—–-]|\bat\b|\bfor\b)\s*", re.IGNORECASE)
+
+
+def _is_date_only_line(line_str: str, date_matches: list) -> bool:
+    """Returns True if the line contains a date range and no role/org content."""
+    if not date_matches:
+        return False
+    d_start, d_end, d_full, _, _ = date_matches[0]
+    rem = line_str[:d_start].strip(" \t|,·•—–-()") + line_str[d_end:].strip(" \t|,·•—–-()")
+    return len(rem) == 0
+
+
+def _is_employment_header_candidate(line_str: str, date_matches: list) -> bool:
+    """Determines if a line is a genuine Role / Organization header line."""
+    clean = line_str.strip()
+    if not clean or clean.startswith(("•", "*", "·", "1.", "2.", "3.")):
+        return False
+
+    # Check if first word is an action verb
+    first_word = clean.split()[0].lower().strip(".,:;/-") if clean.split() else ""
+    if first_word in _ACTION_VERBS:
+        return False
+
+    # Disqualify date-only lines
+    if _is_date_only_line(clean, date_matches):
+        return False
+
+    # Separated header: e.g. "Role | Org", "Role at Org", "Role - Org"
+    has_separator = any(sep in clean for sep in ["|", " at ", " for "]) or (
+        any(sep in clean for sep in ["—", "–", " - "]) and not date_matches
+    )
+
+    words = [w.lower().strip(".,:;/-()") for w in clean.split()]
+    has_role_word = any(w in _ROLE_INDICATORS for w in words)
+    has_org_word = any(w in _ORG_INDICATORS for w in words)
+
+    if has_separator and (has_role_word or has_org_word or len(clean) < 80):
+        return True
+
+    if has_role_word and len(clean) < 60:
+        return True
+
+    return False
 
 
 def _classify_role_and_org(
@@ -172,37 +222,36 @@ def extract_employment_records(
             date_matches = extract_date_range_matches(line_str)
             all_lines.append((block, line_str, line_start, line_end, date_matches))
 
-    # 3. Partition lines into employment record groups
-    # An employment record begins where a date range or a role/org header is found.
-    # Group structure: list of LineItems per record
+    # 3. Partition lines into employment record groups using State Machine
     record_groups: List[List[LineItem]] = []
     current_group: List[LineItem] = []
 
     for line_entry in all_lines:
         block, line_str, l_start, l_end, date_matches = line_entry
 
-        # A line is a separated header (e.g. "Role | Org", "Role - Org", "Role at Org")
-        is_separated_header = (
-            ("|" in line_str or "—" in line_str or "–" in line_str or " at " in line_str.lower() or " for " in line_str.lower())
-            and not line_str.startswith("•")
-            and not line_str.startswith("-")
-            and not line_str.startswith("*")
-        )
+        is_header = _is_employment_header_candidate(line_str, date_matches)
+        is_date_only = _is_date_only_line(line_str, date_matches)
 
-        if is_separated_header:
+        if is_header:
+            # A new header always finalizes previous group and starts a new pending record
             if current_group:
                 record_groups.append(current_group)
             current_group = [line_entry]
-        elif date_matches:
-            # If current group already has dates, split
-            has_existing_dates = any(len(item[4]) > 0 for item in current_group)
-            if has_existing_dates:
-                if current_group:
-                    record_groups.append(current_group)
+        elif date_matches and not is_date_only:
+            # Line has both header content and dates (e.g. "Software Engineer | Google | 2020 - 2022")
+            if current_group:
+                record_groups.append(current_group)
+            current_group = [line_entry]
+        elif is_date_only:
+            # Date-only line attaches to current pending record if it doesn't already have dates
+            has_dates_already = any(len(item[4]) > 0 for item in current_group)
+            if has_dates_already and current_group:
+                record_groups.append(current_group)
                 current_group = [line_entry]
             else:
                 current_group.append(line_entry)
         else:
+            # Description or bullet line attaches to pending record
             current_group.append(line_entry)
 
     if current_group:
@@ -305,9 +354,24 @@ def extract_employment_records(
                         role_span_info = (h1_block, h1_start, h1_end)
                         org_span_info = (h0_block, h0_start, h0_end)
 
+            # If org or role still missing, check if the immediately following line in desc_lines is role/org
+            if (not role_cand or not org_cand) and desc_lines:
+                first_d_block, first_d_line, first_d_start, first_d_end, _ = desc_lines[0]
+                d_str = first_d_line.strip()
+                if not any(d_str.startswith(b) for b in ["•", "-", "*"]) and len(d_str.split()) <= 6 and not d_str.endswith("."):
+                    if not org_cand and role_cand:
+                        org_cand = d_str
+                        org_span_info = (first_d_block, first_d_start, first_d_end)
+                        desc_lines = desc_lines[1:]
+                    elif not role_cand and org_cand:
+                        role_cand = d_str
+                        role_span_info = (first_d_block, first_d_start, first_d_end)
+                        desc_lines = desc_lines[1:]
+
             # Date Range parsing & validation
             norm_start_date = parse_single_date(raw_start_str)
             norm_end_date = parse_single_date(raw_end_str)
+
 
             # Date Span
             abs_date_start = date_block.normalized_text.find(d_full_str, d_l_start)

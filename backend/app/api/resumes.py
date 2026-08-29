@@ -634,7 +634,7 @@ async def get_candidate_profile(
                 detail={"code": "RESUME_NOT_FOUND", "message": "Resume artifact not found."},
             )
 
-        # Check candidate profile record
+        # Check candidate profile record (latest by created_at)
         from app.models.candidate import CandidateProfileRecord
         stmt_prof = (
             select(CandidateProfileRecord)
@@ -642,7 +642,7 @@ async def get_candidate_profile(
             .where(CandidateProfileRecord.artifact_id == artifact_id)
             .order_by(CandidateProfileRecord.created_at.desc())
         )
-        profile_rec = db.execute(stmt_prof).scalar_one_or_none()
+        profile_rec = db.execute(stmt_prof).scalars().first()
 
         if profile_rec is None:
             # Check if extraction exists to assemble profile idempotently on-demand
@@ -700,7 +700,7 @@ async def get_candidate_profile(
             db.commit()
 
             # Reload with identity
-            profile_rec = db.execute(stmt_prof).scalar_one()
+            profile_rec = db.execute(stmt_prof).scalars().first()
 
         identity_payload = profile_rec.identity.identity_payload
         from app.schemas.candidate import (

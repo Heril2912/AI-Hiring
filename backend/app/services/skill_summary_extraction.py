@@ -50,11 +50,13 @@ _PHONE_RE = re.compile(
 # Common section headers / metadata terms to ignore in skills list
 _SECTION_OR_META_TERMS = {
     "skills", "technical skills", "core skills", "key skills", "technologies", "tools",
+    "technical toolkit", "toolkit",
     "languages", "frameworks", "databases", "platforms", "libraries", "tools & technologies",
     "experience", "work experience", "education", "projects", "certifications", "summary",
     "profile", "contact", "email", "phone", "address", "portfolio", "github", "linkedin",
     "curriculum vitae", "resume", "page",
 }
+
 
 # Role / Headline disqualifiers and indicators
 _HEADLINE_DISQUALIFIERS = [
@@ -485,19 +487,25 @@ def extract_skills_and_summary(
         for b in summary_blocks:
             norm_content = b.normalized_text.strip()
             # If the block starts with the section heading itself, strip only the heading line
-            if b.block_type == BlockType.HEADING or (
+
+            is_heading_block = b.block_type == BlockType.HEADING or (
                 sections_result.sections
                 and any(
-                    s.heading and s.heading.heading_block_id == b.block_id
+                    s.heading and (
+                        (s.heading.heading_block_id is not None and s.heading.heading_block_id == b.block_id)
+                        or s.heading.heading_sequence_index == b.sequence_index
+                    )
                     for s in sections_result.sections
                 )
-            ):
+            )
+            if is_heading_block:
                 lines = norm_content.split("\n")
                 if len(lines) > 1:
                     norm_content = "\n".join(lines[1:]).strip()
                 else:
                     # Heading only block, skip content
                     continue
+
 
             if not norm_content:
                 continue

@@ -10,3 +10,4 @@ python-multipart
 pypdf
 defusedxml
 python-docx
+pdfplumber

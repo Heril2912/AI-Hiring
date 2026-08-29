@@ -838,4 +838,157 @@ def test_full_pipeline_roundtrip_integration(client_with_db, in_memory_db, tmp_p
     assert data["reviewRequired"] is False
 
 
+def test_controlled_manual_resume_exact_grouping():
+    """Phase 1D.6: Exact grouping, field association and 0 false warnings on controlled multi-paragraph fixture."""
+    art_id = str(uuid.uuid4())
+    blocks = [
+        _create_block(0, "Aarav Example"),
+        _create_block(1, "Python Developer"),
+        _create_block(2, "aarav@example.com"),
+        _create_block(3, "+1 202-555-0142"),
+        _create_block(4, "https://github.com/aarav-example"),
+        _create_block(5, "PROFESSIONAL SUMMARY", BlockType.HEADING),
+        _create_block(6, "Python developer experienced in building FastAPI and PostgreSQL applications."),
+        _create_block(7, "TECHNICAL SKILLS", BlockType.HEADING),
+        _create_block(8, "Python, FastAPI, Postgres, Docker, ReactJS, Git"),
+        _create_block(9, "WORK EXPERIENCE", BlockType.HEADING),
+        _create_block(10, "Python Developer | Example Technologies"),
+        _create_block(11, "January 2022 – March 2024"),
+        _create_block(12, "Developed internal APIs using FastAPI and PostgreSQL."),
+        _create_block(13, "Containerized local services using Docker."),
+        _create_block(14, "Junior Developer | Sample Systems"),
+        _create_block(15, "June 2020 – December 2021"),
+        _create_block(16, "Maintained Python web applications."),
+        _create_block(17, "EDUCATION", BlockType.HEADING),
+        _create_block(18, "Bachelor of Technology in Computer Science"),
+        _create_block(19, "Example Institute of Technology"),
+        _create_block(20, "2016 – 2020"),
+        _create_block(21, "PROJECTS", BlockType.HEADING),
+        _create_block(22, "Smart Hiring Platform"),
+        _create_block(23, "Created a resume-processing application using Python, FastAPI and PostgreSQL."),
+        _create_block(24, "Accessibility Extension"),
+        _create_block(25, "Developed a browser extension using JavaScript and React."),
+        _create_block(26, "CERTIFICATIONS", BlockType.HEADING),
+        _create_block(27, "AWS Certified Cloud Practitioner"),
+        _create_block(28, "Issuer: Amazon Web Services"),
+        _create_block(29, "Issued: June 2024"),
+        _create_block(30, "Credential ID: TEST-1234"),
+        _create_block(31, "LANGUAGES", BlockType.HEADING),
+        _create_block(32, "English — Professional working proficiency"),
+        _create_block(33, "Hindi — Native or bilingual proficiency"),
+        _create_block(34, "Gujarati"),
+    ]
+
+    res = assemble_candidate_profile(blocks, art_id)
+    prof = res.professional_profile
+
+    # 1. Exactly 2 employment records
+    assert len(prof.employment) == 2
+    # Record 1
+    assert prof.employment[0].job_title.value == "Python Developer"
+    assert prof.employment[0].organization.value == "Example Technologies"
+    assert prof.employment[0].start_date.value == "January 2022"
+    assert prof.employment[0].end_date.value == "March 2024"
+    assert len(prof.employment[0].descriptions) == 2
+    # Record 2
+    assert prof.employment[1].job_title.value == "Junior Developer"
+    assert prof.employment[1].organization.value == "Sample Systems"
+    assert prof.employment[1].start_date.value == "June 2020"
+    assert prof.employment[1].end_date.value == "December 2021"
+    assert len(prof.employment[1].descriptions) == 1
+
+    # 2. Exactly 1 education record
+    assert len(prof.education) == 1
+    assert prof.education[0].degree.value == "Bachelor of Technology"
+    assert prof.education[0].field_of_study is not None
+    assert prof.education[0].field_of_study.value == "Computer Science"
+    assert prof.education[0].institution.value == "Example Institute of Technology"
+    assert prof.education[0].start_date.value == "2016"
+    assert prof.education[0].end_date.value == "2020"
+
+    # 3. Exactly 2 projects
+    assert len(prof.projects) == 2
+    assert prof.projects[0].name.value == "Smart Hiring Platform"
+    assert "Created a resume-processing application" in (prof.projects[0].description.value or "")
+    p1_techs = [t.normalized_value for t in prof.projects[0].technologies]
+    assert "Python" in p1_techs
+    assert "FastAPI" in p1_techs
+
+    assert prof.projects[1].name.value == "Accessibility Extension"
+    assert "Developed a browser extension using JavaScript and React." == prof.projects[1].description.value
+    p2_techs = [t.normalized_value for t in prof.projects[1].technologies]
+    assert "React" in p2_techs
+    assert "JavaScript" in p2_techs
+
+    # 4. Exactly 1 certification with all fields
+    assert len(prof.certifications) == 1
+    assert prof.certifications[0].name.value == "AWS Certified Cloud Practitioner"
+    assert prof.certifications[0].issuer.value == "Amazon Web Services"
+    assert prof.certifications[0].issued_date.value == "June 2024"
+    assert prof.certifications[0].credential_id is not None
+    assert prof.certifications[0].credential_id.value == "TEST-1234"
+
+    # 5. Exactly 3 languages with proficiency
+    assert len(prof.languages) == 3
+    lang_map = {l.value: l.normalized_value for l in prof.languages}
+    assert "English" in lang_map
+    assert "PROFESSIONAL_WORKING" in lang_map["English"] or "Professional working proficiency" in lang_map["English"]
+    assert "Hindi" in lang_map
+    assert "NATIVE" in lang_map["Hindi"] or "Native" in lang_map["Hindi"]
+    assert "Gujarati" in lang_map
+    assert lang_map["Gujarati"] == "Gujarati"
+
+    # 6. Zero false missing-field warnings
+    assert len(res.warnings) == 0
+    assert res.review_required is False
+
+
+def test_profile_reprocessing_version_increment(in_memory_db):
+    """Phase 1D.6: Reprocessing with new parser pipeline version creates incremented profile version and remains idempotent."""
+    art_id = uuid.uuid4()
+    ext_id = uuid.uuid4()
+
+    art = ResumeArtifact(
+        artifact_id=art_id,
+        original_filename="sample.pdf",
+        detected_format=ArtifactFormat.pdf,
+        size_bytes=1024,
+        sha256_hash="a" * 64,
+        quarantine_key=f"quarantine/{art_id}.pdf",
+        validation_status=ArtifactValidationStatus.VALIDATED,
+    )
+    ext = ResumeExtraction(
+        extraction_id=ext_id,
+        artifact_id=art_id,
+        extractor_version="direct-extract-v1.0",
+        review_required=False,
+    )
+    b0 = _create_block(0, "Aarav Example\naarav@example.com")
+    b1 = _create_block(1, "Experience", BlockType.HEADING)
+    b2 = _create_block(2, "Software Engineer | Acme Inc\n2020 - 2022")
+
+    in_memory_db.add_all([art, ext])
+    in_memory_db.commit()
+
+    # 1. Assemble with v1.1
+    assembled = assemble_candidate_profile([b0, b1, b2], str(art_id))
+    rec1 = persist_candidate_profile(in_memory_db, art_id, ext_id, assembled)
+    in_memory_db.commit()
+    assert rec1.profile_version == 1
+
+    # 2. Re-persisting identical assembled profile is idempotent
+    rec1_repeat = persist_candidate_profile(in_memory_db, art_id, ext_id, assembled)
+    assert rec1_repeat.profile_id == rec1.profile_id
+    assert rec1_repeat.profile_version == 1
+
+    # 3. If a different pipeline version is persisted, profile_version increments
+    assembled_v2 = assemble_candidate_profile([b0, b1, b2], str(art_id))
+    assembled_v2.parser_pipeline_version = "pipeline-v1.2[test]"
+    rec2 = persist_candidate_profile(in_memory_db, art_id, ext_id, assembled_v2)
+    in_memory_db.commit()
+    assert rec2.profile_version == 2
+    assert rec2.profile_id != rec1.profile_id
+
+
+
 

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { ExtractionResultData } from "./ExtractionReview";
 
 export type ExtractedField = {
@@ -22,6 +22,7 @@ export type ExperienceRecord = {
 
 export type EducationRecord = {
   degree: ExtractedField;
+  fieldOfStudy?: ExtractedField | null;
   institution: ExtractedField;
   startDate: ExtractedField;
   endDate: ExtractedField;
@@ -39,6 +40,8 @@ export type CertificationRecord = {
   name: ExtractedField;
   issuer: ExtractedField;
   issuedDate: ExtractedField;
+  expiryDate?: ExtractedField | null;
+  credentialId?: ExtractedField | null;
   credentialUrl: ExtractedField;
 };
 
@@ -106,7 +109,74 @@ interface CandidateProfileReviewProps {
 }
 
 export function CandidateProfileReview({ profile, onReset }: CandidateProfileReviewProps) {
-  const { identity, professionalProfile } = profile;
+  const { identity, professionalProfile, evidence } = profile;
+  const [expandedEvidenceKey, setExpandedEvidenceKey] = useState<string | null>(null);
+
+  const evidenceMap = new Map<string, EvidenceSpan>();
+  evidence.forEach((ev) => evidenceMap.set(ev.evidenceId, ev));
+
+  const toggleEvidence = (key: string) => {
+    setExpandedEvidenceKey((prev) => (prev === key ? null : key));
+  };
+
+  const renderEvidenceAccordion = (key: string, evidenceIds: string[]) => {
+    if (!evidenceIds || evidenceIds.length === 0) return null;
+    const isExpanded = expandedEvidenceKey === key;
+    const matchingSpans = evidenceIds
+      .map((id) => evidenceMap.get(id))
+      .filter((s): s is EvidenceSpan => Boolean(s));
+
+    if (matchingSpans.length === 0) return null;
+
+    return (
+      <div className="evidence-accordion-wrapper">
+        <button
+          type="button"
+          className="btn-evidence-toggle"
+          onClick={() => toggleEvidence(key)}
+          aria-expanded={isExpanded}
+        >
+          🔍 {isExpanded ? "Hide Evidence" : `View Evidence (${matchingSpans.length})`}
+        </button>
+        {isExpanded && (
+          <div className="evidence-panel">
+            {matchingSpans.map((span) => (
+              <div key={span.evidenceId} className="evidence-item-card">
+                <div className="evidence-meta-row">
+                  <span className="badge badge-index">
+                    Block #{span.blockNumber !== null ? span.blockNumber : "N/A"}
+                  </span>
+                  {span.pageNumber !== null && (
+                    <span className="badge badge-type">Page {span.pageNumber}</span>
+                  )}
+                  <span className="evidence-method">{span.extractionMethod}</span>
+                  <span className="evidence-offsets mono">
+                    chars [{span.characterStart}:{span.characterEnd}]
+                  </span>
+                </div>
+                <div className="evidence-snippet">
+                  &ldquo;{span.originalText}&rdquo;
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderDateInterval = (startDate: ExtractedField, endDate: ExtractedField) => {
+    if (startDate.value && endDate.value) {
+      return `${startDate.value} — ${endDate.value}`;
+    }
+    if (startDate.value) {
+      return `${startDate.value} — Present`;
+    }
+    if (endDate.value) {
+      return `Until ${endDate.value}`;
+    }
+    return "Date Not Specified";
+  };
 
   return (
     <section className="profile-review-container" aria-labelledby="profile-review-title">
@@ -117,8 +187,8 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
             Candidate Profile Review
           </h2>
           <p className="extraction-meta-subtitle">
-            Schema Version: <span className="mono">{profile.schemaVersion}</span> &bull; Profile ID:{" "}
-            <span className="mono">{profile.profileId.slice(0, 8)}...</span>
+            Pipeline: <span className="mono">{profile.parserPipelineVersion}</span> &bull; Version:{" "}
+            <span className="mono">{profile.profileVersion}</span>
           </p>
         </div>
         <button type="button" onClick={onReset} className="btn btn-secondary btn-sm">
@@ -163,7 +233,7 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
           <span className="section-icon">👤</span>
           <div>
             <h3 className="section-title">Candidate Identity &amp; Contact Details</h3>
-            <p className="section-caption">Isolated from future matcher-facing features</p>
+            <p className="section-caption">Isolated from matcher-facing features</p>
           </div>
         </div>
 
@@ -174,6 +244,7 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
             {identity.fullName.confidence && (
               <span className="badge badge-confidence">{(identity.fullName.confidence * 100).toFixed(0)}% conf</span>
             )}
+            {renderEvidenceAccordion("identity-fullname", identity.fullName.evidenceIds)}
           </div>
 
           <div className="field-group">
@@ -185,6 +256,10 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
                 <span className="null-val">Not Detected</span>
               )}
             </div>
+            {renderEvidenceAccordion(
+              "identity-emails",
+              identity.emails.flatMap((e) => e.evidenceIds)
+            )}
           </div>
 
           <div className="field-group">
@@ -196,6 +271,10 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
                 <span className="null-val">Not Detected</span>
               )}
             </div>
+            {renderEvidenceAccordion(
+              "identity-phones",
+              identity.phoneNumbers.flatMap((p) => p.evidenceIds)
+            )}
           </div>
 
           <div className="field-group">
@@ -237,6 +316,7 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
           <div className="summary-text">
             {professionalProfile.summary.value || <span className="null-val">No summary statement provided</span>}
           </div>
+          {renderEvidenceAccordion("summary-evidence", professionalProfile.summary.evidenceIds)}
         </div>
       </div>
 
@@ -270,26 +350,36 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
         </div>
         {professionalProfile.employment.length > 0 ? (
           <div className="timeline-list">
-            {professionalProfile.employment.map((emp, i) => (
-              <div key={i} className="timeline-item">
-                <div className="timeline-header">
-                  <div>
-                    <h4 className="timeline-role">{emp.jobTitle.value || "Role Not Specified"}</h4>
-                    <span className="timeline-org">{emp.organization.value || "Organization Not Specified"}</span>
+            {professionalProfile.employment.map((emp, i) => {
+              const allEmpEvIds = [
+                ...emp.jobTitle.evidenceIds,
+                ...emp.organization.evidenceIds,
+                ...emp.startDate.evidenceIds,
+                ...emp.endDate.evidenceIds,
+                ...emp.descriptions.flatMap((d) => d.evidenceIds),
+              ];
+              return (
+                <div key={i} className="timeline-item">
+                  <div className="timeline-header">
+                    <div>
+                      <h4 className="timeline-role">{emp.jobTitle.value || "Role Not Specified"}</h4>
+                      <span className="timeline-org">{emp.organization.value || "Organization Not Specified"}</span>
+                    </div>
+                    <span className="timeline-date">
+                      {renderDateInterval(emp.startDate, emp.endDate)}
+                    </span>
                   </div>
-                  <span className="timeline-date">
-                    {emp.startDate.value || "Start"} — {emp.endDate.value || "Present"}
-                  </span>
+                  {emp.descriptions.length > 0 && (
+                    <ul className="timeline-bullets">
+                      {emp.descriptions.map((desc, dIdx) => (
+                        <li key={dIdx}>{desc.value}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {renderEvidenceAccordion(`emp-${i}`, allEmpEvIds)}
                 </div>
-                {emp.descriptions.length > 0 && (
-                  <ul className="timeline-bullets">
-                    {emp.descriptions.map((desc, dIdx) => (
-                      <li key={dIdx}>{desc.value}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <span className="null-val">No employment records extracted</span>
@@ -304,23 +394,38 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
         </div>
         {professionalProfile.education.length > 0 ? (
           <div className="timeline-list">
-            {professionalProfile.education.map((edu, i) => (
-              <div key={i} className="timeline-item">
-                <div className="timeline-header">
-                  <div>
-                    <h4 className="timeline-role">{edu.degree.value || "Degree Not Specified"}</h4>
-                    <span className="timeline-org">{edu.institution.value || "Institution Not Specified"}</span>
+            {professionalProfile.education.map((edu, i) => {
+              const allEduEvIds = [
+                ...edu.degree.evidenceIds,
+                ...(edu.fieldOfStudy ? edu.fieldOfStudy.evidenceIds : []),
+                ...edu.institution.evidenceIds,
+                ...edu.startDate.evidenceIds,
+                ...edu.endDate.evidenceIds,
+                ...edu.grade.evidenceIds,
+              ];
+              return (
+                <div key={i} className="timeline-item">
+                  <div className="timeline-header">
+                    <div>
+                      <h4 className="timeline-role">
+                        {edu.degree.value || "Degree Not Specified"}
+                        {edu.fieldOfStudy && edu.fieldOfStudy.value && (
+                          <span className="field-of-study"> in {edu.fieldOfStudy.value}</span>
+                        )}
+                      </h4>
+                      <span className="timeline-org">{edu.institution.value || "Institution Not Specified"}</span>
+                    </div>
+                    <span className="timeline-date">
+                      {renderDateInterval(edu.startDate, edu.endDate)}
+                    </span>
                   </div>
-                  <span className="timeline-date">
-                    {edu.startDate.value ? `${edu.startDate.value} — ` : ""}
-                    {edu.endDate.value || ""}
-                  </span>
+                  {edu.grade.value && (
+                    <div className="grade-badge">Grade/GPA: {edu.grade.value}</div>
+                  )}
+                  {renderEvidenceAccordion(`edu-${i}`, allEduEvIds)}
                 </div>
-                {edu.grade.value && (
-                  <div className="grade-badge">Grade/GPA: {edu.grade.value}</div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <span className="null-val">No education records extracted</span>
@@ -335,22 +440,31 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
         </div>
         {professionalProfile.projects.length > 0 ? (
           <div className="projects-grid">
-            {professionalProfile.projects.map((proj, i) => (
-              <div key={i} className="project-card">
-                <h4 className="project-name">{proj.name.value || "Project"}</h4>
-                {proj.description.value && <p className="project-desc">{proj.description.value}</p>}
-                {proj.technologies.length > 0 && (
-                  <div className="project-tech-tags">
-                    {proj.technologies.map((t, ti) => (
-                      <span key={ti} className="badge badge-type">{t.value}</span>
-                    ))}
-                  </div>
-                )}
-                {proj.projectUrl.value && (
-                  <div className="project-link mono">{proj.projectUrl.value}</div>
-                )}
-              </div>
-            ))}
+            {professionalProfile.projects.map((proj, i) => {
+              const allProjEvIds = [
+                ...proj.name.evidenceIds,
+                ...proj.description.evidenceIds,
+                ...proj.technologies.flatMap((t) => t.evidenceIds),
+                ...proj.projectUrl.evidenceIds,
+              ];
+              return (
+                <div key={i} className="project-card">
+                  <h4 className="project-name">{proj.name.value || "Project"}</h4>
+                  {proj.description.value && <p className="project-desc">{proj.description.value}</p>}
+                  {proj.technologies.length > 0 && (
+                    <div className="project-tech-tags">
+                      {proj.technologies.map((t, ti) => (
+                        <span key={ti} className="badge badge-type">{t.value}</span>
+                      ))}
+                    </div>
+                  )}
+                  {proj.projectUrl.value && (
+                    <div className="project-link mono">{proj.projectUrl.value}</div>
+                  )}
+                  {renderEvidenceAccordion(`proj-${i}`, allProjEvIds)}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <span className="null-val">No projects extracted</span>
@@ -367,13 +481,27 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
           </div>
           {professionalProfile.certifications.length > 0 ? (
             <ul className="cert-list">
-              {professionalProfile.certifications.map((cert, i) => (
-                <li key={i} className="cert-item">
-                  <strong>{cert.name.value}</strong>
-                  {cert.issuer.value && <div>Issuer: {cert.issuer.value}</div>}
-                  {cert.issuedDate.value && <div>Issued: {cert.issuedDate.value}</div>}
-                </li>
-              ))}
+              {professionalProfile.certifications.map((cert, i) => {
+                const allCertEvIds = [
+                  ...cert.name.evidenceIds,
+                  ...cert.issuer.evidenceIds,
+                  ...cert.issuedDate.evidenceIds,
+                  ...(cert.expiryDate ? cert.expiryDate.evidenceIds : []),
+                  ...(cert.credentialId ? cert.credentialId.evidenceIds : []),
+                  ...cert.credentialUrl.evidenceIds,
+                ];
+                return (
+                  <li key={i} className="cert-item">
+                    <strong className="cert-title">{cert.name.value}</strong>
+                    {cert.issuer.value && <div className="cert-meta-field"><span className="meta-label">Issuer:</span> {cert.issuer.value}</div>}
+                    {cert.issuedDate.value && <div className="cert-meta-field"><span className="meta-label">Issued:</span> {cert.issuedDate.value}</div>}
+                    {cert.expiryDate && cert.expiryDate.value && <div className="cert-meta-field"><span className="meta-label">Expires:</span> {cert.expiryDate.value}</div>}
+                    {cert.credentialId && cert.credentialId.value && <div className="cert-meta-field"><span className="meta-label">Credential ID:</span> <span className="mono">{cert.credentialId.value}</span></div>}
+                    {cert.credentialUrl.value && <div className="cert-meta-field"><span className="meta-label">Credential URL:</span> <span className="mono">{cert.credentialUrl.value}</span></div>}
+                    {renderEvidenceAccordion(`cert-${i}`, allCertEvIds)}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <span className="null-val">No certifications extracted</span>
@@ -388,14 +516,17 @@ export function CandidateProfileReview({ profile, onReset }: CandidateProfileRev
           </div>
           {professionalProfile.languages.length > 0 ? (
             <ul className="lang-list">
-              {professionalProfile.languages.map((l, i) => (
-                <li key={i} className="lang-item">
-                  <span className="lang-name">{l.value}</span>
-                  {l.normalizedValue && l.normalizedValue !== l.value && (
-                    <span className="badge badge-index">{l.normalizedValue}</span>
-                  )}
-                </li>
-              ))}
+              {professionalProfile.languages.map((l, i) => {
+                const hasProficiency = l.normalizedValue && l.normalizedValue.toLowerCase() !== l.value?.toLowerCase();
+                return (
+                  <li key={i} className="lang-item">
+                    <span className="lang-name">{l.value}</span>
+                    {hasProficiency && (
+                      <span className="badge badge-index">{l.normalizedValue}</span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <span className="null-val">No languages extracted</span>

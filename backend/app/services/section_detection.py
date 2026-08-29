@@ -36,6 +36,8 @@ HEADING_ALIASES: Dict[str, SectionType] = {
     # SKILLS
     "skills": SectionType.SKILLS,
     "technical skills": SectionType.SKILLS,
+    "technical toolkit": SectionType.SKILLS,
+    "toolkit": SectionType.SKILLS,
     "core skills": SectionType.SKILLS,
     "key skills": SectionType.SKILLS,
     "competencies": SectionType.SKILLS,
@@ -71,6 +73,7 @@ HEADING_ALIASES: Dict[str, SectionType] = {
 
     # PROJECTS
     "projects": SectionType.PROJECTS,
+    "engineering projects": SectionType.PROJECTS,
     "personal projects": SectionType.PROJECTS,
     "academic projects": SectionType.PROJECTS,
     "key projects": SectionType.PROJECTS,
@@ -93,7 +96,14 @@ HEADING_ALIASES: Dict[str, SectionType] = {
     "languages known": SectionType.LANGUAGES,
     "language proficiency": SectionType.LANGUAGES,
     "language skills": SectionType.LANGUAGES,
+
+    # CONTACT / HEADER
+    "contact": SectionType.HEADER,
+    "contact information": SectionType.HEADER,
+    "contact details": SectionType.HEADER,
+    "contacts": SectionType.HEADER,
 }
+
 
 _COLON_TRAIL_RE = re.compile(r"[:\s]+$")
 _WHITESPACE_COLLAPSE_RE = re.compile(r"\s+")
