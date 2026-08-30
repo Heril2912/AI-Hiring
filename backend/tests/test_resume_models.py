@@ -25,6 +25,7 @@ def test_models_exported_and_tables_registered():
         "extraction_blocks",
         "candidate_identities",
         "candidate_profiles",
+        "profile_corrections",
     }
 
 

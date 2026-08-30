@@ -56,6 +56,10 @@ class CandidateProfileResponse(StrictSchema):
     profile_version: int
     schema_version: str
     parser_pipeline_version: str
+    provenance: str = "PARSER_EXTRACTED"
+    parent_profile_id: Optional[str] = None
+    parent_profile_version: Optional[int] = None
+    created_at: Optional[str] = None
     review_required: bool
     warnings: List[ProfileAssemblyWarning] = Field(default_factory=list)
     identity: CandidateIdentity

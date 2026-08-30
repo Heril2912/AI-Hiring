@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     JSON,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -30,7 +31,6 @@ if TYPE_CHECKING:
 class CandidateIdentityRecord(Base):
     __tablename__ = "candidate_identities"
     __table_args__ = (
-        UniqueConstraint("artifact_id", name="uq_candidate_identities_artifact_id"),
         Index("ix_candidate_identities_artifact_id", "artifact_id"),
     )
 
@@ -87,9 +87,8 @@ class CandidateProfileRecord(Base):
     __table_args__ = (
         UniqueConstraint(
             "artifact_id",
-            "parser_pipeline_version",
-            "schema_version",
-            name="uq_candidate_profiles_artifact_pipeline_schema",
+            "profile_version",
+            name="uq_candidate_profiles_artifact_id_profile_version",
         ),
         CheckConstraint(
             "profile_version >= 1",
@@ -106,6 +105,8 @@ class CandidateProfileRecord(Base):
         Index("ix_candidate_profiles_artifact_id", "artifact_id"),
         Index("ix_candidate_profiles_extraction_id", "extraction_id"),
         Index("ix_candidate_profiles_identity_id", "identity_id"),
+        Index("ix_candidate_profiles_parent_profile_id", "parent_profile_id"),
+        Index("ix_candidate_profiles_origin_profile_id", "origin_profile_id"),
     )
 
     profile_id: Mapped[uuid.UUID] = mapped_column(
@@ -145,6 +146,38 @@ class CandidateProfileRecord(Base):
             name="fk_candidate_profiles_identity_id_candidate_identities",
         ),
         nullable=False,
+    )
+    parent_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "candidate_profiles.profile_id",
+            ondelete="SET NULL",
+            name="fk_candidate_profiles_parent_profile_id",
+        ),
+        nullable=True,
+    )
+    parent_profile_version: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    origin_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "candidate_profiles.profile_id",
+            ondelete="SET NULL",
+            name="fk_candidate_profiles_origin_profile_id",
+        ),
+        nullable=True,
+    )
+    provenance: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="PARSER_EXTRACTED",
+        server_default=text("'PARSER_EXTRACTED'"),
+    )
+    correction_batch_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
     )
     schema_version: Mapped[str] = mapped_column(
         String(20),
@@ -194,4 +227,86 @@ class CandidateProfileRecord(Base):
     identity: Mapped["CandidateIdentityRecord"] = relationship(
         "CandidateIdentityRecord",
         back_populates="profiles",
+    )
+
+
+class ProfileCorrectionRecord(Base):
+    __tablename__ = "profile_corrections"
+    __table_args__ = (
+        UniqueConstraint(
+            "artifact_id",
+            "idempotency_key",
+            name="uq_profile_corrections_artifact_id_idempotency_key",
+        ),
+        Index("ix_profile_corrections_artifact_id", "artifact_id"),
+        Index("ix_profile_corrections_base_profile_id", "base_profile_id"),
+        Index("ix_profile_corrections_new_profile_id", "new_profile_id"),
+    )
+
+    correction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "resume_artifacts.artifact_id",
+            ondelete="CASCADE",
+            name="fk_profile_corrections_artifact_id_resume_artifacts",
+        ),
+        nullable=False,
+    )
+    base_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "candidate_profiles.profile_id",
+            ondelete="CASCADE",
+            name="fk_profile_corrections_base_profile_id_candidate_profiles",
+        ),
+        nullable=False,
+    )
+    base_profile_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    new_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "candidate_profiles.profile_id",
+            ondelete="CASCADE",
+            name="fk_profile_corrections_new_profile_id_candidate_profiles",
+        ),
+        nullable=False,
+    )
+    new_profile_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    reason_category: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+    reviewer_note: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    operations_payload: Mapped[List[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+    )
+    actor_context: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        default="LOCAL_DEVELOPMENT_REVIEWER",
+        server_default=text("'LOCAL_DEVELOPMENT_REVIEWER'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )
