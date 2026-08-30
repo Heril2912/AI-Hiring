@@ -2,7 +2,7 @@ import dataclasses
 from typing import Dict, List, Optional, Set, Tuple
 from app.schemas.skill_and_summary import SkillCategory
 
-SKILL_CATALOG_VERSION = "skill-catalog-v1.0"
+SKILL_CATALOG_VERSION = "skill-catalog-v1.3"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -119,6 +119,11 @@ SKILL_DEFINITIONS: List[SkillDefinition] = [
         aliases=("reactjs", "react.js", "react js"),
     ),
     SkillDefinition(
+        canonical_name="Redux",
+        category=SkillCategory.FRAMEWORK,
+        aliases=("reduxjs", "redux.js", "redux js"),
+    ),
+    SkillDefinition(
         canonical_name="Node.js",
         category=SkillCategory.FRAMEWORK,
         aliases=("nodejs", "node.js", "node js"),
@@ -194,6 +199,11 @@ SKILL_DEFINITIONS: List[SkillDefinition] = [
         aliases=("express", "expressjs", "express.js"),
     ),
     SkillDefinition(
+        canonical_name="Jest",
+        category=SkillCategory.FRAMEWORK,
+        aliases=("jestjs", "jest.js"),
+    ),
+    SkillDefinition(
         canonical_name="GraphQL",
         category=SkillCategory.FRAMEWORK,
         aliases=(),
@@ -248,6 +258,11 @@ SKILL_DEFINITIONS: List[SkillDefinition] = [
         aliases=("git version control",),
     ),
     SkillDefinition(
+        canonical_name="Vite",
+        category=SkillCategory.TOOL_OR_PLATFORM,
+        aliases=("vitejs", "vite.js"),
+    ),
+    SkillDefinition(
         canonical_name="Docker",
         category=SkillCategory.TOOL_OR_PLATFORM,
         aliases=("docker container", "docker compose"),
@@ -291,6 +306,26 @@ SKILL_DEFINITIONS: List[SkillDefinition] = [
         canonical_name="Kafka",
         category=SkillCategory.TOOL_OR_PLATFORM,
         aliases=("apache kafka",),
+    ),
+    SkillDefinition(
+        canonical_name="Apache Spark",
+        category=SkillCategory.FRAMEWORK,
+        aliases=("spark", "pyspark", "apache-spark"),
+    ),
+    SkillDefinition(
+        canonical_name="Apache Airflow",
+        category=SkillCategory.TOOL_OR_PLATFORM,
+        aliases=("airflow", "apache-airflow"),
+    ),
+    SkillDefinition(
+        canonical_name="dbt",
+        category=SkillCategory.TOOL_OR_PLATFORM,
+        aliases=("data build tool", "dbt core", "dbt cloud"),
+    ),
+    SkillDefinition(
+        canonical_name="Power BI",
+        category=SkillCategory.TOOL_OR_PLATFORM,
+        aliases=("powerbi", "power-bi", "microsoft power bi"),
     ),
 ]
 

@@ -24,6 +24,7 @@ from app.schemas.skill_and_summary import (
     SkillSummaryWarning,
     SkillSummaryWarningCode,
 )
+from app.services.section_detection import match_heading_candidate
 from app.services.skill_catalog import (
     DEFAULT_SKILL_CATALOG,
     SKILL_CATALOG_VERSION,
@@ -33,7 +34,7 @@ from app.services.skill_catalog import (
 
 logger = logging.getLogger("ai_hiring.services.skill_summary_extraction")
 
-SKILL_SUMMARY_PARSER_VERSION = "skill-summary-extract-v1.0"
+SKILL_SUMMARY_PARSER_VERSION = "skill-summary-extract-v1.3"
 
 # Contact markers to avoid treating emails, phones, URLs as skills
 _EMAIL_RE = re.compile(
@@ -49,12 +50,14 @@ _PHONE_RE = re.compile(
 
 # Common section headers / metadata terms to ignore in skills list
 _SECTION_OR_META_TERMS = {
-    "skills", "technical skills", "core skills", "key skills", "technologies", "tools",
-    "technical toolkit", "toolkit",
-    "languages", "frameworks", "databases", "platforms", "libraries", "tools & technologies",
-    "experience", "work experience", "education", "projects", "certifications", "summary",
-    "profile", "contact", "email", "phone", "address", "portfolio", "github", "linkedin",
-    "curriculum vitae", "resume", "page",
+    "skills", "skill", "technical skills", "technical skill", "core skills", "key skills",
+    "technologies", "tools", "technical toolkit", "toolkit",
+    "languages", "language", "frameworks", "databases", "platforms", "libraries",
+    "tools & technologies", "tools and technologies",
+    "experience", "work experience", "education", "projects", "project",
+    "selected projects", "selected project", "certifications", "certification",
+    "certificates", "certificate", "summary", "profile", "contact", "email",
+    "phone", "address", "portfolio", "github", "linkedin", "curriculum vitae", "resume", "page",
 }
 
 
@@ -269,6 +272,10 @@ def _is_unresolved_candidate_defensible(item_text: str) -> bool:
 
     # Check for section or meta terms
     if cleaned.lower() in _SECTION_OR_META_TERMS:
+        return False
+
+    # Check for recognized section headings
+    if match_heading_candidate(cleaned) is not None:
         return False
 
     # Pure numbers or years
@@ -672,7 +679,7 @@ def extract_skills_and_summary(
                                 item_text,
                                 SkillResolutionStatus.UNRESOLVED,
                                 None,
-                                0.60,
+                                0.95,
                                 span,
                                 block.extraction_method.value,
                                 SectionType.SKILLS.value,

@@ -16,9 +16,11 @@ from app.schemas.section_and_identity import (
     SectionType,
 )
 
+from app.services.section_detection import match_heading_candidate
+
 logger = logging.getLogger("ai_hiring.services.identity_extraction")
 
-IDENTITY_PARSER_VERSION = "identity-extract-v1.0"
+IDENTITY_PARSER_VERSION = "identity-extract-v1.1"
 
 # Bounded email pattern
 _EMAIL_RE = re.compile(
@@ -37,6 +39,15 @@ _URL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Location patterns in header/contact region
+_LOCATION_LABEL_RE = re.compile(
+    r"\b(?:Location|Address|City)\s*[:\-–—]\s*([A-Za-z\s.-]+,\s*[A-Z]{2}(?:\s+\d{5})?|[A-Za-z\s.-]+,\s*[A-Za-z\s.-]+)",
+    re.IGNORECASE,
+)
+_CITY_STATE_RE = re.compile(
+    r"\b([A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2})\b"
+)
+
 # Trailing punctuation to strip from URLs
 _URL_TRAILING_PUNCT_RE = re.compile(r"[.,;:!?)\]]+$")
 
@@ -49,13 +60,13 @@ _NAME_BLACKLIST = {
     "github", "linkedin", "portfolio", "full-stack", "frontend", "backend", "software engineer",
     "developer", "senior developer", "lead developer", "architect", "data scientist",
     "senior software engineer", "lead software engineer", "principal engineer", "engineering",
-    "manager", "director", "consultant", "analyst", "specialist",
+    "manager", "director", "consultant", "analyst", "specialist", "technical toolkit", "toolkit",
 }
 
 # Substrings that disqualify a line from being a person's name
 _NAME_DISQUALIFYING_SUBSTRINGS = [
     "engineer", "developer", "architect", "manager", "director", "consultant",
-    "analyst", "specialist", "administrator", "lead", "officer", "executive",
+    "analyst", "specialist", "administrator", "lead", "officer", "executive", "toolkit",
 ]
 
 
@@ -143,6 +154,10 @@ def _extract_name_candidates_from_blocks(
             if any(sub in lower_line for sub in _NAME_DISQUALIFYING_SUBSTRINGS):
                 continue
 
+            # Reject detected section headings
+            if match_heading_candidate(line_str) is not None:
+                continue
+
             lower_words = [w.lower().strip(".,:;") for w in words]
             if any(w in _NAME_BLACKLIST for w in lower_words):
                 continue
@@ -152,9 +167,12 @@ def _extract_name_candidates_from_blocks(
             if title_case_words < len(words) - 1:
                 continue
 
-            # Exclude punctuation-heavy lines
-            punct_count = sum(1 for c in line_str if c in ",;:/|\\<>{}[]()!@#$%^&*")
-            if punct_count > 1:
+            # Exclude punctuation-heavy lines or lines with comma/location pattern
+            if "," in line_str or _CITY_STATE_RE.search(line_str):
+                continue
+
+            punct_count = sum(1 for c in line_str if c in ";:/|\\<>{}[]()!@#$%^&*")
+            if punct_count > 0:
                 continue
 
             candidates.append((line_str, line_start, line_end, block))
@@ -383,7 +401,48 @@ def extract_identity_and_contacts(
             elif url_type == "portfolio" and portfolio_field.value is None:
                 portfolio_field = field
 
+    # 6. Extract Location from bounded header/contact blocks
     location_field = ExtractedField(field_name="location")
+    location_search_blocks = header_blocks if header_blocks else blocks[:3]
+    for block in location_search_blocks:
+        # Check for explicit Location label
+        m_lbl = _LOCATION_LABEL_RE.search(block.normalized_text)
+        if m_lbl:
+            loc_val = m_lbl.group(1).strip(" \t\r\n,;|")
+            start_off = block.normalized_text.find(loc_val)
+            if start_off != -1:
+                span = make_evidence_span(block, start_off, start_off + len(loc_val), loc_val)
+                evidence_spans.append(span)
+                location_field = ExtractedField(
+                    field_name="location",
+                    value=loc_val,
+                    normalized_value=loc_val.upper(),
+                    confidence=0.95,
+                    evidence_ids=[span.evidence_id],
+                    extraction_method=block.extraction_method.value,
+                    review_status=ReviewStatus.UNREVIEWED,
+                )
+                break
+
+        # Check for City, State pattern (e.g. Los Angeles, CA or Seattle, WA)
+        m_city = _CITY_STATE_RE.search(block.normalized_text)
+        if m_city:
+            loc_val = m_city.group(1).strip(" \t\r\n,;|")
+            if (not full_name_field.value or loc_val.lower() not in full_name_field.value.lower()) and len(loc_val) < 40:
+                start_off = block.normalized_text.find(loc_val)
+                if start_off != -1:
+                    span = make_evidence_span(block, start_off, start_off + len(loc_val), loc_val)
+                    evidence_spans.append(span)
+                    location_field = ExtractedField(
+                        field_name="location",
+                        value=loc_val,
+                        normalized_value=loc_val.upper(),
+                        confidence=0.90,
+                        evidence_ids=[span.evidence_id],
+                        extraction_method=block.extraction_method.value,
+                        review_status=ReviewStatus.UNREVIEWED,
+                    )
+                    break
 
     identity = CandidateIdentity(
         resume_artifact_id=artifact_id,

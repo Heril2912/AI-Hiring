@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from app.schemas.education_project_certification import DegreeLevel
 
-EDUCATION_PROJECT_CERTIFICATION_RULES_VERSION = "ed-proj-cert-lang-rules-v1.0"
+EDUCATION_PROJECT_CERTIFICATION_RULES_VERSION = "ed-proj-cert-lang-rules-v1.1"
 
 # =============================================================================
 # 1. EDUCATION RULES & PATTERNS
@@ -158,7 +158,7 @@ INSTITUTION_INDICATORS: Set[str] = {
 
 # Major / Field of Study prefixes
 FIELD_OF_STUDY_PREFIX_RE = re.compile(
-    r"\b(?:in|major in|specialization in|specialized in|majoring in|emphasis in|field of|discipline of)\s+([A-Za-z0-9\s&,/-]+?)(?=(?:\s*[,;|\n]|\s+(?:from|at|with|gpa|cgpa|\([0-9]|19\d\d|20\d\d)|$))",
+    r"\b(?:in|major in|specialization in|specialized in|majoring in|emphasis in|field of|discipline of)\s+([A-Za-z0-9\s&,/-]+?)(?=(?:\s*[,;|—–\n]|\s+(?:from|at|with|gpa|cgpa|\([0-9]|19\d\d|20\d\d)|$))",
     re.IGNORECASE,
 )
 
@@ -299,7 +299,7 @@ PROGRAMMING_LANGUAGES_REJECT_LIST: Set[str] = {
 # Level strings: "NATIVE", "FLUENT", "PROFESSIONAL_WORKING", "INTERMEDIATE", "ELEMENTARY"
 PROFICIENCY_MAPPINGS: List[Tuple[re.Pattern, str]] = [
     (
-        re.compile(r"\b(?:native(?:\s+or\s+bilingual)?|mother\s+tongue|first\s+language)\b", re.IGNORECASE),
+        re.compile(r"\b(?:native(?:\s+proficiency)?(?:\s+or\s+bilingual)?|mother\s+tongue|first\s+language)\b", re.IGNORECASE),
         "NATIVE",
     ),
     (
@@ -307,7 +307,7 @@ PROFICIENCY_MAPPINGS: List[Tuple[re.Pattern, str]] = [
         "FLUENT",
     ),
     (
-        re.compile(r"\b(?:professional\s+working(?:\s+proficiency)?|working\s+proficiency|advanced|conversational)\b", re.IGNORECASE),
+        re.compile(r"\b(?:professional(?:\s+working)?(?:\s+proficiency)?|working\s+proficiency|advanced|conversational)\b", re.IGNORECASE),
         "PROFESSIONAL_WORKING",
     ),
     (
