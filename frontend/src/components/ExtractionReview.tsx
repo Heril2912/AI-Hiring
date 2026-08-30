@@ -28,6 +28,57 @@ interface ExtractionReviewProps {
   onNavigateBack: () => void;
 }
 
+function formatBlockType(type: string): string {
+  switch (type.toUpperCase()) {
+    case "PARAGRAPH":
+      return "Paragraph";
+    case "HEADING":
+      return "Heading";
+    case "LIST_ITEM":
+      return "List item";
+    case "TABLE_CELL":
+      return "Table cell";
+    case "HEADER":
+      return "Header";
+    case "FOOTER":
+      return "Footer";
+    default:
+      return type;
+  }
+}
+
+function formatExtractionMethod(method: string): string {
+  switch (method.toUpperCase()) {
+    case "PDF_TEXT":
+      return "Direct PDF text";
+    case "DOCX_TEXT":
+      return "Direct DOCX text";
+    case "PDF_LAYOUT":
+      return "PDF layout";
+    case "OCR":
+      return "OCR text";
+    default:
+      return method;
+  }
+}
+
+function renderConfidenceBadge(confidence: number | null | undefined) {
+  if (
+    typeof confidence !== "number" ||
+    isNaN(confidence) ||
+    confidence < 0 ||
+    confidence > 1
+  ) {
+    return null;
+  }
+  const pct = Math.round(confidence * 100);
+  return (
+    <span className="badge badge-confidence">
+      {pct}% confidence
+    </span>
+  );
+}
+
 export function ExtractionReview({ extraction, onNavigateBack }: ExtractionReviewProps) {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [filterType, setFilterType] = useState<string>("ALL");
@@ -116,7 +167,7 @@ export function ExtractionReview({ extraction, onNavigateBack }: ExtractionRevie
             <option value="ALL">All Block Types ({extraction.blocks.length})</option>
             {blockTypes.map((t) => (
               <option key={t} value={t}>
-                {t} ({extraction.blocks.filter((b) => b.blockType === t).length})
+                {formatBlockType(t)} ({extraction.blocks.filter((b) => b.blockType === t).length})
               </option>
             ))}
           </select>
@@ -135,6 +186,7 @@ export function ExtractionReview({ extraction, onNavigateBack }: ExtractionRevie
           filteredBlocks.map((block) => {
             const isIdentical = block.rawText === block.normalizedText;
             const isCopied = copiedBlockId === (block.blockId || String(block.sequenceIndex));
+            const confBadge = renderConfidenceBadge(block.confidence);
 
             return (
               <article
@@ -145,16 +197,12 @@ export function ExtractionReview({ extraction, onNavigateBack }: ExtractionRevie
                 <div className="block-card-header">
                   <div className="block-tag-group">
                     <span className="badge badge-index">#{block.sequenceIndex}</span>
-                    <span className="badge badge-type">{block.blockType}</span>
-                    <span className="badge badge-method">{block.extractionMethod}</span>
+                    <span className="badge badge-type">{formatBlockType(block.blockType)}</span>
+                    <span className="badge badge-method">{formatExtractionMethod(block.extractionMethod)}</span>
                     {block.pageNumber !== null && (
                       <span className="badge badge-location">Page {block.pageNumber}</span>
                     )}
-                    {block.confidence !== null && (
-                      <span className="badge badge-confidence">
-                        {(block.confidence * 100).toFixed(0)}% conf
-                      </span>
-                    )}
+                    {confBadge}
                   </div>
 
                   <div className="block-action-group">

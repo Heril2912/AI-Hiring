@@ -2146,6 +2146,130 @@ input, select, textarea {
   gap: 8px;
 }
 
+.btn-warning-action {
+  background-color: var(--status-warn-bg);
+  color: #92400e;
+  border: 1px solid var(--status-warn-border);
+  font-weight: 600;
+}
+
+.btn-warning-action:hover {
+  background-color: #fde68a;
+  border-color: #f59e0b;
+  color: #78350f;
+}
+
+.warning-count-pill {
+  background-color: #f59e0b;
+  color: #ffffff;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.drawer-panel-wide {
+  max-width: 540px;
+}
+
+.review-section-group {
+  margin-bottom: 20px;
+}
+
+.review-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.review-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.review-items-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.review-item-card {
+  background-color: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-item-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.review-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.review-item-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.review-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.btn-tech-link {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.btn-tech-link:hover {
+  color: var(--text-primary);
+}
+
+.target-section-highlight {
+  animation: targetPulse 2.5s ease-out;
+}
+
+@keyframes targetPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(79, 91, 213, 0.4);
+    border-color: var(--accent-primary);
+  }
+  30% {
+    box-shadow: 0 0 0 6px rgba(79, 91, 213, 0.25);
+    border-color: var(--accent-primary);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(79, 91, 213, 0);
+    border-color: var(--border-subtle);
+  }
+}
+
 .warnings-summary-card {
   background-color: #ffffff;
   border: 1px solid var(--status-warn-border);

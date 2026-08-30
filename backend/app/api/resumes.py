@@ -156,6 +156,12 @@ def _cleanup_file(file_path: Path) -> None:
         "creates ResumeArtifact and ProcessingJob persistence records atomically, and queues the document."
     ),
 )
+@router.post(
+    "/upload",
+    response_model=ResumeUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
+)
 async def upload_resume(
     file: UploadFile = File(...),
     settings: Settings = Depends(get_settings),
