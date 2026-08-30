@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { Icon } from "./Icon";
+import { EvidenceDrawer } from "./EvidenceDrawer";
+import { VersionHistoryDrawer, ProfileSummary } from "./VersionHistoryDrawer";
 import { ExtractionResultData } from "./ExtractionReview";
 
 export type ExtractedField = {
@@ -106,24 +109,6 @@ export type CandidateProfileData = {
   evidence: EvidenceSpan[];
 };
 
-export type ProfileSummary = {
-  profileId: string;
-  profileVersion: number;
-  schemaVersion: string;
-  parserPipelineVersion: string;
-  provenance: string;
-  reviewRequired: boolean;
-  createdAt: string;
-  parentProfileId?: string | null;
-  parentProfileVersion?: number | null;
-  correctionSummary?: {
-    correctionId: string;
-    reasonCategory: string;
-    reviewerNote?: string | null;
-    operationCount: number;
-  } | null;
-};
-
 export type CorrectionReasonCategory =
   | "INCORRECT_EXTRACTION"
   | "MISSING_INFORMATION"
@@ -146,15 +131,34 @@ export type CorrectionOperation = {
 interface CandidateProfileReviewProps {
   profile: CandidateProfileData;
   extraction?: ExtractionResultData | null;
-  onReset: () => void;
+  onNavigateBack: () => void;
+  onNavigateExtraction?: () => void;
 }
 
-export function CandidateProfileReview({ profile: initialProfile, onReset }: CandidateProfileReviewProps) {
+export function CandidateProfileReview({
+  profile: initialProfile,
+  extraction,
+  onNavigateBack,
+  onNavigateExtraction,
+}: CandidateProfileReviewProps) {
   const [currentProfile, setCurrentProfile] = useState<CandidateProfileData>(initialProfile);
   const [historyList, setHistoryList] = useState<ProfileSummary[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number>(initialProfile.profileVersion);
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
-  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
+
+  // Drawers
+  const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] = useState<boolean>(false);
+  const [evidenceDrawerState, setEvidenceDrawerState] = useState<{
+    isOpen: boolean;
+    fieldLabel: string;
+    fieldValue?: string | null;
+    evidenceIds: string[];
+  }>({
+    isOpen: false,
+    fieldLabel: "",
+    fieldValue: null,
+    evidenceIds: [],
+  });
 
   // Correction Workflow State
   const [isCorrectionMode, setIsCorrectionMode] = useState<boolean>(false);
@@ -165,24 +169,22 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<boolean>(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [showDiffPreview, setShowDiffPreview] = useState<boolean>(false);
 
-  // Expanded evidence span accordion
-  const [expandedEvidenceKey, setExpandedEvidenceKey] = useState<string | null>(null);
-
-  // Temp draft state during correction
-  const [draftFullName, setDraftFullName] = useState(currentProfile.identity.fullName?.value || "");
-  const [draftEmail, setDraftEmail] = useState(currentProfile.identity.emails?.[0]?.value || "");
-  const [draftPhone, setDraftPhone] = useState(currentProfile.identity.phoneNumbers?.[0]?.value || "");
-  const [draftLocation, setDraftLocation] = useState(currentProfile.identity.location?.value || "");
-  const [draftLinkedin, setDraftLinkedin] = useState(currentProfile.identity.linkedin?.value || "");
-  const [draftGithub, setDraftGithub] = useState(currentProfile.identity.github?.value || "");
-  const [draftPortfolio, setDraftPortfolio] = useState(currentProfile.identity.portfolio?.value || "");
-  const [draftHeadline, setDraftHeadline] = useState(currentProfile.professionalProfile.headline?.value || "");
-  const [draftSummary, setDraftSummary] = useState(currentProfile.professionalProfile.summary?.value || "");
+  // Draft scalar inputs for correction
+  const [draftFullName, setDraftFullName] = useState("");
+  const [draftEmail, setDraftEmail] = useState("");
+  const [draftPhone, setDraftPhone] = useState("");
+  const [draftLocation, setDraftLocation] = useState("");
+  const [draftLinkedin, setDraftLinkedin] = useState("");
+  const [draftGithub, setDraftGithub] = useState("");
+  const [draftPortfolio, setDraftPortfolio] = useState("");
+  const [draftHeadline, setDraftHeadline] = useState("");
+  const [draftSummary, setDraftSummary] = useState("");
   const [newSkillInput, setNewSkillInput] = useState("");
   const [newLangInput, setNewLangInput] = useState("");
 
-  // Record modal states
+  // Record modals
   const [editingExperienceIndex, setEditingExperienceIndex] = useState<number | "new" | null>(null);
   const [expJobTitle, setExpJobTitle] = useState("");
   const [expOrg, setExpOrg] = useState("");
@@ -201,7 +203,6 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
   const evidenceMap = new Map<string, EvidenceSpan>();
   currentProfile.evidence.forEach((ev) => evidenceMap.set(ev.evidenceId, ev));
 
-  // Fetch Version History on mount
   const fetchHistory = async () => {
     try {
       setIsLoadingHistory(true);
@@ -221,7 +222,6 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
     fetchHistory();
   }, [currentProfile.artifactId, currentProfile.profileVersion]);
 
-  // Load a specific version from history
   const handleSelectVersion = async (version: number) => {
     if (version === currentProfile.profileVersion) return;
     try {
@@ -242,7 +242,6 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
     }
   };
 
-  // Reload latest version (e.g. after 409 conflict)
   const handleReloadLatest = async () => {
     try {
       setIsLoadingHistory(true);
@@ -263,13 +262,9 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
     }
   };
 
-  const toggleEvidence = (key: string) => {
-    setExpandedEvidenceKey((prev) => (prev === key ? null : key));
-  };
+  const isLatestVersion =
+    historyList.length === 0 || selectedVersion === Math.max(...historyList.map((h) => h.profileVersion));
 
-  const isLatestVersion = historyList.length === 0 || selectedVersion === Math.max(...historyList.map((h) => h.profileVersion));
-
-  // Initialize draft fields when entering correction mode
   const startCorrectionMode = () => {
     setDraftFullName(currentProfile.identity.fullName?.value || "");
     setDraftEmail(currentProfile.identity.emails?.[0]?.value || "");
@@ -283,10 +278,10 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
     setOperations([]);
     setErrorMessage(null);
     setConflictError(false);
+    setShowDiffPreview(false);
     setIsCorrectionMode(true);
   };
 
-  // Build scalar changes into operations
   const computeScalarOperations = (): CorrectionOperation[] => {
     const ops: CorrectionOperation[] = [];
 
@@ -373,7 +368,7 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
       (s) => s.value?.toLowerCase() === trimmed.toLowerCase()
     );
     if (exists) {
-      setErrorMessage(`Skill '${trimmed}' is already present in this profile.`);
+      setErrorMessage(`Skill '${trimmed}' is already present.`);
       return;
     }
     setOperations((prev) => [
@@ -537,19 +532,18 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
     setErrorMessage(null);
   };
 
-  // Submit Correction Batch
   const handleSubmitCorrections = async (e: React.FormEvent) => {
     e.preventDefault();
     const scalarOps = computeScalarOperations();
     const totalOps = [...scalarOps, ...operations];
 
     if (totalOps.length === 0) {
-      setErrorMessage("No corrections were made. Make changes to submit a correction batch.");
+      setErrorMessage("No modifications detected in draft.");
       return;
     }
 
     if (reasonCategory === "OTHER" && !reviewerNote.trim()) {
-      setErrorMessage("A reviewer note is mandatory when selecting reason 'OTHER'.");
+      setErrorMessage("Reviewer note is required when reason category is 'Other'.");
       return;
     }
 
@@ -579,7 +573,7 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
         if (errJson?.detail?.code === "PROFILE_VERSION_CONFLICT") {
           setConflictError(true);
           setErrorMessage(
-            "Conflict: A newer version of this profile was created. Please reload to review the latest changes before correcting."
+            "Conflict: A newer profile version exists. Please reload to review the latest changes before correcting."
           );
         } else {
           setErrorMessage(errJson?.detail?.message || "Correction conflict encountered.");
@@ -598,7 +592,7 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
       setSelectedVersion(responseData.newProfileVersion);
       setIsCorrectionMode(false);
       setOperations([]);
-      setSuccessToast(`Created Profile Version ${responseData.newProfileVersion} successfully.`);
+      setSuccessToast(`Profile Version ${responseData.newProfileVersion} created successfully.`);
       fetchHistory();
       setTimeout(() => setSuccessToast(null), 5000);
     } catch (err) {
@@ -609,51 +603,23 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
     }
   };
 
-  const renderEvidenceAccordion = (key: string, evidenceIds: string[]) => {
-    if (!evidenceIds || evidenceIds.length === 0) return null;
-    const isExpanded = expandedEvidenceKey === key;
-    const matchingSpans = evidenceIds
-      .map((id) => evidenceMap.get(id))
-      .filter((s): s is EvidenceSpan => Boolean(s));
-
-    if (matchingSpans.length === 0) return null;
-
-    return (
-      <div className="evidence-accordion-wrapper">
-        <button
-          type="button"
-          className="btn-evidence-toggle"
-          onClick={() => toggleEvidence(key)}
-          aria-expanded={isExpanded}
-        >
-          🔍 {isExpanded ? "Hide Evidence" : `View Evidence (${matchingSpans.length})`}
-        </button>
-        {isExpanded && (
-          <div className="evidence-panel">
-            {matchingSpans.map((span) => (
-              <div key={span.evidenceId} className="evidence-item-card">
-                <div className="evidence-meta-row">
-                  <span className="badge badge-index">
-                    Block #{span.blockNumber !== null ? span.blockNumber : "N/A"}
-                  </span>
-                  {span.pageNumber !== null && (
-                    <span className="badge badge-type">Page {span.pageNumber}</span>
-                  )}
-                  <span className="evidence-method">{span.extractionMethod}</span>
-                  <span className="evidence-offsets mono">
-                    chars [{span.characterStart}:{span.characterEnd}]
-                  </span>
-                </div>
-                <div className="evidence-snippet">&ldquo;{span.originalText}&rdquo;</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
+  const openEvidenceInspector = (label: string, value: string | null | undefined, evidenceIds: string[]) => {
+    setEvidenceDrawerState({
+      isOpen: true,
+      fieldLabel: label,
+      fieldValue: value || null,
+      evidenceIds: evidenceIds || [],
+    });
   };
 
-  const renderDateInterval = (startDate: ExtractedField, endDate: ExtractedField) => {
+  const getInitials = (name?: string | null) => {
+    if (!name || !name.trim()) return "??";
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
+  const renderDateInterval = (startDate?: ExtractedField | null, endDate?: ExtractedField | null) => {
     if (startDate?.value && endDate?.value) {
       return `${startDate.value} — ${endDate.value}`;
     }
@@ -663,49 +629,64 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
     if (endDate?.value) {
       return `Until ${endDate.value}`;
     }
-    return "Date Not Specified";
+    return "Date not specified";
+  };
+
+  const formatLanguageProficiency = (normalized?: string | null, raw?: string | null) => {
+    if (!normalized && !raw) return "";
+    const val = (normalized || raw || "").toUpperCase();
+    switch (val) {
+      case "NATIVE":
+      case "NATIVE_OR_BILINGUAL":
+        return "Native or bilingual proficiency";
+      case "PROFESSIONAL_WORKING":
+      case "PROFESSIONAL":
+        return "Professional working proficiency";
+      case "FULL_PROFESSIONAL":
+        return "Full professional proficiency";
+      case "LIMITED_WORKING":
+        return "Limited working proficiency";
+      case "ELEMENTARY":
+        return "Elementary proficiency";
+      default:
+        return normalized || raw || "";
+    }
   };
 
   const { identity, professionalProfile } = currentProfile;
-  const isCorrectedProfile = currentProfile.provenance === "HUMAN_CORRECTED";
+  const isHumanCorrected = currentProfile.provenance === "HUMAN_CORRECTED";
+  const fullNameStr = identity.fullName?.value || "Candidate";
+  const initials = getInitials(fullNameStr);
+
+  const totalOps = [...computeScalarOperations(), ...operations];
 
   return (
-    <section className="profile-review-container" aria-labelledby="profile-review-title">
-      {/* Header Bar */}
-      <div className="extraction-review-header">
-        <div>
-          <div className="profile-version-tag-row">
-            <h2 id="profile-review-title" className="extraction-review-title">
-              Candidate Profile Review
-            </h2>
-            <span className={`badge ${isCorrectedProfile ? "badge-provenance-corrected" : "badge-provenance-parser"}`}>
-              {isCorrectedProfile ? "HUMAN CORRECTED" : "PARSER EXTRACTED"}
-            </span>
-            <span className="badge badge-version">v{currentProfile.profileVersion}</span>
-          </div>
-          <p className="extraction-meta-subtitle">
-            Pipeline: <span className="mono">{currentProfile.parserPipelineVersion}</span> &bull; Schema:{" "}
-            <span className="mono">v{currentProfile.schemaVersion}</span>
-            {currentProfile.parentProfileVersion && (
-              <span> &bull; Derived from: <span className="mono">v{currentProfile.parentProfileVersion}</span></span>
-            )}
-          </p>
-        </div>
+    <div className="candidate-workspace-container">
+      {/* Top Workspace Breadcrumb & Header */}
+      <div className="workspace-header-bar">
+        <button
+          type="button"
+          onClick={onNavigateBack}
+          className="btn-back-link"
+        >
+          <Icon name="arrow-left" size={16} />
+          <span>Back to Candidates</span>
+        </button>
 
-        <div className="header-action-group">
+        <div className="workspace-header-actions">
           {historyList.length > 1 && (
-            <div className="version-selector-container">
-              <label htmlFor="version-select" className="sr-only">Select Version</label>
+            <div className="version-select-pill">
+              <span className="version-pill-label">Version:</span>
               <select
-                id="version-select"
-                className="version-select"
+                className="version-native-select"
                 value={selectedVersion}
                 onChange={(e) => handleSelectVersion(Number(e.target.value))}
                 disabled={isLoadingHistory || isCorrectionMode}
+                aria-label="Select profile version snapshot"
               >
                 {historyList.map((h) => (
                   <option key={h.profileVersion} value={h.profileVersion}>
-                    v{h.profileVersion} ({h.provenance === "HUMAN_CORRECTED" ? "Human Corrected" : "Parser"})
+                    v{h.profileVersion} ({h.provenance === "HUMAN_CORRECTED" ? "Corrected" : "Parser"})
                   </option>
                 ))}
               </select>
@@ -716,107 +697,256 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
             <button
               type="button"
               onClick={startCorrectionMode}
-              className="btn btn-primary btn-sm btn-correct"
+              className="btn btn-primary btn-sm"
             >
-              ✏️ Correct Profile
+              <Icon name="edit" size={14} /> Correct Profile
             </button>
           )}
 
           <button
             type="button"
-            onClick={() => setShowHistoryModal(true)}
+            onClick={() => setIsHistoryDrawerOpen(true)}
             className="btn btn-secondary btn-sm"
           >
-            📋 Audit History ({historyList.length})
+            <Icon name="history" size={14} /> History ({historyList.length})
           </button>
 
-          <button type="button" onClick={onReset} className="btn btn-secondary btn-sm">
-            Upload Another
-          </button>
+          {onNavigateExtraction && (
+            <button
+              type="button"
+              onClick={onNavigateExtraction}
+              className="btn btn-secondary btn-sm"
+            >
+              <Icon name="file-text" size={14} /> Raw Extraction
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Success Toast */}
+      {/* Success Toast Banner */}
       {successToast && (
         <div className="feedback-box success toast-banner" role="status">
-          ✓ {successToast}
+          <Icon name="check" size={16} />
+          <span>{successToast}</span>
         </div>
       )}
 
-      {/* Historical View Warning Banner */}
+      {/* Stale Version Alert */}
       {!isLatestVersion && (
         <div className="historical-view-banner" role="alert">
-          <span>📜 Viewing historical profile version <strong>v{currentProfile.profileVersion}</strong> (Read-Only).</span>
+          <div className="banner-left">
+            <Icon name="history" size={16} />
+            <span>
+              Viewing historical snapshot <strong>Version {currentProfile.profileVersion}</strong> (Read-Only).
+            </span>
+          </div>
           <button
             type="button"
             onClick={handleReloadLatest}
-            className="btn btn-secondary btn-sm"
+            className="btn btn-secondary btn-xs"
           >
             Switch to Latest (v{Math.max(...historyList.map((h) => h.profileVersion))})
           </button>
         </div>
       )}
 
-      {/* Review Required Banner */}
-      {currentProfile.reviewRequired && !isCorrectedProfile && (
+      {/* Conflict / Error Banner */}
+      {errorMessage && (
+        <div className="feedback-box error" role="alert">
+          <Icon name="alert-triangle" size={16} />
+          <div className="error-content">
+            <p className="feedback-text error">{errorMessage}</p>
+            {conflictError && (
+              <button
+                type="button"
+                onClick={handleReloadLatest}
+                className="btn btn-primary btn-xs"
+                style={{ marginTop: "6px" }}
+              >
+                <Icon name="refresh" size={13} /> Reload Latest Version
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Manual Review Required Banner */}
+      {currentProfile.reviewRequired && !isHumanCorrected && !isCorrectionMode && (
         <div className="review-required-banner" role="alert">
-          <span className="warning-icon" aria-hidden="true">⚠️</span>
-          <div>
+          <div className="review-banner-icon">
+            <Icon name="alert-triangle" size={18} />
+          </div>
+          <div className="review-banner-content">
             <strong>Manual Review Required</strong>
             <p>
-              Parser ambiguity or potential extraction anomalies were detected.
-              Please inspect the highlighted fields and evidence references.
+              Parser quality signals identified potential formatting ambiguity or unconfirmed fields. Inspect highlighted records below.
             </p>
           </div>
         </div>
       )}
 
-      {/* Conflict / Error Banner */}
-      {errorMessage && (
-        <div className="feedback-box error" role="alert">
-          <p className="feedback-text error">{errorMessage}</p>
-          {conflictError && (
-            <div className="action-row" style={{ marginTop: "8px" }}>
-              <button
-                type="button"
-                onClick={handleReloadLatest}
-                className="btn btn-primary btn-sm"
-              >
-                🔄 Reload Latest Version
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Quality Warnings Breakdown */}
+      {/* Quality Warnings Breakdown (Grouped) */}
       {currentProfile.warnings.length > 0 && !isCorrectionMode && (
-        <div className="warning-breakdown-card">
-          <h3 className="section-subtitle">Extraction Quality &amp; Parser Warnings ({currentProfile.warnings.length})</h3>
-          <ul className="warning-list">
+        <div className="warnings-summary-card">
+          <div className="warnings-summary-header">
+            <Icon name="alert-triangle" size={15} className="text-amber" />
+            <h4 className="warnings-summary-title">
+              Review Items ({currentProfile.warnings.length})
+            </h4>
+          </div>
+          <div className="warnings-summary-grid">
             {currentProfile.warnings.map((w, idx) => (
-              <li key={idx} className="warning-item">
+              <div key={idx} className="warning-pill-item">
                 <span className="badge badge-review-warn">{w.code}</span>
-                <span className="warning-cat">[{w.category}]</span>
-                {w.fieldName && <span> Field: <strong>{w.fieldName}</strong></span>}
-                {w.message && <span> - {w.message}</span>}
-              </li>
+                <span className="warning-pill-text">
+                  {w.fieldName ? <strong>{w.fieldName}: </strong> : null}
+                  {w.message || w.category}
+                </span>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
-      {/* CORRECTION WORKFLOW FORM CONTAINER */}
+      {/* CANDIDATE HEADER HERO CARD */}
+      <div className="candidate-hero-card">
+        <div className="hero-left">
+          <div className="candidate-hero-avatar">
+            <span>{initials}</span>
+          </div>
+
+          <div className="hero-details">
+            <div className="hero-name-row">
+              <h1 className="candidate-hero-name">{fullNameStr}</h1>
+              <div className="hero-status-tags">
+                <span className={`badge ${isHumanCorrected ? "badge-provenance-corrected" : "badge-provenance-parser"}`}>
+                  {isHumanCorrected ? "Human Corrected" : "Parser Generated"}
+                </span>
+                <span className="badge badge-version">v{currentProfile.profileVersion}</span>
+              </div>
+            </div>
+
+            <p className="candidate-hero-headline">
+              {professionalProfile.headline?.value || "Professional Profile"}
+            </p>
+
+            {/* Quick Contact Links (Omitted if not present) */}
+            <div className="hero-contact-row">
+              {identity.location?.value && (
+                <span className="hero-contact-item">
+                  <Icon name="map-pin" size={14} />
+                  <span>{identity.location.value}</span>
+                </span>
+              )}
+
+              {identity.emails?.[0]?.value && (
+                <a href={`mailto:${identity.emails[0].value}`} className="hero-contact-link">
+                  <Icon name="mail" size={14} />
+                  <span>{identity.emails[0].value}</span>
+                </a>
+              )}
+
+              {identity.phoneNumbers?.[0]?.value && (
+                <a href={`tel:${identity.phoneNumbers[0].value}`} className="hero-contact-link">
+                  <Icon name="phone" size={14} />
+                  <span>{identity.phoneNumbers[0].value}</span>
+                </a>
+              )}
+
+              {identity.linkedin?.value && (
+                <a
+                  href={identity.linkedin.value.startsWith("http") ? identity.linkedin.value : `https://${identity.linkedin.value}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hero-contact-link"
+                >
+                  <Icon name="linkedin" size={14} />
+                  <span>LinkedIn</span>
+                </a>
+              )}
+
+              {identity.github?.value && (
+                <a
+                  href={identity.github.value.startsWith("http") ? identity.github.value : `https://${identity.github.value}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hero-contact-link"
+                >
+                  <Icon name="github" size={14} />
+                  <span>GitHub</span>
+                </a>
+              )}
+
+              {identity.portfolio?.value && (
+                <a
+                  href={identity.portfolio.value.startsWith("http") ? identity.portfolio.value : `https://${identity.portfolio.value}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hero-contact-link"
+                >
+                  <Icon name="globe" size={14} />
+                  <span>Portfolio</span>
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* AT-A-GLANCE SUMMARY METRICS BAR */}
+      <div className="at-a-glance-bar">
+        <div className="glance-metric-card">
+          <span className="glance-metric-value">{professionalProfile.skills?.length || 0}</span>
+          <span className="glance-metric-label">Skills Recognized</span>
+        </div>
+
+        <div className="glance-metric-card">
+          <span className="glance-metric-value">{professionalProfile.employment?.length || 0}</span>
+          <span className="glance-metric-label">Positions Held</span>
+        </div>
+
+        <div className="glance-metric-card">
+          <span className="glance-metric-value">{professionalProfile.education?.length || 0}</span>
+          <span className="glance-metric-label">Education Records</span>
+        </div>
+
+        <div className="glance-metric-card">
+          <span className="glance-metric-value">{professionalProfile.projects?.length || 0}</span>
+          <span className="glance-metric-label">Projects</span>
+        </div>
+
+        <div className="glance-metric-card">
+          <span className="glance-metric-value">{professionalProfile.certifications?.length || 0}</span>
+          <span className="glance-metric-label">Certifications</span>
+        </div>
+
+        <div className="glance-metric-card">
+          <span className={`glance-metric-status ${currentProfile.reviewRequired ? "status-warn" : "status-ok"}`}>
+            {currentProfile.reviewRequired ? "Needs Review" : "Verified"}
+          </span>
+          <span className="glance-metric-label">Profile Status</span>
+        </div>
+      </div>
+
+      {/* CORRECTION WORKFLOW PANEL */}
       {isCorrectionMode && (
-        <form onSubmit={handleSubmitCorrections} className="correction-mode-banner">
-          <div className="correction-mode-header">
+        <form onSubmit={handleSubmitCorrections} className="correction-workspace-card">
+          <div className="correction-card-header">
             <div>
-              <h3 className="correction-mode-title">Editing Candidate Profile (Drafting v{currentProfile.profileVersion + 1})</h3>
-              <p className="correction-mode-desc">
-                Review and update fields below. Corrected profiles create an immutable new version with an audit trail. Original extractions and previous profile versions remain untouched.
+              <div className="correction-badge-row">
+                <span className="badge badge-indigo">
+                  <Icon name="edit" size={13} className="badge-icon" />
+                  Correction Workspace
+                </span>
+                <span className="badge badge-neutral">Drafting Version {currentProfile.profileVersion + 1}</span>
+              </div>
+              <h2 className="correction-workspace-title">Audited Profile Correction</h2>
+              <p className="correction-workspace-desc">
+                Update extracted values below. Submitting applies an audited, immutable new version without mutating original document bytes or raw extraction blocks.
               </p>
             </div>
-            <div className="action-row">
+
+            <div className="correction-header-actions">
               <button
                 type="button"
                 onClick={() => setIsCorrectionMode(false)}
@@ -826,19 +956,27 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
                 Cancel
               </button>
               <button
+                type="button"
+                onClick={() => setShowDiffPreview((prev) => !prev)}
+                className="btn btn-secondary btn-sm"
+              >
+                <Icon name="eye" size={14} />
+                {showDiffPreview ? "Hide Changes" : `Review Changes (${totalOps.length})`}
+              </button>
+              <button
                 type="submit"
                 className="btn btn-primary btn-sm"
                 disabled={isSubmitting}
                 aria-busy={isSubmitting}
               >
-                {isSubmitting ? "Saving Version..." : "Submit Correction Batch"}
+                {isSubmitting ? "Saving Version..." : "Save Correction Batch"}
               </button>
             </div>
           </div>
 
-          {/* Audit Metadata Inputs */}
-          <div className="audit-reason-row">
-            <div className="form-group audit-field">
+          {/* Audit Reason & Reviewer Note Fields */}
+          <div className="audit-inputs-grid">
+            <div className="form-group">
               <label htmlFor="reason-category" className="field-label">
                 Correction Reason <span className="req-star">*</span>
               </label>
@@ -855,11 +993,11 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
                 <option value="DUPLICATE_RECORD">Duplicate Record</option>
                 <option value="INCORRECT_NORMALIZATION">Incorrect Normalization</option>
                 <option value="INCORRECT_DATE">Incorrect Date or Date Range</option>
-                <option value="OTHER">Other (Reviewer note mandatory)</option>
+                <option value="OTHER">Other Reason (Note required)</option>
               </select>
             </div>
 
-            <div className="form-group audit-field flex-grow">
+            <div className="form-group flex-grow">
               <label htmlFor="reviewer-note" className="field-label">
                 Reviewer Note {reasonCategory === "OTHER" && <span className="req-star">*</span>}
               </label>
@@ -867,7 +1005,11 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
                 id="reviewer-note"
                 type="text"
                 className="field-input"
-                placeholder={reasonCategory === "OTHER" ? "Explain the reason for this correction..." : "Optional audit note for this change batch"}
+                placeholder={
+                  reasonCategory === "OTHER"
+                    ? "Mandatory audit explanation for reason 'Other'..."
+                    : "Optional note describing context for this correction batch"
+                }
                 value={reviewerNote}
                 onChange={(e) => setReviewerNote(e.target.value)}
                 required={reasonCategory === "OTHER"}
@@ -875,521 +1017,582 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
             </div>
           </div>
 
-          {/* Pending Operations Count */}
-          {(operations.length > 0 || computeScalarOperations().length > 0) && (
-            <div className="pending-ops-bar">
-              <span>
-                <strong>{operations.length + computeScalarOperations().length}</strong> pending change(s) in draft.
-              </span>
+          {/* Before vs After Diff Preview */}
+          {showDiffPreview && (
+            <div className="diff-preview-panel">
+              <h4 className="diff-preview-title">Pending Modifications ({totalOps.length})</h4>
+              {totalOps.length === 0 ? (
+                <p className="diff-empty-text">No fields have been modified yet.</p>
+              ) : (
+                <div className="diff-items-list">
+                  {totalOps.map((op, i) => (
+                    <div key={i} className="diff-item-row">
+                      <span className="badge badge-neutral mono">{op.targetSection}</span>
+                      <span className="diff-op-type">{op.operationType}</span>
+                      {op.value && <span className="diff-val">&ldquo;{op.value}&rdquo;</span>}
+                      {op.recordPayload && (
+                        <span className="diff-val">
+                          {String(op.recordPayload.jobTitle || op.recordPayload.degree || "Structured Record")}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </form>
       )}
 
-      {/* 1. Identity & Contact Information (Visibly Separated) */}
-      <div className="profile-section-card identity-card">
-        <div className="section-card-header">
-          <span className="section-icon">👤</span>
-          <div>
-            <h3 className="section-title">Candidate Identity &amp; Contact Details</h3>
-            <p className="section-caption">Isolated from matcher-facing features</p>
-          </div>
-        </div>
-
-        <div className="identity-grid">
-          {/* Full Name */}
-          <div className="field-group">
-            <label htmlFor="input-full-name" className="field-label">Full Name</label>
-            {isCorrectionMode ? (
-              <input
-                id="input-full-name"
-                type="text"
-                className="field-input"
-                value={draftFullName}
-                onChange={(e) => setDraftFullName(e.target.value)}
-                placeholder="Candidate full name"
-              />
-            ) : (
-              <div className="field-value">{identity.fullName?.value || <span className="null-val">Not Detected</span>}</div>
-            )}
-            {identity.fullName?.confidence && !isCorrectionMode && (
-              <span className="badge badge-confidence">{(identity.fullName.confidence * 100).toFixed(0)}% conf</span>
-            )}
-            {!isCorrectionMode && renderEvidenceAccordion("identity-fullname", identity.fullName?.evidenceIds || [])}
-          </div>
-
-          {/* Primary Email */}
-          <div className="field-group">
-            <label htmlFor="input-primary-email" className="field-label">Primary Email</label>
-            {isCorrectionMode ? (
-              <input
-                id="input-primary-email"
-                type="email"
-                className="field-input"
-                value={draftEmail}
-                onChange={(e) => setDraftEmail(e.target.value)}
-                placeholder="name@example.com"
-              />
-            ) : (
-              <div className="field-value">
-                {identity.emails && identity.emails.length > 0 ? (
-                  identity.emails[0].value
-                ) : (
-                  <span className="null-val">Not Detected</span>
-                )}
+      {/* TWO-COLUMN CANDIDATE PROFILE WORKSPACE */}
+      <div className="profile-dashboard-layout">
+        {/* MAIN COLUMN (Summary, Experience, Projects) */}
+        <div className="dashboard-main-col">
+          {/* Professional Summary */}
+          <section className="profile-surface-card" aria-labelledby="section-summary-title">
+            <div className="card-header-row">
+              <div className="card-title-group">
+                <Icon name="file-text" size={17} className="card-icon" />
+                <h3 id="section-summary-title" className="card-title">Profile Summary</h3>
               </div>
-            )}
-            {!isCorrectionMode && identity.emails && identity.emails.length > 0 && renderEvidenceAccordion("identity-email-0", identity.emails[0].evidenceIds)}
-          </div>
+              {!isCorrectionMode && professionalProfile.summary?.value && (
+                <button
+                  type="button"
+                  className="btn-evidence-subtle"
+                  onClick={() =>
+                    openEvidenceInspector(
+                      "Profile Summary",
+                      professionalProfile.summary?.value,
+                      professionalProfile.summary?.evidenceIds || []
+                    )
+                  }
+                >
+                  <Icon name="search" size={13} /> Evidence
+                </button>
+              )}
+            </div>
 
-          {/* Primary Phone */}
-          <div className="field-group">
-            <label htmlFor="input-primary-phone" className="field-label">Phone Number</label>
             {isCorrectionMode ? (
-              <input
-                id="input-primary-phone"
-                type="tel"
-                className="field-input"
-                value={draftPhone}
-                onChange={(e) => setDraftPhone(e.target.value)}
-                placeholder="+1 555-0199"
+              <textarea
+                rows={3}
+                className="field-input textarea-input"
+                value={draftSummary}
+                onChange={(e) => setDraftSummary(e.target.value)}
+                placeholder="Professional career summary..."
               />
+            ) : professionalProfile.summary?.value ? (
+              <p className="summary-body-text">{professionalProfile.summary.value}</p>
             ) : (
-              <div className="field-value">
-                {identity.phoneNumbers && identity.phoneNumbers.length > 0 ? (
-                  identity.phoneNumbers[0].value
-                ) : (
-                  <span className="null-val">Not Detected</span>
-                )}
-              </div>
+              <p className="empty-field-text">No summary provided in candidate document.</p>
             )}
-            {!isCorrectionMode && identity.phoneNumbers && identity.phoneNumbers.length > 0 && renderEvidenceAccordion("identity-phone-0", identity.phoneNumbers[0].evidenceIds)}
-          </div>
+          </section>
 
-          {/* Location */}
-          <div className="field-group">
-            <label htmlFor="input-location" className="field-label">Location</label>
-            {isCorrectionMode ? (
-              <input
-                id="input-location"
-                type="text"
-                className="field-input"
-                value={draftLocation}
-                onChange={(e) => setDraftLocation(e.target.value)}
-                placeholder="City, State / Country"
-              />
-            ) : (
-              <div className="field-value">{identity.location?.value || <span className="null-val">Not Detected</span>}</div>
-            )}
-            {!isCorrectionMode && renderEvidenceAccordion("identity-location", identity.location?.evidenceIds || [])}
-          </div>
-
-          {/* LinkedIn */}
-          <div className="field-group">
-            <label htmlFor="input-linkedin" className="field-label">LinkedIn</label>
-            {isCorrectionMode ? (
-              <input
-                id="input-linkedin"
-                type="text"
-                className="field-input"
-                value={draftLinkedin}
-                onChange={(e) => setDraftLinkedin(e.target.value)}
-                placeholder="https://linkedin.com/in/username"
-              />
-            ) : (
-              <div className="field-value mono">
-                {identity.linkedin?.value ? (
-                  <a href={identity.linkedin.value.startsWith("http") ? identity.linkedin.value : `https://${identity.linkedin.value}`} target="_blank" rel="noreferrer" className="link-text">
-                    {identity.linkedin.value}
-                  </a>
-                ) : (
-                  <span className="null-val">Not Detected</span>
-                )}
+          {/* Employment History Timeline */}
+          <section className="profile-surface-card" aria-labelledby="section-experience-title">
+            <div className="card-header-row">
+              <div className="card-title-group">
+                <Icon name="briefcase" size={17} className="card-icon" />
+                <h3 id="section-experience-title" className="card-title">
+                  Experience ({professionalProfile.employment?.length || 0})
+                </h3>
               </div>
-            )}
-            {!isCorrectionMode && renderEvidenceAccordion("identity-linkedin", identity.linkedin?.evidenceIds || [])}
-          </div>
 
-          {/* GitHub */}
-          <div className="field-group">
-            <label htmlFor="input-github" className="field-label">GitHub</label>
-            {isCorrectionMode ? (
-              <input
-                id="input-github"
-                type="text"
-                className="field-input"
-                value={draftGithub}
-                onChange={(e) => setDraftGithub(e.target.value)}
-                placeholder="https://github.com/username"
-              />
-            ) : (
-              <div className="field-value mono">
-                {identity.github?.value ? (
-                  <a href={identity.github.value.startsWith("http") ? identity.github.value : `https://${identity.github.value}`} target="_blank" rel="noreferrer" className="link-text">
-                    {identity.github.value}
-                  </a>
-                ) : (
-                  <span className="null-val">Not Detected</span>
-                )}
-              </div>
-            )}
-            {!isCorrectionMode && renderEvidenceAccordion("identity-github", identity.github?.evidenceIds || [])}
-          </div>
+              {isCorrectionMode && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExpJobTitle("");
+                    setExpOrg("");
+                    setExpStart("");
+                    setExpEnd("");
+                    setExpBullets("");
+                    setEditingExperienceIndex("new");
+                  }}
+                  className="btn btn-secondary btn-xs"
+                >
+                  <Icon name="plus" size={13} /> Add Position
+                </button>
+              )}
+            </div>
 
-          {/* Portfolio */}
-          <div className="field-group">
-            <label htmlFor="input-portfolio" className="field-label">Portfolio / Web</label>
-            {isCorrectionMode ? (
-              <input
-                id="input-portfolio"
-                type="text"
-                className="field-input"
-                value={draftPortfolio}
-                onChange={(e) => setDraftPortfolio(e.target.value)}
-                placeholder="https://portfolio.me"
-              />
-            ) : (
-              <div className="field-value mono">
-                {identity.portfolio?.value ? (
-                  <a href={identity.portfolio.value.startsWith("http") ? identity.portfolio.value : `https://${identity.portfolio.value}`} target="_blank" rel="noreferrer" className="link-text">
-                    {identity.portfolio.value}
-                  </a>
-                ) : (
-                  <span className="null-val">Not Detected</span>
-                )}
-              </div>
-            )}
-            {!isCorrectionMode && renderEvidenceAccordion("identity-portfolio", identity.portfolio?.evidenceIds || [])}
-          </div>
-        </div>
-      </div>
+            {professionalProfile.employment && professionalProfile.employment.length > 0 ? (
+              <div className="employment-timeline">
+                {professionalProfile.employment.map((emp, i) => {
+                  const allEvIds = [
+                    ...(emp.jobTitle?.evidenceIds || []),
+                    ...(emp.organization?.evidenceIds || []),
+                    ...(emp.startDate?.evidenceIds || []),
+                    ...(emp.endDate?.evidenceIds || []),
+                    ...(emp.descriptions?.flatMap((d) => d.evidenceIds) || []),
+                  ];
 
-      {/* 2. Professional Headline & Summary */}
-      <div className="profile-section-card">
-        <div className="section-card-header">
-          <span className="section-icon">💼</span>
-          <h3 className="section-title">Headline &amp; Professional Summary</h3>
-        </div>
-
-        <div className="field-group" style={{ marginBottom: "16px" }}>
-          <label htmlFor="input-headline" className="field-label">Headline</label>
-          {isCorrectionMode ? (
-            <input
-              id="input-headline"
-              type="text"
-              className="field-input"
-              value={draftHeadline}
-              onChange={(e) => setDraftHeadline(e.target.value)}
-              placeholder="e.g. Senior Backend Engineer"
-            />
-          ) : (
-            <div className="field-value font-medium">{professionalProfile.headline?.value || <span className="null-val">Not Extracted</span>}</div>
-          )}
-          {!isCorrectionMode && renderEvidenceAccordion("prof-headline", professionalProfile.headline?.evidenceIds || [])}
-        </div>
-
-        <div className="field-group">
-          <label htmlFor="input-summary" className="field-label">Summary</label>
-          {isCorrectionMode ? (
-            <textarea
-              id="input-summary"
-              rows={3}
-              className="field-input textarea-input"
-              value={draftSummary}
-              onChange={(e) => setDraftSummary(e.target.value)}
-              placeholder="Professional summary..."
-            />
-          ) : (
-            <div className="field-value summary-text">{professionalProfile.summary?.value || <span className="null-val">Not Extracted</span>}</div>
-          )}
-          {!isCorrectionMode && renderEvidenceAccordion("prof-summary", professionalProfile.summary?.evidenceIds || [])}
-        </div>
-      </div>
-
-      {/* 3. Skills */}
-      <div className="profile-section-card">
-        <div className="section-card-header">
-          <span className="section-icon">⚡</span>
-          <h3 className="section-title">Skills ({professionalProfile.skills?.length || 0})</h3>
-        </div>
-
-        {isCorrectionMode && (
-          <div className="skill-add-row">
-            <input
-              type="text"
-              className="field-input"
-              placeholder="Type new skill and press Enter or click Add"
-              value={newSkillInput}
-              onChange={(e) => setNewSkillInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAddSkill(newSkillInput);
-                }
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => handleAddSkill(newSkillInput)}
-              className="btn btn-secondary btn-sm"
-            >
-              + Add Skill
-            </button>
-          </div>
-        )}
-
-        {professionalProfile.skills && professionalProfile.skills.length > 0 ? (
-          <div className="skills-cloud">
-            {professionalProfile.skills.map((sk, i) => (
-              <div key={i} className="skill-chip">
-                <span className="skill-label">{sk.value}</span>
-                {isCorrectionMode && (
-                  <button
-                    type="button"
-                    className="btn-chip-remove"
-                    title={`Remove ${sk.value}`}
-                    onClick={() => handleRemoveSkill(sk.value || "")}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <span className="null-val">No skills extracted</span>
-        )}
-      </div>
-
-      {/* 4. Employment Experience */}
-      <div className="profile-section-card">
-        <div className="section-card-header">
-          <span className="section-icon">🏢</span>
-          <h3 className="section-title">Experience &amp; Work History ({professionalProfile.employment?.length || 0})</h3>
-          {isCorrectionMode && (
-            <button
-              type="button"
-              onClick={() => {
-                setExpJobTitle("");
-                setExpOrg("");
-                setExpStart("");
-                setExpEnd("");
-                setExpBullets("");
-                setEditingExperienceIndex("new");
-              }}
-              className="btn btn-secondary btn-sm"
-              style={{ marginLeft: "auto" }}
-            >
-              + Add Position
-            </button>
-          )}
-        </div>
-
-        {professionalProfile.employment && professionalProfile.employment.length > 0 ? (
-          <div className="timeline-container">
-            {professionalProfile.employment.map((emp, i) => {
-              const allEmpEvIds = [
-                ...(emp.jobTitle?.evidenceIds || []),
-                ...(emp.organization?.evidenceIds || []),
-                ...(emp.startDate?.evidenceIds || []),
-                ...(emp.endDate?.evidenceIds || []),
-                ...(emp.descriptions?.flatMap((d) => d.evidenceIds) || []),
-              ];
-              return (
-                <div key={i} className="timeline-item">
-                  <div className="timeline-marker" />
-                  <div className="timeline-content">
-                    <div className="timeline-header-row">
-                      <h4 className="timeline-title">
-                        {emp.jobTitle?.value || "Role Not Specified"} &bull; {emp.organization?.value || "Organization Not Specified"}
-                      </h4>
-                      <span className="timeline-date">{renderDateInterval(emp.startDate, emp.endDate)}</span>
-                    </div>
-
-                    {emp.descriptions && emp.descriptions.length > 0 && (
-                      <ul className="timeline-bullets">
-                        {emp.descriptions.map((desc, di) => (
-                          <li key={di}>{desc.value}</li>
-                        ))}
-                      </ul>
-                    )}
-
-                    {isCorrectionMode && (
-                      <div className="action-row" style={{ marginTop: "10px" }}>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => {
-                            setExpJobTitle(emp.jobTitle?.value || "");
-                            setExpOrg(emp.organization?.value || "");
-                            setExpStart(emp.startDate?.value || "");
-                            setExpEnd(emp.endDate?.value || "");
-                            setExpBullets(emp.descriptions?.map((d) => d.value).join("\n") || "");
-                            setEditingExperienceIndex(i);
-                          }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm btn-danger"
-                          onClick={() => handleRemoveExperience(i)}
-                        >
-                          Delete
-                        </button>
+                  return (
+                    <div key={i} className="timeline-item-entry">
+                      <div className="timeline-spine">
+                        <div className="timeline-dot" />
+                        {i !== professionalProfile.employment.length - 1 && (
+                          <div className="timeline-connector" />
+                        )}
                       </div>
-                    )}
 
-                    {!isCorrectionMode && renderEvidenceAccordion(`emp-${i}`, allEmpEvIds)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <span className="null-val">No employment history extracted</span>
-        )}
-      </div>
+                      <div className="timeline-details">
+                        <div className="timeline-heading-row">
+                          <div>
+                            <h4 className="timeline-job-title">
+                              {emp.jobTitle?.value || "Position Title"}
+                            </h4>
+                            <span className="timeline-org-name">
+                              {emp.organization?.value || "Organization"}
+                            </span>
+                          </div>
 
-      {/* 5. Education */}
-      <div className="profile-section-card">
-        <div className="section-card-header">
-          <span className="section-icon">🎓</span>
-          <h3 className="section-title">Education ({professionalProfile.education?.length || 0})</h3>
-          {isCorrectionMode && (
-            <button
-              type="button"
-              onClick={() => {
-                setEduDegree("");
-                setEduField("");
-                setEduInst("");
-                setEduStart("");
-                setEduEnd("");
-                setEduGrade("");
-                setEditingEducationIndex("new");
-              }}
-              className="btn btn-secondary btn-sm"
-              style={{ marginLeft: "auto" }}
-            >
-              + Add Degree
-            </button>
-          )}
-        </div>
+                          <div className="timeline-meta-right">
+                            <span className="timeline-date-badge">
+                              {renderDateInterval(emp.startDate, emp.endDate)}
+                            </span>
 
-        {professionalProfile.education && professionalProfile.education.length > 0 ? (
-          <div className="education-grid">
-            {professionalProfile.education.map((edu, i) => {
-              const allEduEvIds = [
-                ...(edu.degree?.evidenceIds || []),
-                ...(edu.fieldOfStudy ? edu.fieldOfStudy.evidenceIds : []),
-                ...(edu.institution?.evidenceIds || []),
-                ...(edu.startDate?.evidenceIds || []),
-                ...(edu.endDate?.evidenceIds || []),
-                ...(edu.grade?.evidenceIds || []),
-              ];
-              return (
-                <div key={i} className="education-card">
-                  <h4 className="education-degree">
-                    {edu.degree?.value} {edu.fieldOfStudy?.value ? `in ${edu.fieldOfStudy.value}` : ""}
-                  </h4>
-                  <div className="education-inst">{edu.institution?.value}</div>
-                  <div className="education-dates">{renderDateInterval(edu.startDate, edu.endDate)}</div>
-                  {edu.grade?.value && <div className="education-grade">Grade/GPA: {edu.grade.value}</div>}
+                            {!isCorrectionMode && (
+                              <button
+                                type="button"
+                                className="btn-evidence-subtle"
+                                onClick={() =>
+                                  openEvidenceInspector(
+                                    `${emp.jobTitle?.value || "Position"} at ${emp.organization?.value || "Company"}`,
+                                    `${emp.jobTitle?.value} (${emp.organization?.value})`,
+                                    allEvIds
+                                  )
+                                }
+                              >
+                                <Icon name="search" size={13} /> Evidence
+                              </button>
+                            )}
+                          </div>
+                        </div>
 
-                  {isCorrectionMode && (
-                    <div className="action-row" style={{ marginTop: "10px" }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          setEduDegree(edu.degree?.value || "");
-                          setEduField(edu.fieldOfStudy?.value || "");
-                          setEduInst(edu.institution?.value || "");
-                          setEduStart(edu.startDate?.value || "");
-                          setEduEnd(edu.endDate?.value || "");
-                          setEduGrade(edu.grade?.value || "");
-                          setEditingEducationIndex(i);
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm btn-danger"
-                        onClick={() => handleRemoveEducation(i)}
-                      >
-                        Delete
-                      </button>
+                        {emp.descriptions && emp.descriptions.length > 0 && (
+                          <ul className="timeline-achievement-list">
+                            {emp.descriptions.map((desc, di) => (
+                              <li key={di}>{desc.value}</li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {isCorrectionMode && (
+                          <div className="timeline-edit-actions">
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-xs"
+                              onClick={() => {
+                                setExpJobTitle(emp.jobTitle?.value || "");
+                                setExpOrg(emp.organization?.value || "");
+                                setExpStart(emp.startDate?.value || "");
+                                setExpEnd(emp.endDate?.value || "");
+                                setExpBullets(emp.descriptions?.map((d) => d.value).join("\n") || "");
+                                setEditingExperienceIndex(i);
+                              }}
+                            >
+                              <Icon name="edit" size={12} /> Edit Position
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-xs btn-danger"
+                              onClick={() => handleRemoveExperience(i)}
+                            >
+                              <Icon name="trash" size={12} /> Remove
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="empty-field-text">No employment history detected.</p>
+            )}
+          </section>
 
-                  {!isCorrectionMode && renderEvidenceAccordion(`edu-${i}`, allEduEvIds)}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <span className="null-val">No education records extracted</span>
-        )}
-      </div>
+          {/* Projects */}
+          <section className="profile-surface-card" aria-labelledby="section-projects-title">
+            <div className="card-header-row">
+              <div className="card-title-group">
+                <Icon name="layers" size={17} className="card-icon" />
+                <h3 id="section-projects-title" className="card-title">
+                  Projects ({professionalProfile.projects?.length || 0})
+                </h3>
+              </div>
+            </div>
 
-      {/* 6. Languages */}
-      <div className="profile-section-card">
-        <div className="section-card-header">
-          <span className="section-icon">🌐</span>
-          <h3 className="section-title">Languages ({professionalProfile.languages?.length || 0})</h3>
+            {professionalProfile.projects && professionalProfile.projects.length > 0 ? (
+              <div className="projects-grid">
+                {professionalProfile.projects.map((proj, i) => {
+                  const allProjEvIds = [
+                    ...(proj.name?.evidenceIds || []),
+                    ...(proj.description?.evidenceIds || []),
+                    ...(proj.technologies?.flatMap((t) => t.evidenceIds) || []),
+                  ];
+
+                  return (
+                    <div key={i} className="project-display-card">
+                      <div className="project-header-row">
+                        <h4 className="project-display-name">{proj.name?.value || "Project"}</h4>
+                        {!isCorrectionMode && (
+                          <button
+                            type="button"
+                            className="btn-evidence-subtle"
+                            onClick={() =>
+                              openEvidenceInspector(
+                                proj.name?.value || "Project",
+                                proj.description?.value,
+                                allProjEvIds
+                              )
+                            }
+                          >
+                            <Icon name="search" size={13} /> Evidence
+                          </button>
+                        )}
+                      </div>
+
+                      {proj.description?.value && (
+                        <p className="project-display-desc">{proj.description.value}</p>
+                      )}
+
+                      {proj.technologies && proj.technologies.length > 0 && (
+                        <div className="project-tech-cloud">
+                          {proj.technologies.map((t, ti) => (
+                            <span key={ti} className="tech-chip">{t.value}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {proj.projectUrl?.value && (
+                        <a
+                          href={proj.projectUrl.value.startsWith("http") ? proj.projectUrl.value : `https://${proj.projectUrl.value}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="project-display-link"
+                        >
+                          <Icon name="external-link" size={13} />
+                          <span>{proj.projectUrl.value}</span>
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="empty-field-text">No technical projects extracted.</p>
+            )}
+          </section>
         </div>
 
-        {isCorrectionMode && (
-          <div className="skill-add-row">
-            <input
-              type="text"
-              className="field-input"
-              placeholder="Type language and press Enter"
-              value={newLangInput}
-              onChange={(e) => setNewLangInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAddLanguage(newLangInput);
-                }
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => handleAddLanguage(newLangInput)}
-              className="btn btn-secondary btn-sm"
-            >
-              + Add Language
-            </button>
-          </div>
-        )}
+        {/* SUPPORTING COLUMN (Skills, Education, Certifications, Languages, Contact) */}
+        <div className="dashboard-side-col">
+          {/* Skills */}
+          <section className="profile-surface-card" aria-labelledby="section-skills-title">
+            <div className="card-header-row">
+              <div className="card-title-group">
+                <Icon name="sparkles" size={17} className="card-icon" />
+                <h3 id="section-skills-title" className="card-title">
+                  Skills ({professionalProfile.skills?.length || 0})
+                </h3>
+              </div>
 
-        {professionalProfile.languages && professionalProfile.languages.length > 0 ? (
-          <ul className="lang-list">
-            {professionalProfile.languages.map((l, i) => {
-              const hasProficiency = l.normalizedValue && l.normalizedValue.toLowerCase() !== l.value?.toLowerCase();
-              return (
-                <li key={i} className="lang-item">
-                  <span className="lang-name">{l.value}</span>
-                  {hasProficiency && <span className="badge badge-index">{l.normalizedValue}</span>}
-                  {isCorrectionMode && (
-                    <button
-                      type="button"
-                      className="btn-chip-remove"
-                      onClick={() => handleRemoveLanguage(l.value || "")}
-                    >
-                      ×
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <span className="null-val">No languages extracted</span>
-        )}
+              {!isCorrectionMode && professionalProfile.skills?.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-evidence-subtle"
+                  onClick={() => {
+                    const allSkillEvs = professionalProfile.skills.flatMap((s) => s.evidenceIds);
+                    openEvidenceInspector("Skills Inventory", `${professionalProfile.skills.length} skills recognized`, allSkillEvs);
+                  }}
+                >
+                  <Icon name="search" size={13} /> Evidence
+                </button>
+              )}
+            </div>
+
+            {isCorrectionMode && (
+              <div className="skill-input-row">
+                <input
+                  type="text"
+                  className="field-input"
+                  placeholder="Type new skill and press Enter..."
+                  value={newSkillInput}
+                  onChange={(e) => setNewSkillInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddSkill(newSkillInput);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddSkill(newSkillInput)}
+                  className="btn btn-secondary btn-sm"
+                >
+                  <Icon name="plus" size={13} /> Add
+                </button>
+              </div>
+            )}
+
+            {professionalProfile.skills && professionalProfile.skills.length > 0 ? (
+              <div className="skills-chip-cloud">
+                {professionalProfile.skills.map((sk, i) => (
+                  <div key={i} className="skill-badge-chip">
+                    <span>{sk.value}</span>
+                    {isCorrectionMode ? (
+                      <button
+                        type="button"
+                        className="chip-remove-btn"
+                        onClick={() => handleRemoveSkill(sk.value || "")}
+                        aria-label={`Remove ${sk.value}`}
+                      >
+                        <Icon name="x" size={12} />
+                      </button>
+                    ) : sk.evidenceIds && sk.evidenceIds.length > 0 ? (
+                      <button
+                        type="button"
+                        className="chip-evidence-btn"
+                        onClick={() => openEvidenceInspector(`Skill: ${sk.value}`, sk.value, sk.evidenceIds)}
+                        title="View evidence"
+                        aria-label={`View evidence for ${sk.value}`}
+                      >
+                        <Icon name="search" size={11} />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-field-text">No technical skills detected.</p>
+            )}
+          </section>
+
+          {/* Education */}
+          <section className="profile-surface-card" aria-labelledby="section-education-title">
+            <div className="card-header-row">
+              <div className="card-title-group">
+                <Icon name="academic-cap" size={17} className="card-icon" />
+                <h3 id="section-education-title" className="card-title">
+                  Education ({professionalProfile.education?.length || 0})
+                </h3>
+              </div>
+
+              {isCorrectionMode && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEduDegree("");
+                    setEduField("");
+                    setEduInst("");
+                    setEduStart("");
+                    setEduEnd("");
+                    setEduGrade("");
+                    setEditingEducationIndex("new");
+                  }}
+                  className="btn btn-secondary btn-xs"
+                >
+                  <Icon name="plus" size={13} /> Add Degree
+                </button>
+              )}
+            </div>
+
+            {professionalProfile.education && professionalProfile.education.length > 0 ? (
+              <div className="education-stack">
+                {professionalProfile.education.map((edu, i) => {
+                  const allEduEvs = [
+                    ...(edu.degree?.evidenceIds || []),
+                    ...(edu.institution?.evidenceIds || []),
+                    ...(edu.startDate?.evidenceIds || []),
+                    ...(edu.endDate?.evidenceIds || []),
+                  ];
+
+                  return (
+                    <div key={i} className="education-entry-card">
+                      <div className="education-entry-header">
+                        <div>
+                          <h4 className="education-entry-degree">
+                            {edu.degree?.value} {edu.fieldOfStudy?.value ? `in ${edu.fieldOfStudy.value}` : ""}
+                          </h4>
+                          <span className="education-entry-school">{edu.institution?.value}</span>
+                        </div>
+
+                        {!isCorrectionMode && (
+                          <button
+                            type="button"
+                            className="btn-evidence-subtle"
+                            onClick={() =>
+                              openEvidenceInspector(
+                                `${edu.degree?.value} at ${edu.institution?.value}`,
+                                `${edu.degree?.value} (${edu.institution?.value})`,
+                                allEduEvs
+                              )
+                            }
+                          >
+                            <Icon name="search" size={13} />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="education-entry-footer">
+                        <span className="education-date-text">
+                          {renderDateInterval(edu.startDate, edu.endDate)}
+                        </span>
+                        {edu.grade?.value && (
+                          <span className="education-gpa-badge">GPA: {edu.grade.value}</span>
+                        )}
+                      </div>
+
+                      {isCorrectionMode && (
+                        <div className="timeline-edit-actions">
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            onClick={() => {
+                              setEduDegree(edu.degree?.value || "");
+                              setEduField(edu.fieldOfStudy?.value || "");
+                              setEduInst(edu.institution?.value || "");
+                              setEduStart(edu.startDate?.value || "");
+                              setEduEnd(edu.endDate?.value || "");
+                              setEduGrade(edu.grade?.value || "");
+                              setEditingEducationIndex(i);
+                            }}
+                          >
+                            <Icon name="edit" size={12} /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs btn-danger"
+                            onClick={() => handleRemoveEducation(i)}
+                          >
+                            <Icon name="trash" size={12} /> Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="empty-field-text">No education records extracted.</p>
+            )}
+          </section>
+
+          {/* Certifications */}
+          <section className="profile-surface-card" aria-labelledby="section-certifications-title">
+            <div className="card-header-row">
+              <div className="card-title-group">
+                <Icon name="badge-check" size={17} className="card-icon" />
+                <h3 id="section-certifications-title" className="card-title">
+                  Certifications ({professionalProfile.certifications?.length || 0})
+                </h3>
+              </div>
+            </div>
+
+            {professionalProfile.certifications && professionalProfile.certifications.length > 0 ? (
+              <div className="cert-stack">
+                {professionalProfile.certifications.map((cert, i) => (
+                  <div key={i} className="cert-entry-card">
+                    <h4 className="cert-entry-name">{cert.name?.value}</h4>
+                    {cert.issuer?.value && <span className="cert-entry-issuer">{cert.issuer.value}</span>}
+                    {cert.issuedDate?.value && (
+                      <span className="cert-entry-date">Issued: {cert.issuedDate.value}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-field-text">No certifications found.</p>
+            )}
+          </section>
+
+          {/* Languages */}
+          <section className="profile-surface-card" aria-labelledby="section-languages-title">
+            <div className="card-header-row">
+              <div className="card-title-group">
+                <Icon name="globe" size={17} className="card-icon" />
+                <h3 id="section-languages-title" className="card-title">
+                  Languages ({professionalProfile.languages?.length || 0})
+                </h3>
+              </div>
+            </div>
+
+            {isCorrectionMode && (
+              <div className="skill-input-row">
+                <input
+                  type="text"
+                  className="field-input"
+                  placeholder="Type language..."
+                  value={newLangInput}
+                  onChange={(e) => setNewLangInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddLanguage(newLangInput);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddLanguage(newLangInput)}
+                  className="btn btn-secondary btn-sm"
+                >
+                  <Icon name="plus" size={13} /> Add
+                </button>
+              </div>
+            )}
+
+            {professionalProfile.languages && professionalProfile.languages.length > 0 ? (
+              <div className="languages-stack">
+                {professionalProfile.languages.map((l, i) => {
+                  const profText = formatLanguageProficiency(l.normalizedValue, l.value);
+                  return (
+                    <div key={i} className="language-entry-row">
+                      <span className="language-name">{l.value}</span>
+                      {profText && profText !== l.value && (
+                        <span className="language-prof-badge">{profText}</span>
+                      )}
+                      {isCorrectionMode && (
+                        <button
+                          type="button"
+                          className="chip-remove-btn"
+                          onClick={() => handleRemoveLanguage(l.value || "")}
+                        >
+                          <Icon name="x" size={12} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="empty-field-text">No languages extracted.</p>
+            )}
+          </section>
+        </div>
       </div>
+
+      {/* Slide-over Evidence Drawer */}
+      <EvidenceDrawer
+        isOpen={evidenceDrawerState.isOpen}
+        onClose={() => setEvidenceDrawerState((prev) => ({ ...prev, isOpen: false }))}
+        fieldLabel={evidenceDrawerState.fieldLabel}
+        fieldValue={evidenceDrawerState.fieldValue}
+        evidenceIds={evidenceDrawerState.evidenceIds}
+        evidenceMap={evidenceMap}
+        rawBlocks={extraction?.blocks || []}
+      />
+
+      {/* Version History Drawer */}
+      <VersionHistoryDrawer
+        isOpen={isHistoryDrawerOpen}
+        onClose={() => setIsHistoryDrawerOpen(false)}
+        historyList={historyList}
+        currentVersion={selectedVersion}
+        onSelectVersion={handleSelectVersion}
+      />
 
       {/* EDIT EXPERIENCE RECORD MODAL */}
       {editingExperienceIndex !== null && (
@@ -1449,7 +1652,7 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
                 className="field-input textarea-input"
                 value={expBullets}
                 onChange={(e) => setExpBullets(e.target.value)}
-                placeholder="• Designed microservices..."
+                placeholder="• Designed distributed backend services..."
               />
             </div>
             <div className="action-row modal-actions">
@@ -1486,7 +1689,7 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
                 className="field-input"
                 value={eduDegree}
                 onChange={(e) => setEduDegree(e.target.value)}
-                placeholder="e.g. Bachelor of Technology"
+                placeholder="e.g. Bachelor of Science"
                 required
               />
             </div>
@@ -1540,7 +1743,7 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
                 className="field-input"
                 value={eduGrade}
                 onChange={(e) => setEduGrade(e.target.value)}
-                placeholder="e.g. 3.9 GPA"
+                placeholder="e.g. 3.8 GPA"
               />
             </div>
             <div className="action-row modal-actions">
@@ -1562,74 +1765,6 @@ export function CandidateProfileReview({ profile: initialProfile, onReset }: Can
           </div>
         </div>
       )}
-
-      {/* AUDIT HISTORY MODAL */}
-      {showHistoryModal && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-history-title">
-          <div className="modal-content modal-history">
-            <div className="modal-header-row">
-              <h3 id="modal-history-title" className="modal-title">Profile Version &amp; Audit History</h3>
-              <button
-                type="button"
-                className="btn-modal-close"
-                onClick={() => setShowHistoryModal(false)}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="history-timeline-list">
-              {historyList.map((h) => (
-                <div
-                  key={h.profileVersion}
-                  className={`history-card ${h.profileVersion === selectedVersion ? "active-version" : ""}`}
-                >
-                  <div className="history-card-header">
-                    <span className="badge badge-version">Version {h.profileVersion}</span>
-                    <span className={`badge ${h.provenance === "HUMAN_CORRECTED" ? "badge-provenance-corrected" : "badge-provenance-parser"}`}>
-                      {h.provenance}
-                    </span>
-                    <span className="history-timestamp">{new Date(h.createdAt).toLocaleString()}</span>
-                  </div>
-
-                  {h.parentProfileVersion && (
-                    <div className="history-meta">
-                      Parent Version: <strong>v{h.parentProfileVersion}</strong>
-                    </div>
-                  )}
-
-                  {h.correctionSummary && (
-                    <div className="history-correction-box">
-                      <div>Reason: <strong>{h.correctionSummary.reasonCategory}</strong></div>
-                      {h.correctionSummary.reviewerNote && (
-                        <div>Note: <em>&ldquo;{h.correctionSummary.reviewerNote}&rdquo;</em></div>
-                      )}
-                      <div>Operations: {h.correctionSummary.operationCount} change(s)</div>
-                    </div>
-                  )}
-
-                  <div className="action-row" style={{ marginTop: "8px" }}>
-                    {h.profileVersion !== selectedVersion ? (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          handleSelectVersion(h.profileVersion);
-                          setShowHistoryModal(false);
-                        }}
-                      >
-                        Inspect Version v{h.profileVersion}
-                      </button>
-                    ) : (
-                      <span className="badge badge-index">Currently Viewing</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
+    </div>
   );
 }

@@ -97,6 +97,33 @@ class MockDBSession:
     def close(self):
         self.closed = True
 
+    def execute(self, statement, *args, **kwargs):
+        class MockResult:
+            def __init__(self, records):
+                self._records = records
+
+            def scalars(self):
+                return self
+
+            def all(self):
+                return self._records
+
+            def first(self):
+                return self._records[0] if self._records else None
+
+            def scalar_one_or_none(self):
+                return self._records[0] if self._records else None
+
+        from app.models.resume import ResumeArtifact
+        from app.models.candidate import CandidateProfileRecord
+
+        stmt_str = str(statement).lower()
+        if "candidate_profiles" in stmt_str:
+            records = [r for r in self.added_records if isinstance(r, CandidateProfileRecord)]
+        else:
+            records = [r for r in self.added_records if isinstance(r, ResumeArtifact)]
+        return MockResult(records)
+
 
 @pytest.fixture
 def mock_db_session():
@@ -631,4 +658,33 @@ def test_upload_reportlab_pdf_with_trans_and_ascii85_endpoint_success(test_clien
     assert "artifactId" in data
     assert "jobId" in data
     assert data["status"] == "QUEUED"
+
+
+def test_list_candidate_resumes_endpoint(test_client):
+    """GET /api/v1/resumes returns list of candidates with correct status and metadata."""
+    client, intake_dir, quarantine_dir, db_session, _ = test_client
+
+    # Add a mock artifact
+    from datetime import datetime, timezone
+    art = ResumeArtifact(
+        artifact_id=uuid.uuid4(),
+        original_filename="sample_candidate.pdf",
+        declared_mime_type="application/pdf",
+        size_bytes=1234,
+        sha256_hash="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        detected_format=ArtifactFormat.pdf,
+        validation_status=ArtifactValidationStatus.VALIDATED,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(art)
+
+    resp = client.get("/api/v1/resumes")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert isinstance(items, list)
+    assert len(items) >= 1
+    found = next((i for i in items if i["artifactId"] == str(art.artifact_id)), None)
+    assert found is not None
+    assert found["originalFilename"] == "sample_candidate.pdf"
+    assert found["validationStatus"] == "VALIDATED"
 

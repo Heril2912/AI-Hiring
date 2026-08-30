@@ -90,3 +90,23 @@ class ResumeUploadErrorDetail(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
+
+
+class CandidateListItemResponse(BaseModel):
+    artifact_id: UUID
+    original_filename: str
+    detected_format: Optional[ArtifactFormat] = None
+    validation_status: ArtifactValidationStatus
+    created_at: str
+    has_extraction: bool
+    latest_profile_version: Optional[int] = None
+    full_name: Optional[str] = None
+    headline: Optional[str] = None
+    review_required: bool = False
+    provenance: Optional[str] = None
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )

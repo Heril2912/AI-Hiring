@@ -29,6 +29,7 @@ from app.schemas.correction import (
 )
 from app.schemas.profile_assembly import CandidateProfileResponse
 from app.schemas.resume import (
+    CandidateListItemResponse,
     ResumeExtractionBlockResponse,
     ResumeExtractionResponse,
     ResumeProcessResponse,
@@ -904,5 +905,85 @@ async def correct_candidate_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": "CORRECTION_FAILED", "message": "Failed to apply profile correction."},
+        )
+
+
+@router.get(
+    "",
+    response_model=list[CandidateListItemResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List Candidate Resumes",
+    description="Returns recent candidate resume documents and their latest profile status for the recruiter workspace.",
+)
+async def list_candidate_resumes(
+    db: Session = Depends(get_db),
+) -> list[CandidateListItemResponse]:
+    try:
+        from app.models.candidate import CandidateProfileRecord
+
+        stmt_art = select(ResumeArtifact).options(selectinload(ResumeArtifact.extraction)).order_by(ResumeArtifact.created_at.desc())
+        artifacts = db.execute(stmt_art).scalars().all()
+
+        results = []
+        for art in artifacts:
+            has_ext = getattr(art, "extraction", None) is not None
+            
+            stmt_prof = (
+                select(CandidateProfileRecord)
+                .options(selectinload(CandidateProfileRecord.identity))
+                .where(CandidateProfileRecord.artifact_id == art.artifact_id)
+                .order_by(CandidateProfileRecord.profile_version.desc())
+            )
+            latest_prof = db.execute(stmt_prof).scalars().first()
+
+            full_name = None
+            headline = None
+            rev_req = False
+            prov = None
+            latest_v = None
+
+            if latest_prof:
+                latest_v = latest_prof.profile_version
+                rev_req = latest_prof.review_required
+                prov = latest_prof.provenance
+                if latest_prof.identity:
+                    full_name = latest_prof.identity.full_name
+                if latest_prof.professional_profile:
+                    hl_obj = latest_prof.professional_profile.get("headline")
+                    if isinstance(hl_obj, dict):
+                        headline = hl_obj.get("value")
+            elif getattr(art, "extraction", None):
+                rev_req = art.extraction.review_required
+
+            created_at_str = ""
+            if hasattr(art, "created_at") and art.created_at:
+                created_at_str = art.created_at.isoformat() if hasattr(art.created_at, "isoformat") else str(art.created_at)
+
+            results.append(
+                CandidateListItemResponse(
+                    artifact_id=art.artifact_id,
+                    original_filename=art.original_filename,
+                    detected_format=art.detected_format,
+                    validation_status=art.validation_status,
+                    created_at=created_at_str,
+                    has_extraction=has_ext,
+                    latest_profile_version=latest_v,
+                    full_name=full_name,
+                    headline=headline,
+                    review_required=rev_req,
+                    provenance=prov,
+                )
+            )
+        return results
+
+    except SQLAlchemyError as e:
+        logger.error(
+            "Database error listing candidate resumes",
+            exc_info=True,
+            extra={"error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Database service is currently unavailable."},
         )
 
