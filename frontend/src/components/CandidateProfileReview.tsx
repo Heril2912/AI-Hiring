@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { EvidenceDrawer } from "./EvidenceDrawer";
 import { VersionHistoryDrawer, ProfileSummary } from "./VersionHistoryDrawer";
+import { ReviewDrawer } from "./ReviewDrawer";
 import { ExtractionResultData } from "./ExtractionReview";
 
 export type ExtractedField = {
@@ -89,7 +90,7 @@ export type ProfileWarning = {
   message?: string | null;
   fieldName?: string | null;
   count?: number | null;
-  evidenceId?: string | null;
+  evidence_id?: string | null;
 };
 
 export type CandidateProfileData = {
@@ -148,6 +149,7 @@ export function CandidateProfileReview({
 
   // Drawers
   const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] = useState<boolean>(false);
+  const [isReviewDrawerOpen, setIsReviewDrawerOpen] = useState<boolean>(false);
   const [evidenceDrawerState, setEvidenceDrawerState] = useState<{
     isOpen: boolean;
     fieldLabel: string;
@@ -612,6 +614,32 @@ export function CandidateProfileReview({
     });
   };
 
+  const handleNavigateToSection = (sectionKey: string) => {
+    const sectionMap: Record<string, string> = {
+      summary: "section-summary-title",
+      skills: "section-skills-title",
+      employment: "section-experience-title",
+      education: "section-education-title",
+      projects: "section-projects-title",
+      certifications: "section-certifications-title",
+      languages: "section-languages-title",
+      identity: "candidate-hero-name",
+    };
+    const elemId = sectionMap[sectionKey] || "section-summary-title";
+    const elem = document.getElementById(elemId);
+    if (elem) {
+      elem.scrollIntoView({ behavior: "smooth", block: "center" });
+      const card = elem.closest(".profile-surface-card") || elem.closest(".candidate-hero-card");
+      if (card) {
+        card.classList.add("target-section-highlight");
+        setTimeout(() => {
+          card.classList.remove("target-section-highlight");
+        }, 2500);
+      }
+      elem.focus?.();
+    }
+  };
+
   const getInitials = (name?: string | null) => {
     if (!name || !name.trim()) return "??";
     const parts = name.trim().split(/\s+/);
@@ -659,6 +687,7 @@ export function CandidateProfileReview({
   const initials = getInitials(fullNameStr);
 
   const totalOps = [...computeScalarOperations(), ...operations];
+  const warningCount = currentProfile.warnings?.length || 0;
 
   return (
     <div className="candidate-workspace-container">
@@ -691,6 +720,20 @@ export function CandidateProfileReview({
                 ))}
               </select>
             </div>
+          )}
+
+          {/* Compact Review Items Action */}
+          {warningCount > 0 && !isCorrectionMode && (
+            <button
+              type="button"
+              onClick={() => setIsReviewDrawerOpen(true)}
+              className="btn btn-warning-action btn-sm"
+              aria-label={`Open ${warningCount} profile review items`}
+            >
+              <Icon name="alert-triangle" size={14} className="text-amber" />
+              <span>Review Items</span>
+              <span className="warning-count-pill">{warningCount}</span>
+            </button>
           )}
 
           {!isCorrectionMode && isLatestVersion && (
@@ -770,44 +813,6 @@ export function CandidateProfileReview({
         </div>
       )}
 
-      {/* Manual Review Required Banner */}
-      {currentProfile.reviewRequired && !isHumanCorrected && !isCorrectionMode && (
-        <div className="review-required-banner" role="alert">
-          <div className="review-banner-icon">
-            <Icon name="alert-triangle" size={18} />
-          </div>
-          <div className="review-banner-content">
-            <strong>Manual Review Required</strong>
-            <p>
-              Parser quality signals identified potential formatting ambiguity or unconfirmed fields. Inspect highlighted records below.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Quality Warnings Breakdown (Grouped) */}
-      {currentProfile.warnings.length > 0 && !isCorrectionMode && (
-        <div className="warnings-summary-card">
-          <div className="warnings-summary-header">
-            <Icon name="alert-triangle" size={15} className="text-amber" />
-            <h4 className="warnings-summary-title">
-              Review Items ({currentProfile.warnings.length})
-            </h4>
-          </div>
-          <div className="warnings-summary-grid">
-            {currentProfile.warnings.map((w, idx) => (
-              <div key={idx} className="warning-pill-item">
-                <span className="badge badge-review-warn">{w.code}</span>
-                <span className="warning-pill-text">
-                  {w.fieldName ? <strong>{w.fieldName}: </strong> : null}
-                  {w.message || w.category}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* CANDIDATE HEADER HERO CARD */}
       <div className="candidate-hero-card">
         <div className="hero-left">
@@ -817,12 +822,17 @@ export function CandidateProfileReview({
 
           <div className="hero-details">
             <div className="hero-name-row">
-              <h1 className="candidate-hero-name">{fullNameStr}</h1>
+              <h1 id="candidate-hero-name" className="candidate-hero-name" tabIndex={-1}>
+                {fullNameStr}
+              </h1>
               <div className="hero-status-tags">
                 <span className={`badge ${isHumanCorrected ? "badge-provenance-corrected" : "badge-provenance-parser"}`}>
                   {isHumanCorrected ? "Human Corrected" : "Parser Generated"}
                 </span>
                 <span className="badge badge-version">v{currentProfile.profileVersion}</span>
+                {currentProfile.reviewRequired && !isHumanCorrected && (
+                  <span className="badge badge-review-warn">Needs Review</span>
+                )}
               </div>
             </div>
 
@@ -922,7 +932,7 @@ export function CandidateProfileReview({
 
         <div className="glance-metric-card">
           <span className={`glance-metric-status ${currentProfile.reviewRequired ? "status-warn" : "status-ok"}`}>
-            {currentProfile.reviewRequired ? "Needs Review" : "Verified"}
+            {currentProfile.reviewRequired ? "Needs Review" : "Reviewed"}
           </span>
           <span className="glance-metric-label">Profile Status</span>
         </div>
@@ -1053,7 +1063,7 @@ export function CandidateProfileReview({
             <div className="card-header-row">
               <div className="card-title-group">
                 <Icon name="file-text" size={17} className="card-icon" />
-                <h3 id="section-summary-title" className="card-title">Profile Summary</h3>
+                <h3 id="section-summary-title" className="card-title" tabIndex={-1}>Profile Summary</h3>
               </div>
               {!isCorrectionMode && professionalProfile.summary?.value && (
                 <button
@@ -1092,7 +1102,7 @@ export function CandidateProfileReview({
             <div className="card-header-row">
               <div className="card-title-group">
                 <Icon name="briefcase" size={17} className="card-icon" />
-                <h3 id="section-experience-title" className="card-title">
+                <h3 id="section-experience-title" className="card-title" tabIndex={-1}>
                   Experience ({professionalProfile.employment?.length || 0})
                 </h3>
               </div>
@@ -1217,7 +1227,7 @@ export function CandidateProfileReview({
             <div className="card-header-row">
               <div className="card-title-group">
                 <Icon name="layers" size={17} className="card-icon" />
-                <h3 id="section-projects-title" className="card-title">
+                <h3 id="section-projects-title" className="card-title" tabIndex={-1}>
                   Projects ({professionalProfile.projects?.length || 0})
                 </h3>
               </div>
@@ -1293,7 +1303,7 @@ export function CandidateProfileReview({
             <div className="card-header-row">
               <div className="card-title-group">
                 <Icon name="sparkles" size={17} className="card-icon" />
-                <h3 id="section-skills-title" className="card-title">
+                <h3 id="section-skills-title" className="card-title" tabIndex={-1}>
                   Skills ({professionalProfile.skills?.length || 0})
                 </h3>
               </div>
@@ -1375,7 +1385,7 @@ export function CandidateProfileReview({
             <div className="card-header-row">
               <div className="card-title-group">
                 <Icon name="academic-cap" size={17} className="card-icon" />
-                <h3 id="section-education-title" className="card-title">
+                <h3 id="section-education-title" className="card-title" tabIndex={-1}>
                   Education ({professionalProfile.education?.length || 0})
                 </h3>
               </div>
@@ -1485,7 +1495,7 @@ export function CandidateProfileReview({
             <div className="card-header-row">
               <div className="card-title-group">
                 <Icon name="badge-check" size={17} className="card-icon" />
-                <h3 id="section-certifications-title" className="card-title">
+                <h3 id="section-certifications-title" className="card-title" tabIndex={-1}>
                   Certifications ({professionalProfile.certifications?.length || 0})
                 </h3>
               </div>
@@ -1513,7 +1523,7 @@ export function CandidateProfileReview({
             <div className="card-header-row">
               <div className="card-title-group">
                 <Icon name="globe" size={17} className="card-icon" />
-                <h3 id="section-languages-title" className="card-title">
+                <h3 id="section-languages-title" className="card-title" tabIndex={-1}>
                   Languages ({professionalProfile.languages?.length || 0})
                 </h3>
               </div>
@@ -1592,6 +1602,16 @@ export function CandidateProfileReview({
         historyList={historyList}
         currentVersion={selectedVersion}
         onSelectVersion={handleSelectVersion}
+      />
+
+      {/* Review Items Drawer */}
+      <ReviewDrawer
+        isOpen={isReviewDrawerOpen}
+        onClose={() => setIsReviewDrawerOpen(false)}
+        warnings={currentProfile.warnings}
+        onNavigateToSection={handleNavigateToSection}
+        onOpenEvidence={(evId, label) => openEvidenceInspector(label, null, [evId])}
+        onStartCorrection={startCorrectionMode}
       />
 
       {/* EDIT EXPERIENCE RECORD MODAL */}

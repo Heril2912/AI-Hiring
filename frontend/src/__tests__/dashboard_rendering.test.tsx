@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { CandidateProfileReview, CandidateProfileData } from "../components/CandidateProfileReview";
 
@@ -481,7 +481,7 @@ describe("CandidateProfileReview Component", () => {
     expect(screen.queryByText("NATIVE_OR_BILINGUAL")).toBeNull();
   });
 
-  it("renders human-readable warning summary", () => {
+  it("renders human-readable review items in drawer", () => {
     render(
       <CandidateProfileReview
         profile={mockProfile}
@@ -489,8 +489,12 @@ describe("CandidateProfileReview Component", () => {
       />
     );
 
-    expect(screen.getByText(/Review Items/i)).toBeInTheDocument();
-    expect(screen.getByText("EMPLOYMENT_ORGANIZATION_MISSING")).toBeInTheDocument();
+    const reviewBtn = screen.getByRole("button", { name: /profile review items/i });
+    expect(reviewBtn).toBeInTheDocument();
+    fireEvent.click(reviewBtn);
+
+    expect(screen.getByText("Profile Review Items")).toBeInTheDocument();
+    expect(screen.getByText("Organization missing from employment record")).toBeInTheDocument();
     expect(screen.getByText(/Organization was not detected in one employment record/i)).toBeInTheDocument();
   });
 });

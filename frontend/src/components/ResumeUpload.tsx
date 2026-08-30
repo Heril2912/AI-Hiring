@@ -152,7 +152,7 @@ export function ResumeUpload({ onCandidateProcessed, onNavigateCandidates }: Res
 
     try {
       // 1. Upload to intake endpoint
-      const uploadRes = await fetch("/api/v1/resumes/upload", {
+      const uploadRes = await fetch("/api/v1/resumes", {
         method: "POST",
         body: formData,
       });
