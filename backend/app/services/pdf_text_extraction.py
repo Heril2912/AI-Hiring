@@ -286,20 +286,26 @@ def _detect_page_column_layout(
     width_int = int(page_width)
     x_coverage = [0] * max(width_int, 1)
 
+    min_word_x = min(w.x0 for w in words)
+    max_word_x = max(w.x1 for w in words)
+
     for w in words:
         s = int(max(0, min(width_int - 1, w.x0)))
         e = int(max(0, min(width_int - 1, w.x1)))
         for x in range(s, e + 1):
             x_coverage[x] += 1
 
-    # Scan for vertical whitespace gutter between 15% and 85% width
-    min_x = int(0.15 * width_int)
-    max_x = int(0.85 * width_int)
+    # Scan for vertical whitespace gutter strictly within the text bounds (min_word_x to max_word_x)
+    scan_min = int(max(0.10 * width_int, min_word_x + 10))
+    scan_max = int(min(0.90 * width_int, max_word_x - 10))
+
+    if scan_max <= scan_min:
+        return PageLayoutType.SINGLE_COLUMN, 1, None
 
     gutters: List[Tuple[int, int, int]] = []
     cur_start = None
 
-    for x in range(min_x, max_x):
+    for x in range(scan_min, scan_max):
         if x_coverage[x] == 0:
             if cur_start is None:
                 cur_start = x
@@ -311,16 +317,20 @@ def _detect_page_column_layout(
                 cur_start = None
 
     if cur_start is not None:
-        g_len = max_x - cur_start
+        g_len = scan_max - cur_start
         if g_len >= 12:
-            gutters.append((cur_start, max_x, g_len))
+            gutters.append((cur_start, scan_max, g_len))
 
     if not gutters:
         return PageLayoutType.SINGLE_COLUMN, 1, None
 
-    # Pick the widest central gutter
-    best_gutter = max(gutters, key=lambda g: g[2])
-    g_start, g_end, g_width = best_gutter
+    # If multiple distinct internal gutters exist across the page (> 1 separated column gutters),
+    # this indicates a 3+ column layout or complex multi-pane layout -> UNCERTAIN_LAYOUT
+    if len(gutters) >= 2:
+        return PageLayoutType.UNCERTAIN_LAYOUT, len(gutters) + 1, None
+
+    # Single internal gutter detected -> examine two-column separation
+    g_start, g_end, g_width = gutters[0]
     split_x = (g_start + g_end) / 2.0
 
     left_words = [w for w in words if w.x1 <= split_x]
@@ -328,14 +338,11 @@ def _detect_page_column_layout(
     spanning_words = [w for w in words if w.x0 < split_x and w.x1 > split_x]
 
     # If substantial words exist on both sides and few words span across the gutter
-    if len(left_words) >= 5 and len(right_words) >= 5 and len(spanning_words) <= 2:
+    if len(left_words) >= 4 and len(right_words) >= 4 and len(spanning_words) <= 2:
         return PageLayoutType.TWO_COLUMN, 2, split_x
 
-    # If gutters exist but distribution is irregular
-    if len(gutters) > 2:
-        return PageLayoutType.UNCERTAIN_LAYOUT, 1, None
-
     return PageLayoutType.SINGLE_COLUMN, 1, None
+
 
 
 def _words_to_visual_lines(words: List[_WordItem]) -> List[_VisualLine]:
