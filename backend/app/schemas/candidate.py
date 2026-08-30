@@ -64,17 +64,32 @@ class ExtractedField(StrictSchema):
                 raise ValueError("When value is null, evidence_ids must be empty.")
             self.confidence_band = ConfidenceBand.UNKNOWN
         else:
-            if self.confidence is None:
-                raise ValueError("When value is present, confidence is required.")
-            if len(self.evidence_ids) == 0:
-                raise ValueError("When value is present, at least one evidence ID is required.")
-
-            if self.confidence >= 0.90:
-                self.confidence_band = ConfidenceBand.HIGH
-            elif self.confidence >= 0.70:
-                self.confidence_band = ConfidenceBand.MEDIUM
+            # Human-provided corrections without resume evidence
+            is_human_provided = (
+                self.extraction_method == "HUMAN_PROVIDED"
+                or (self.review_status == ReviewStatus.CORRECTED and len(self.evidence_ids) == 0)
+            )
+            if is_human_provided:
+                if self.confidence is None:
+                    self.confidence_band = ConfidenceBand.UNKNOWN
+                elif self.confidence >= 0.90:
+                    self.confidence_band = ConfidenceBand.HIGH
+                elif self.confidence >= 0.70:
+                    self.confidence_band = ConfidenceBand.MEDIUM
+                else:
+                    self.confidence_band = ConfidenceBand.LOW
             else:
-                self.confidence_band = ConfidenceBand.LOW
+                if self.confidence is None:
+                    raise ValueError("When value is present, confidence is required.")
+                if len(self.evidence_ids) == 0:
+                    raise ValueError("When value is present, at least one evidence ID is required.")
+
+                if self.confidence >= 0.90:
+                    self.confidence_band = ConfidenceBand.HIGH
+                elif self.confidence >= 0.70:
+                    self.confidence_band = ConfidenceBand.MEDIUM
+                else:
+                    self.confidence_band = ConfidenceBand.LOW
 
         return self
 

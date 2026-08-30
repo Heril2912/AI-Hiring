@@ -22,6 +22,11 @@ from app.models.resume import (
     ProcessingJobStatus,
     ResumeArtifact,
 )
+from app.schemas.correction import (
+    ProfileCorrectionRequest,
+    ProfileCorrectionResponse,
+    ProfileSummaryResponse,
+)
 from app.schemas.profile_assembly import CandidateProfileResponse
 from app.schemas.resume import (
     ResumeExtractionBlockResponse,
@@ -617,11 +622,12 @@ async def get_resume_extraction(
     summary="Get Candidate Profile",
     description=(
         "Returns the structured CandidateProfile v1, evidence spans, review requirements, "
-        "and separated identity details for a processed resume artifact."
+        "and separated identity details for a processed resume artifact. Optionally accepts a specific version."
     ),
 )
 async def get_candidate_profile(
     artifact_id: UUID,
+    version: Optional[int] = None,
     db: Session = Depends(get_db),
 ) -> CandidateProfileResponse:
     try:
@@ -634,15 +640,32 @@ async def get_candidate_profile(
                 detail={"code": "RESUME_NOT_FOUND", "message": "Resume artifact not found."},
             )
 
-        # Check candidate profile record (latest by created_at)
         from app.models.candidate import CandidateProfileRecord
-        stmt_prof = (
-            select(CandidateProfileRecord)
-            .options(selectinload(CandidateProfileRecord.identity))
-            .where(CandidateProfileRecord.artifact_id == artifact_id)
-            .order_by(CandidateProfileRecord.created_at.desc())
-        )
-        profile_rec = db.execute(stmt_prof).scalars().first()
+
+        if version is not None:
+            stmt_prof = (
+                select(CandidateProfileRecord)
+                .options(selectinload(CandidateProfileRecord.identity))
+                .where(
+                    CandidateProfileRecord.artifact_id == artifact_id,
+                    CandidateProfileRecord.profile_version == version,
+                )
+            )
+            profile_rec = db.execute(stmt_prof).scalars().first()
+            if profile_rec is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "PROFILE_VERSION_NOT_FOUND", "message": f"Profile version {version} not found."},
+                )
+        else:
+            # Query latest profile by profile_version
+            stmt_prof = (
+                select(CandidateProfileRecord)
+                .options(selectinload(CandidateProfileRecord.identity))
+                .where(CandidateProfileRecord.artifact_id == artifact_id)
+                .order_by(CandidateProfileRecord.profile_version.desc())
+            )
+            profile_rec = db.execute(stmt_prof).scalars().first()
 
         if profile_rec is None:
             # Check if extraction exists to assemble profile idempotently on-demand
@@ -716,6 +739,10 @@ async def get_candidate_profile(
             profile_version=profile_rec.profile_version,
             schema_version=profile_rec.schema_version,
             parser_pipeline_version=profile_rec.parser_pipeline_version,
+            provenance=profile_rec.provenance,
+            parent_profile_id=str(profile_rec.parent_profile_id) if profile_rec.parent_profile_id else None,
+            parent_profile_version=profile_rec.parent_profile_version,
+            created_at=profile_rec.created_at.isoformat() if profile_rec.created_at else None,
             review_required=profile_rec.review_required,
             warnings=[ProfileAssemblyWarning.model_validate(w) for w in profile_rec.warning_metadata],
             identity=CandidateIdentity.model_validate(identity_payload),
@@ -744,5 +771,138 @@ async def get_candidate_profile(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "INTAKE_UNAVAILABLE", "message": "Service is currently unavailable."},
+        )
+
+
+@router.get(
+    "/{artifact_id}/profiles",
+    response_model=list[ProfileSummaryResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get Profile History",
+    description="Returns version history metadata for all profile versions generated or corrected for an artifact.",
+)
+async def get_candidate_profiles_history(
+    artifact_id: UUID,
+    db: Session = Depends(get_db),
+) -> list[ProfileSummaryResponse]:
+    try:
+        stmt_art = select(ResumeArtifact).where(ResumeArtifact.artifact_id == artifact_id)
+        artifact = db.execute(stmt_art).scalar_one_or_none()
+        if artifact is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "RESUME_NOT_FOUND", "message": "Resume artifact not found."},
+            )
+
+        from app.models.candidate import CandidateProfileRecord, ProfileCorrectionRecord
+
+        stmt = (
+            select(CandidateProfileRecord)
+            .where(CandidateProfileRecord.artifact_id == artifact_id)
+            .order_by(CandidateProfileRecord.profile_version.asc())
+        )
+        profiles = db.execute(stmt).scalars().all()
+
+        # Query corrections map
+        stmt_corr = select(ProfileCorrectionRecord).where(ProfileCorrectionRecord.artifact_id == artifact_id)
+        corrections = db.execute(stmt_corr).scalars().all()
+        corr_map = {c.new_profile_id: c for c in corrections}
+
+        results = []
+        from app.schemas.correction import ProfileProvenance, ProfileSummaryResponse
+        for p in profiles:
+            corr = corr_map.get(p.profile_id)
+            corr_summary = None
+            if corr:
+                corr_summary = {
+                    "correctionId": str(corr.correction_id),
+                    "reasonCategory": corr.reason_category,
+                    "reviewerNote": corr.reviewer_note,
+                    "operationCount": len(corr.operations_payload),
+                }
+
+            results.append(
+                ProfileSummaryResponse(
+                    profile_id=str(p.profile_id),
+                    profile_version=p.profile_version,
+                    schema_version=p.schema_version,
+                    parser_pipeline_version=p.parser_pipeline_version,
+                    provenance=ProfileProvenance(p.provenance),
+                    review_required=p.review_required,
+                    created_at=p.created_at.isoformat(),
+                    parent_profile_id=str(p.parent_profile_id) if p.parent_profile_id else None,
+                    parent_profile_version=p.parent_profile_version,
+                    correction_summary=corr_summary,
+                )
+            )
+        return results
+
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.error(
+            "Database error querying candidate profile history",
+            exc_info=True,
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Database service is currently unavailable."},
+        )
+
+
+@router.post(
+    "/{artifact_id}/profile-corrections",
+    response_model=ProfileCorrectionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Correct Candidate Profile",
+    description="Submits an audited batch of human corrections to create a new profile version without modifying original extractions or historical profile versions.",
+)
+async def correct_candidate_profile(
+    artifact_id: UUID,
+    correction_req: ProfileCorrectionRequest,
+    db: Session = Depends(get_db),
+) -> ProfileCorrectionResponse:
+    try:
+        from app.services.profile_correction import (
+            CorrectionError,
+            apply_profile_correction,
+        )
+
+        response = apply_profile_correction(
+            session=db,
+            artifact_id=artifact_id,
+            correction_req=correction_req,
+        )
+        db.commit()
+        return response
+
+    except CorrectionError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=e.status_code,
+            detail={"code": e.code, "message": e.message},
+        )
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(
+            "Database error applying candidate profile correction",
+            exc_info=True,
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "INTAKE_UNAVAILABLE", "message": "Database service is currently unavailable."},
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            "Unexpected error applying candidate profile correction",
+            exc_info=True,
+            extra={"artifact_id": str(artifact_id), "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "CORRECTION_FAILED", "message": "Failed to apply profile correction."},
         )
 

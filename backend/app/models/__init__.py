@@ -1,5 +1,9 @@
 from app.models.base import Base
-from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
+from app.models.candidate import (
+    CandidateIdentityRecord,
+    CandidateProfileRecord,
+    ProfileCorrectionRecord,
+)
 from app.models.extraction import BlockType, ExtractionBlock, ExtractionMethod, ResumeExtraction
 from app.models.resume import (
     ArtifactFormat,
@@ -22,4 +26,5 @@ __all__ = [
     "ExtractionBlock",
     "CandidateIdentityRecord",
     "CandidateProfileRecord",
+    "ProfileCorrectionRecord",
 ]

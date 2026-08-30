@@ -125,6 +125,16 @@ from app.services.skill_summary_extraction import (
     extract_skills_and_summary,
 )
 
+from app.services.profile_correction import (
+    CorrectionError,
+    IdempotencyConflictError,
+    InvalidCorrectionOperationError,
+    InvalidEvidenceReferenceError,
+    ProfileNotFoundError,
+    ProfileVersionConflictError,
+    apply_profile_correction,
+)
+
 __all__ = [
     "DOCXArchiveLimitExceededError",
     "DOCXValidationError",
@@ -216,6 +226,13 @@ __all__ = [
     "PROFILE_PIPELINE_VERSION",
     "assemble_candidate_profile",
     "persist_candidate_profile",
+    "CorrectionError",
+    "ProfileNotFoundError",
+    "ProfileVersionConflictError",
+    "IdempotencyConflictError",
+    "InvalidCorrectionOperationError",
+    "InvalidEvidenceReferenceError",
+    "apply_profile_correction",
 ]
 
 
