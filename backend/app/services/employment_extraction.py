@@ -35,7 +35,7 @@ from app.services.date_extraction import (
 
 logger = logging.getLogger("ai_hiring.services.employment_extraction")
 
-EMPLOYMENT_PARSER_VERSION = "employment-extract-v1.1"
+EMPLOYMENT_PARSER_VERSION = "employment-extract-v1.3"
 
 _ROLE_INDICATORS = {
     "engineer", "developer", "architect", "lead", "specialist", "scientist",
@@ -57,7 +57,31 @@ _ACTION_VERBS = {
     "orchestrated", "optimized", "monitored", "refactored", "troubleshot",
 }
 
-_HEADER_SPLIT_RE = re.compile(r"\s*(?:[|•·—–-]|\bat\b|\bfor\b)\s*", re.IGNORECASE)
+_TABLE_COLUMN_HEADER_TERMS = {
+    "role", "title", "job title", "position", "designation",
+    "organization", "employer", "company", "firm", "workplace",
+    "role and organization", "role & organization", "position and organization",
+    "dates", "date", "period", "duration", "timeline", "years", "timeframe",
+    "responsibilities", "outcomes", "description", "details", "duties",
+    "responsibilities and outcomes", "responsibilities & outcomes",
+    "key responsibilities", "achievements", "summary",
+}
+
+_HEADER_DELIMITERS = [" | ", " – ", " — ", " at ", " for ", " @ ", " - ", "|", "—", "–"]
+_HEADER_SPLIT_RE = re.compile(r"\s*(?:[|•·—–-]|\bat\b|\bfor\b|\b@\b)\s*", re.IGNORECASE)
+
+
+def _is_table_header_text(text: str) -> bool:
+    """Checks if text is a structural table column header row."""
+    cleaned = text.strip().lower().strip(".,:;/-")
+    if not cleaned:
+        return False
+    if cleaned in _TABLE_COLUMN_HEADER_TERMS:
+        return True
+    sub_parts = [p.strip() for p in re.split(r"[,|/]|(?:\band\b)|(?:\b&\b)", cleaned) if p.strip()]
+    if sub_parts and all(p in _TABLE_COLUMN_HEADER_TERMS for p in sub_parts):
+        return True
+    return False
 
 
 def _is_date_only_line(line_str: str, date_matches: list) -> bool:
@@ -75,6 +99,9 @@ def _is_employment_header_candidate(line_str: str, date_matches: list) -> bool:
     if not clean or clean.startswith(("•", "*", "·", "1.", "2.", "3.")):
         return False
 
+    if _is_table_header_text(clean):
+        return False
+
     # Check if first word is an action verb
     first_word = clean.split()[0].lower().strip(".,:;/-") if clean.split() else ""
     if first_word in _ACTION_VERBS:
@@ -85,7 +112,7 @@ def _is_employment_header_candidate(line_str: str, date_matches: list) -> bool:
         return False
 
     # Separated header: e.g. "Role | Org", "Role at Org", "Role - Org"
-    has_separator = any(sep in clean for sep in ["|", " at ", " for "]) or (
+    has_separator = any(sep in clean for sep in ["|", " at ", " for ", " @ "]) or (
         any(sep in clean for sep in ["—", "–", " - "]) and not date_matches
     )
 
@@ -100,6 +127,24 @@ def _is_employment_header_candidate(line_str: str, date_matches: list) -> bool:
         return True
 
     return False
+
+
+def _has_role_indicators(text: str) -> bool:
+    words = [w.lower().strip(".,:;/-()") for w in text.split()]
+    return any(w in _ROLE_INDICATORS for w in words)
+
+
+def _is_valid_org_segment(text: str) -> bool:
+    clean = text.strip()
+    if not clean or len(clean) > 80:
+        return False
+    if extract_date_range_matches(clean) or parse_single_date(clean):
+        return False
+    if clean.startswith(("•", "*", "·", "- ")) or (clean.endswith(".") and len(clean.split()) > 7):
+        return False
+    if _is_table_header_text(clean):
+        return False
+    return True
 
 
 def _classify_role_and_org(
@@ -134,6 +179,49 @@ def _classify_role_and_org(
 
     # Default convention: First part is Role, Second part is Organization (with ambiguity flag)
     return a_clean, b_clean, True
+
+
+def _split_compound_role_org_line(
+    line: str,
+) -> Optional[Tuple[str, str, int, int, int, int, bool]]:
+    """
+    Evaluates compound lines with separators: |, -, –, —, at, for, @.
+    Returns (role_val, org_val, role_start, role_end, org_start, org_end, is_ambiguous) or None.
+    """
+    clean_line = line.strip()
+    for delim in _HEADER_DELIMITERS:
+        if delim in clean_line:
+            parts = clean_line.split(delim, 1)
+            p0 = parts[0].strip()
+            p1 = parts[1].strip()
+            if not p0 or not p1:
+                continue
+
+            p0_has_role = _has_role_indicators(p0)
+            p1_has_role = _has_role_indicators(p1)
+
+            p0_valid_org = _is_valid_org_segment(p0)
+            p1_valid_org = _is_valid_org_segment(p1)
+
+            p0_start = line.find(p0)
+            p0_end = p0_start + len(p0)
+            p1_start = line.find(p1, p0_end)
+            if p1_start == -1:
+                p1_start = line.find(p1)
+            p1_end = p1_start + len(p1)
+
+            if p0_has_role and not p1_has_role and p1_valid_org:
+                return p0, p1, p0_start, p0_end, p1_start, p1_end, False
+            if p1_has_role and not p0_has_role and p0_valid_org:
+                return p1, p0, p1_start, p1_end, p0_start, p0_end, False
+
+            role_val, org_val, amb = _classify_role_and_org(p0, p1)
+            if role_val == p0:
+                return p0, p1, p0_start, p0_end, p1_start, p1_end, amb
+            else:
+                return p1, p0, p1_start, p1_end, p0_start, p0_end, amb
+
+    return None
 
 
 def extract_employment_records(
@@ -183,6 +271,8 @@ def extract_employment_records(
             for seq in range(sec.start_sequence_index, sec.end_sequence_index + 1):
                 if seq in blocks_by_seq:
                     b = blocks_by_seq[seq]
+                    if b.block_type == BlockType.FOOTER or (b.structural_location and "/footer/" in b.structural_location):
+                        continue
                     # Skip section heading block if it contains only heading text
                     if sec.heading and sec.heading.heading_block_id == b.block_id and b.normalized_text.strip().lower() == sec.heading.matched_heading_text.strip().lower():
                         continue
@@ -205,18 +295,19 @@ def extract_employment_records(
     all_lines: List[LineItem] = []
 
     for block in exp_blocks:
-        lines = block.normalized_text.split("\n")
+        text_to_split = block.normalized_text if block.normalized_text else block.raw_text
+        lines = text_to_split.split("\n")
         curr_off = 0
         for line in lines:
             line_str = line.strip()
             line_len = len(line)
-            line_start = block.normalized_text.find(line, curr_off)
+            line_start = text_to_split.find(line, curr_off)
             if line_start == -1:
                 line_start = curr_off
             line_end = line_start + len(line_str)
             curr_off = line_start + line_len + 1
 
-            if not line_str:
+            if not line_str or _is_table_header_text(line_str):
                 continue
 
             date_matches = extract_date_range_matches(line_str)
@@ -292,23 +383,16 @@ def extract_employment_records(
             desc_lines = group[date_line_idx + 1:]
 
             if line_before_date:
-                # Same line before date
-                if any(sep in line_before_date for sep in ["|", "—", "–", " at ", " for "]):
-                    parts = _HEADER_SPLIT_RE.split(line_before_date)
-                    if len(parts) >= 2:
-                        role_cand, org_cand, is_header_ambiguous = _classify_role_and_org(parts[0], parts[1])
-                        # Find exact offsets inside block
-                        p0_off = date_block.normalized_text.find(parts[0].strip(), d_l_start)
-                        p1_off = date_block.normalized_text.find(parts[1].strip(), d_l_start)
-                        if role_cand == parts[0].strip():
-                            role_span_info = (date_block, p0_off, p0_off + len(parts[0].strip()))
-                            org_span_info = (date_block, p1_off, p1_off + len(parts[1].strip()))
-                        else:
-                            role_span_info = (date_block, p1_off, p1_off + len(parts[1].strip()))
-                            org_span_info = (date_block, p0_off, p0_off + len(parts[0].strip()))
+                split_res = _split_compound_role_org_line(line_before_date)
+                if split_res:
+                    r_val, o_val, r_st, r_en, o_st, o_en, amb = split_res
+                    role_cand = r_val
+                    org_cand = o_val
+                    is_header_ambiguous = amb
+                    role_span_info = (date_block, d_l_start + r_st, d_l_start + r_en)
+                    org_span_info = (date_block, d_l_start + o_st, d_l_start + o_en)
                 else:
-                    # Single item before date
-                    if any(w in line_before_date.lower() for w in _ROLE_INDICATORS):
+                    if _has_role_indicators(line_before_date):
                         role_cand = line_before_date
                         r_off = date_block.normalized_text.find(line_before_date, d_l_start)
                         role_span_info = (date_block, r_off, r_off + len(line_before_date))
@@ -321,26 +405,19 @@ def extract_employment_records(
             if (not role_cand or not org_cand) and header_lines_before:
                 if len(header_lines_before) == 1:
                     h_block, h_line, h_start, h_end, _ = header_lines_before[0]
-                    if any(sep in h_line for sep in ["|", "—", "–", " at ", " for "]):
-                        parts = _HEADER_SPLIT_RE.split(h_line)
-                        if len(parts) >= 2:
-                            r_val, o_val, amb = _classify_role_and_org(parts[0], parts[1])
-                            role_cand = r_val
-                            org_cand = o_val
-                            is_header_ambiguous = amb
-                            p0_off = h_block.normalized_text.find(parts[0].strip(), h_start)
-                            p1_off = h_block.normalized_text.find(parts[1].strip(), h_start)
-                            if role_cand == parts[0].strip():
-                                role_span_info = (h_block, p0_off, p0_off + len(parts[0].strip()))
-                                org_span_info = (h_block, p1_off, p1_off + len(parts[1].strip()))
-                            else:
-                                role_span_info = (h_block, p1_off, p1_off + len(parts[1].strip()))
-                                org_span_info = (h_block, p0_off, p0_off + len(parts[0].strip()))
+                    split_res = _split_compound_role_org_line(h_line)
+                    if split_res:
+                        r_val, o_val, r_st, r_en, o_st, o_en, amb = split_res
+                        role_cand = r_val
+                        org_cand = o_val
+                        is_header_ambiguous = amb
+                        role_span_info = (h_block, h_start + r_st, h_start + r_en)
+                        org_span_info = (h_block, h_start + o_st, h_start + o_en)
                     else:
-                        if not role_cand:
+                        if _has_role_indicators(h_line):
                             role_cand = h_line
                             role_span_info = (h_block, h_start, h_end)
-                        elif not org_cand:
+                        else:
                             org_cand = h_line
                             org_span_info = (h_block, h_start, h_end)
                 elif len(header_lines_before) >= 2:
@@ -372,7 +449,6 @@ def extract_employment_records(
             norm_start_date = parse_single_date(raw_start_str)
             norm_end_date = parse_single_date(raw_end_str)
 
-
             # Date Span
             abs_date_start = date_block.normalized_text.find(d_full_str, d_l_start)
             if abs_date_start == -1:
@@ -391,17 +467,18 @@ def extract_employment_records(
                     s_y = norm_start_date.year
                     e_y = norm_end_date.year
                     s_m = norm_start_date.month or 1
-                    e_m = norm_end_date.month or 1
-                    if (e_y < s_y) or (e_y == s_y and e_m < s_m):
+                    e_m = norm_end_date.month or 12
+                    if (s_y > e_y) or (s_y == e_y and s_m > e_m):
                         rec_warnings.append(
                             EmploymentWarning(
                                 code=EmploymentWarningCode.EMPLOYMENT_DATE_REVERSED,
                                 record_index=rec_idx,
                                 field_name="date_interval",
+                                evidence_id=date_span.evidence_id,
                             )
                         )
 
-                if is_current_role and not parsed_as_of_date:
+                if is_current_role and parsed_as_of_date is None:
                     rec_warnings.append(
                         EmploymentWarning(
                             code=EmploymentWarningCode.CURRENT_ROLE_REQUIRES_AS_OF_DATE,
@@ -490,24 +567,24 @@ def extract_employment_records(
             # Try to extract role and org from the first line of the group
             if group:
                 h0_block, h0_line, h0_start, h0_end, _ = group[0]
-                if any(sep in h0_line for sep in ["|", "—", "–", " at ", " for "]):
-                    parts = _HEADER_SPLIT_RE.split(h0_line)
-                    if len(parts) >= 2:
-                        r_val, o_val, amb = _classify_role_and_org(parts[0], parts[1])
-                        role_cand = r_val
-                        org_cand = o_val
-                        is_header_ambiguous = amb
-                        p0_off = h0_block.normalized_text.find(parts[0].strip(), h0_start)
-                        p1_off = h0_block.normalized_text.find(parts[1].strip(), h0_start)
-                        if role_cand == parts[0].strip():
-                            role_span_info = (h0_block, p0_off, p0_off + len(parts[0].strip()))
-                            org_span_info = (h0_block, p1_off, p1_off + len(parts[1].strip()))
-                        else:
-                            role_span_info = (h0_block, p1_off, p1_off + len(parts[1].strip()))
-                            org_span_info = (h0_block, p0_off, p0_off + len(parts[0].strip()))
+                split_res = _split_compound_role_org_line(h0_line)
+                if split_res:
+                    r_val, o_val, r_st, r_en, o_st, o_en, amb = split_res
+                    role_cand = r_val
+                    org_cand = o_val
+                    is_header_ambiguous = amb
+                    role_span_info = (h0_block, h0_start + r_st, h0_start + r_en)
+                    org_span_info = (h0_block, h0_start + o_st, h0_start + o_en)
                     desc_lines = group[1:]
                 else:
-                    desc_lines = group
+                    if _has_role_indicators(h0_line):
+                        role_cand = h0_line
+                        role_span_info = (h0_block, h0_start, h0_end)
+                        desc_lines = group[1:]
+                    else:
+                        org_cand = h0_line
+                        org_span_info = (h0_block, h0_start, h0_end)
+                        desc_lines = group[1:]
             else:
                 desc_lines = group
 

@@ -334,10 +334,10 @@ def _extract_header_footer_text(
         return blocks, curr_seq, char_count, has_drawing_or_textbox, has_image
 
     # Check if header/footer is linked to previous section or shares underlying part
-    part_id = id(hf_obj._element)
-    if part_id in seen_part_ids:
+    part_elem = hf_obj._element
+    if part_elem in seen_part_ids:
         return blocks, curr_seq, char_count, has_drawing_or_textbox, has_image
-    seen_part_ids.add(part_id)
+    seen_part_ids.add(part_elem)
 
     # Walk paragraphs inside the header/footer
     for p_idx, p in enumerate(hf_obj.paragraphs):
@@ -532,15 +532,14 @@ def extract_docx_text(
             elif tag == "tbl":
                 # Body table
                 tbl_obj = Table(child, doc)
-                seen_cell_elements: Set[int] = set()
+                seen_cell_elements: Set[Any] = set()
 
                 for row_idx, row in enumerate(tbl_obj.rows):
                     for col_idx, cell in enumerate(row.cells):
-                        cell_elem_id = id(cell._element)
-                        if cell_elem_id in seen_cell_elements:
+                        if cell._element in seen_cell_elements:
                             # Avoid duplicate merged-cell extraction
                             continue
-                        seen_cell_elements.add(cell_elem_id)
+                        seen_cell_elements.add(cell._element)
 
                         # Check for nested tables in cell
                         nested_tbls = cell._element.findall(qn("w:tbl"))

@@ -67,7 +67,7 @@ from app.services.education_project_certification_rules import (
 
 logger = logging.getLogger("ai_hiring.services.education_project_certification_extraction")
 
-EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION = "ed-proj-cert-lang-extract-v1.1"
+EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION = "ed-proj-cert-lang-extract-v1.3"
 
 _ACTION_VERBS = {
     "developed", "built", "created", "managed", "designed", "led", "architected",
@@ -78,25 +78,36 @@ _ACTION_VERBS = {
 }
 
 
+def _is_footer_block(b: ExtractionBlockData) -> bool:
+    return b.block_type == BlockType.FOOTER or (
+        b.structural_location is not None and "/footer/" in b.structural_location
+    )
+
+
 def _create_evidence_span(
     artifact_id: str,
     block: ExtractionBlockData,
-    char_start: int,
-    char_end: int,
-    method: str = "deterministic_rule",
+    start_char: int,
+    end_char: int,
+    field_text: Optional[str] = None,
 ) -> EvidenceSpan:
-    """Creates a validated EvidenceSpan against block text."""
-    orig_text = block.raw_text[char_start:char_end]
-    if not orig_text or char_end <= char_start:
-        raise ValueError("Invalid character offsets for evidence span")
+    """Creates a strictly validated evidence span with non-empty text."""
+    raw = block.raw_text or ""
+    orig_text = field_text if field_text else raw[start_char:end_char]
+    if not orig_text.strip():
+        orig_text = block.raw_text.strip()
+        start_char = 0
+        end_char = len(orig_text)
+
+    method = block.extraction_method.value if block.extraction_method else "deterministic_rule"
 
     return EvidenceSpan(
         evidence_id=f"ev-{uuid.uuid4().hex[:12]}",
         resume_artifact_id=artifact_id,
         page_number=block.page_number,
         block_number=block.sequence_index,
-        character_start=char_start,
-        character_end=char_end,
+        character_start=start_char,
+        character_end=end_char,
         original_text=orig_text,
         extraction_method=method,
     )
@@ -175,6 +186,8 @@ def extract_education_records(
         for idx in range(section.start_sequence_index, section.end_sequence_index + 1):
             if idx in block_map:
                 blk = block_map[idx]
+                if _is_footer_block(blk):
+                    continue
                 if section.heading and section.heading.heading_sequence_index == idx:
                     continue
                 sec_blocks.append(blk)
@@ -250,6 +263,9 @@ def extract_education_records(
                 has_formal = any(deg_re.search(line_str) for deg_re, _, _ in DEGREE_DEFINITIONS)
                 if not has_formal:
                     continue
+
+            # Split line into parts by bounded separators (pipe, em-dash, or spaced dash/hyphen)
+            parts = [p.strip() for p in re.split(r"\s*(?:[|—]|\s+[–-]\s+)\s*", line_str) if p.strip()]
 
             # Detect degree
             matched_deg: Optional[str] = None
@@ -369,7 +385,6 @@ def extract_education_records(
                             evidence_spans=[d_span],
                             field_name="end_date",
                         )
-                continue
 
             # Detect grade / GPA
             grade_m = GRADE_RE.search(line_str)
@@ -387,36 +402,46 @@ def extract_education_records(
                     all_evidence.append(g_span)
                     current.grade_spans.append(g_span)
 
-            # Detect institution
-            words = [w.strip(".,:;/-()") for w in lower_line.split()]
-            has_inst_word = any(w in INSTITUTION_INDICATORS for w in words)
-            if not is_date_line and (has_inst_word or (not matched_deg and len(line_str) < 80 and not fos_m and not grade_m)):
-                inst_cand = line_str.strip(" •·-*–—\t")
-                if " from " in inst_cand.lower():
-                    from_idx = inst_cand.lower().find(" from ")
-                    inst_cand = inst_cand[from_idx + 6:].strip()
-                elif " at " in inst_cand.lower():
-                    at_idx = inst_cand.lower().find(" at ")
-                    inst_cand = inst_cand[at_idx + 4:].strip()
-                elif "|" in inst_cand:
-                    parts = inst_cand.split("|")
-                    for p in parts:
-                        p_words = [w.strip(".,:;/-()") for w in p.lower().split()]
-                        if any(w in INSTITUTION_INDICATORS for w in p_words):
-                            inst_cand = p.strip()
-                            break
+            # Detect institution (from line or split parts)
+            for p in parts:
+                p_lower = p.lower()
+                p_words = [w.strip(".,:;/-()") for w in p_lower.split()]
+                has_inst_word = any(w in INSTITUTION_INDICATORS for w in p_words)
+                is_p_date = bool(extract_date_range_matches(p)) or bool(parse_single_date(p))
+                is_p_deg = any(deg_re.search(p) for deg_re, _, _ in DEGREE_DEFINITIONS)
+                is_p_fos = bool(FIELD_OF_STUDY_PREFIX_RE.search(p))
 
-                if current is None:
-                    current = PendingEducation()
-                if not current.inst_val and inst_cand:
-                    current.inst_val = inst_cand
-                    c_start = blk.raw_text.find(inst_cand, l_start)
-                    if c_start == -1:
-                        c_start = l_start
-                    c_end = c_start + len(inst_cand)
-                    i_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
-                    all_evidence.append(i_span)
-                    current.inst_spans.append(i_span)
+                # If p has date range and remaining text contains institution indicator
+                p_date_matches = extract_date_range_matches(p)
+                if p_date_matches:
+                    p_d_start, p_d_end = p_date_matches[0][0], p_date_matches[0][1]
+                    p_rem = p[:p_d_start].strip(" \t|,·•—–-()") + p[p_d_end:].strip(" \t|,·•—–-()")
+                    if p_rem and any(w in INSTITUTION_INDICATORS for w in p_rem.lower().split()):
+                        p = p_rem
+                        has_inst_word = True
+                        is_p_date = False
+
+                if has_inst_word or (not is_p_date and not is_p_deg and not is_p_fos and len(p) < 80 and len(p.split()) >= 2):
+                    inst_cand = p.strip(" •·-*–—\t")
+                    if " from " in inst_cand.lower():
+                        from_idx = inst_cand.lower().find(" from ")
+                        inst_cand = inst_cand[from_idx + 6:].strip()
+                    elif " at " in inst_cand.lower():
+                        at_idx = inst_cand.lower().find(" at ")
+                        inst_cand = inst_cand[at_idx + 4:].strip()
+
+                    if current is None:
+                        current = PendingEducation()
+                    if not current.inst_val and inst_cand and len(inst_cand) > 3:
+                        current.inst_val = inst_cand
+                        c_start = blk.raw_text.find(inst_cand, l_start)
+                        if c_start == -1:
+                            c_start = l_start
+                        c_end = c_start + len(inst_cand)
+                        i_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
+                        all_evidence.append(i_span)
+                        current.inst_spans.append(i_span)
+                        break
 
         finalize_pending()
 
@@ -527,6 +552,8 @@ def extract_project_records(
         for idx in range(section.start_sequence_index, section.end_sequence_index + 1):
             if idx in block_map:
                 blk = block_map[idx]
+                if _is_footer_block(blk):
+                    continue
                 if section.heading and section.heading.heading_sequence_index == idx:
                     continue
                 sec_blocks.append(blk)
@@ -542,7 +569,6 @@ def extract_project_records(
                 self.desc_spans: List[EvidenceSpan] = []
                 self.url_val: Optional[str] = None
                 self.url_spans: List[EvidenceSpan] = []
-                self.tech_lines: List[str] = []
                 self.participating_seqs: Set[int] = set()
                 self.warnings: List[ProjectWarning] = []
 
@@ -575,103 +601,82 @@ def extract_project_records(
                 is_action_verb = first_word in _ACTION_VERBS
                 is_bullet = line.strip().startswith(("•", "-", "*", "·", "1.", "2.", "3."))
                 has_label = bool(re.match(r"^Project(?:\s*Name)?\s*:\s*", line_clean, re.I))
-
                 is_tech_label = bool(re.match(r"^(?:Technologies|Tech Stack|Tools|Built with)\s*:\s*", line_clean, re.I))
 
+                is_continuation = (
+                    line_clean[0].islower()
+                    or line_clean.endswith(".")
+                    or any(line_clean.lower().startswith(p) for p in ["and ", "with ", "to ", "for ", "by ", "in ", "of ", "checks", "transitions"])
+                    or (len(line_clean.split()) <= 3 and any(w in line_clean.lower() for w in ["checks", "transitions", "tests", "monitoring", "alerting"]))
+                )
+
                 # Check if this line starts a NEW project
-                is_new_project_start = False
-                if has_label or blk.block_type == BlockType.HEADING:
-                    is_new_project_start = True
-                elif (
-                    not is_bullet
-                    and not is_action_verb
-                    and not is_tech_label
-                    and not PROJECT_URL_RE.match(line_clean)
-                    and len(line_clean) < 60
-                    and line_clean.lower() not in PROJECT_TITLE_DISQUALIFIERS
-                ):
-                    # Short title line that is not a bullet and not an action sentence
-                    # If current already has name and description, this is the start of the next project
-                    if current and current.name_val and (current.desc_lines or current.participating_seqs != {blk.sequence_index}):
-                        is_new_project_start = True
-                    elif current is None:
-                        is_new_project_start = True
-
-                if is_new_project_start:
-                    if current:
+                if not is_action_verb and not is_bullet and not is_tech_label and not is_continuation:
+                    if has_label:
+                        m_lbl = re.match(r"^Project(?:\s*Name)?\s*:\s*(.*)", line_clean, re.I)
+                        p_name = m_lbl.group(1).strip() if m_lbl else line_clean
                         finalize_pending_project()
-                    current = PendingProject()
-
-                    # Extract name
-                    clean_name = re.sub(r"^(?:Project(?:\s*Name)?\s*:\s*|[•\-*·\d\.]+\s*)", "", line_clean, flags=re.IGNORECASE).strip()
-                    url_m = PROJECT_URL_RE.search(clean_name)
-                    if url_m:
-                        current.url_val = url_m.group(0).rstrip(".,;:)")
-                        u_start = blk.raw_text.find(current.url_val)
-                        if u_start != -1:
-                            u_span = _create_evidence_span(artifact_id, blk, u_start, u_start + len(current.url_val))
-                            current.url_spans.append(u_span)
-                            all_evidence.append(u_span)
-                        clean_name = clean_name.replace(current.url_val, "").strip(" -:|")
-
-                    if "|" in clean_name:
-                        clean_name = clean_name.split("|")[0].strip()
-                    elif " - " in clean_name:
-                        clean_name = clean_name.split(" - ")[0].strip()
-
-                    current.name_val = clean_name
-                    c_start = blk.raw_text.find(clean_name)
-                    if c_start != -1:
-                        n_span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(clean_name))
-                        current.name_spans.append(n_span)
-                        all_evidence.append(n_span)
-                    current.participating_seqs.add(blk.sequence_index)
-                    continue
+                        current = PendingProject()
+                        current.name_val = p_name
+                        current.participating_seqs.add(blk.sequence_index)
+                        c_start = blk.raw_text.find(p_name)
+                        if c_start != -1:
+                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(p_name))
+                            current.name_spans.append(span)
+                            all_evidence.append(span)
+                        continue
+                    elif len(line_clean.split()) <= 6 and not any(p in line_clean.lower() for p in ["http", "github"]):
+                        # Standalone title line
+                        if current is None or current.desc_lines:
+                            finalize_pending_project()
+                            current = PendingProject()
+                            current.name_val = line_clean
+                            current.participating_seqs.add(blk.sequence_index)
+                            c_start = blk.raw_text.find(line_clean)
+                            if c_start != -1:
+                                span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
+                                current.name_spans.append(span)
+                                all_evidence.append(span)
+                            continue
 
                 if current is None:
                     current = PendingProject()
 
                 current.participating_seqs.add(blk.sequence_index)
 
-                # Check for explicit tech label
-                if is_tech_label:
-                    tech_content = re.sub(r"^(?:Technologies|Tech Stack|Tools|Built with)\s*:\s*", "", line_clean, flags=re.IGNORECASE).strip()
-                    current.tech_lines.append(tech_content)
-                    current.desc_lines.append(line_clean)
-                    continue
-
-                # Check for URL
-                url_m = PROJECT_URL_RE.search(line_clean)
-                if url_m and not current.url_val:
-                    current.url_val = url_m.group(0).rstrip(".,;:)")
+                # Check for URLs
+                u_m = PROJECT_URL_RE.search(line_clean)
+                if u_m:
+                    current.url_val = u_m.group(0)
                     u_start = blk.raw_text.find(current.url_val)
                     if u_start != -1:
-                        u_span = _create_evidence_span(artifact_id, blk, u_start, u_start + len(current.url_val))
-                        current.url_spans.append(u_span)
-                        all_evidence.append(u_span)
+                        span = _create_evidence_span(artifact_id, blk, u_start, u_start + len(current.url_val))
+                        current.url_spans.append(span)
+                        all_evidence.append(span)
 
-                # Otherwise attach as description line
+                # Add to description lines
                 current.desc_lines.append(line_clean)
-                c_start = blk.raw_text.find(line_clean)
-                if c_start != -1:
-                    d_span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
-                    current.desc_spans.append(d_span)
-                    all_evidence.append(d_span)
+                d_start = blk.raw_text.find(line_clean)
+                if d_start != -1:
+                    span = _create_evidence_span(artifact_id, blk, d_start, d_start + len(line_clean))
+                    current.desc_spans.append(span)
+                    all_evidence.append(span)
 
         finalize_pending_project()
 
-        # Build records
+        # Build output records and attach skills strictly within participating sequences
         for p in pending_projects:
             all_warnings.extend(p.warnings)
 
             name_field = _build_extracted_field(
                 p.name_val,
                 normalized_value=p.name_val,
-                confidence=0.95 if p.name_val else None,
+                confidence=0.90 if p.name_val else None,
                 evidence_spans=p.name_spans,
                 field_name="name",
             )
-            desc_text = "\n".join(p.desc_lines).strip()
+
+            desc_text = " ".join(p.desc_lines).strip()
             desc_field = _build_extracted_field(
                 desc_text if desc_text else None,
                 normalized_value=desc_text if desc_text else None,
@@ -679,6 +684,7 @@ def extract_project_records(
                 evidence_spans=p.desc_spans,
                 field_name="description",
             )
+
             url_field = _build_extracted_field(
                 p.url_val,
                 normalized_value=p.url_val,
@@ -728,8 +734,7 @@ def extract_project_records(
                 + [s.evidence_id for s in p.url_spans]
                 + [ev for tf in tech_fields for ev in tf.evidence_ids]
             )
-
-            rec_conf = 0.95 if p.name_val else 0.50
+            rec_conf = 0.90 if p.name_val and desc_text else (0.75 if p.name_val else 0.40)
 
             records.append(ExtractedProjectRecord(
                 name=name_field,
@@ -759,9 +764,11 @@ def extract_certification_records(
     artifact_id: str,
 ) -> CertificationExtractionResult:
     """
-    Extracts certification records strictly from CERTIFICATIONS section blocks using a pending-record state machine.
-    - Captures certification name, issuer, issue date, expiry date, credential ID, credential URL.
-    - Labels like 'Issuer:', 'Issued:', 'Credential ID:' attach to the current pending certification record.
+    Extracts certification records strictly from detected CERTIFICATIONS sections using a state machine.
+    - Non-metadata certification title starts a record.
+    - Following metadata-only blocks or pipe-separated metadata attach to active record.
+    - Metadata-only lines never create separate certification records.
+    - Emits CERTIFICATION_ISSUER_AMBIGUOUS only after complete record assembly.
     """
     cert_sections = [
         s for s in sections_result.sections if s.section_type == SectionType.CERTIFICATIONS
@@ -786,6 +793,8 @@ def extract_certification_records(
         for idx in range(section.start_sequence_index, section.end_sequence_index + 1):
             if idx in block_map:
                 blk = block_map[idx]
+                if _is_footer_block(blk):
+                    continue
                 if section.heading and section.heading.heading_sequence_index == idx:
                     continue
                 sec_blocks.append(blk)
@@ -830,6 +839,91 @@ def extract_certification_records(
                 pending_certs.append(current)
             current = None
 
+        def _is_metadata_token(token: str) -> bool:
+            return any(
+                bool(CERTIFICATION_LABEL_PATTERNS[k].search(token))
+                for k in ["issuer", "issued_date", "expiry_date", "credential_id", "credential_url"]
+            )
+
+        def _apply_metadata_to_cert(cert: PendingCert, token: str, block: ExtractionBlockData):
+            is_iss = bool(CERTIFICATION_LABEL_PATTERNS["issuer"].search(token))
+            is_dt = bool(CERTIFICATION_LABEL_PATTERNS["issued_date"].search(token))
+            is_exp = bool(CERTIFICATION_LABEL_PATTERNS["expiry_date"].search(token))
+            is_cid = bool(CERTIFICATION_LABEL_PATTERNS["credential_id"].search(token))
+            is_curl = bool(CERTIFICATION_LABEL_PATTERNS["credential_url"].search(token))
+
+            if is_iss:
+                m = CERTIFICATION_LABEL_PATTERNS["issuer"].search(token)
+                val = m.group(1).strip()
+                cert.issuer_val = val
+                s_off = block.raw_text.find(val)
+                if s_off != -1:
+                    span = _create_evidence_span(artifact_id, block, s_off, s_off + len(val))
+                    cert.issuer_spans.append(span)
+                    all_evidence.append(span)
+            elif is_dt:
+                m = CERTIFICATION_LABEL_PATTERNS["issued_date"].search(token)
+                val = m.group(1).strip()
+                cert.issued_date_val = val
+                s_off = block.raw_text.find(val)
+                if s_off != -1:
+                    span = _create_evidence_span(artifact_id, block, s_off, s_off + len(val))
+                    cert.issued_date_spans.append(span)
+                    all_evidence.append(span)
+            elif is_exp:
+                m = CERTIFICATION_LABEL_PATTERNS["expiry_date"].search(token)
+                val = m.group(1).strip()
+                cert.expiry_date_val = val
+                s_off = block.raw_text.find(val)
+                if s_off != -1:
+                    span = _create_evidence_span(artifact_id, block, s_off, s_off + len(val))
+                    cert.expiry_date_spans.append(span)
+                    all_evidence.append(span)
+            elif is_cid:
+                m = CERTIFICATION_LABEL_PATTERNS["credential_id"].search(token)
+                val = m.group(1).strip()
+                cert.cred_id_val = val
+                s_off = block.raw_text.find(val)
+                if s_off != -1:
+                    span = _create_evidence_span(artifact_id, block, s_off, s_off + len(val))
+                    cert.cred_id_spans.append(span)
+                    all_evidence.append(span)
+            elif is_curl:
+                m = CERTIFICATION_LABEL_PATTERNS["credential_url"].search(token)
+                val = m.group(1).strip()
+                cert.cred_url_val = val
+                s_off = block.raw_text.find(val)
+                if s_off != -1:
+                    span = _create_evidence_span(artifact_id, block, s_off, s_off + len(val))
+                    cert.cred_url_spans.append(span)
+                    all_evidence.append(span)
+            else:
+                for kw, canon_iss in KNOWN_CERT_ISSUERS.items():
+                    if re.search(r"\b" + re.escape(kw) + r"\b", token, re.I):
+                        cert.issuer_val = canon_iss
+                        s_off = block.raw_text.find(token)
+                        if s_off != -1:
+                            span = _create_evidence_span(artifact_id, block, s_off, s_off + len(token))
+                            cert.issuer_spans.append(span)
+                            all_evidence.append(span)
+                        break
+                if not cert.issued_date_val:
+                    d_m = extract_date_range_matches(token)
+                    if d_m:
+                        cert.issued_date_val = d_m[0][3]
+                        s_off = block.raw_text.find(token)
+                        if s_off != -1:
+                            span = _create_evidence_span(artifact_id, block, s_off, s_off + len(token))
+                            cert.issued_date_spans.append(span)
+                            all_evidence.append(span)
+                    elif parse_single_date(token):
+                        cert.issued_date_val = token
+                        s_off = block.raw_text.find(token)
+                        if s_off != -1:
+                            span = _create_evidence_span(artifact_id, block, s_off, s_off + len(token))
+                            cert.issued_date_spans.append(span)
+                            all_evidence.append(span)
+
         for blk in sec_blocks:
             lines = [l.strip() for l in blk.raw_text.splitlines() if l.strip()]
             if not lines:
@@ -840,141 +934,98 @@ def extract_certification_records(
                 if not line_clean:
                     continue
 
-                # Check if line is a metadata label
-                is_issuer_line = bool(CERTIFICATION_LABEL_PATTERNS["issuer"].search(line_clean))
-                is_issued_date_line = bool(CERTIFICATION_LABEL_PATTERNS["issued_date"].search(line_clean))
-                is_expiry_date_line = bool(CERTIFICATION_LABEL_PATTERNS["expiry_date"].search(line_clean))
-                is_cred_id_line = bool(CERTIFICATION_LABEL_PATTERNS["credential_id"].search(line_clean))
-                is_cred_url_line = bool(CERTIFICATION_LABEL_PATTERNS["credential_url"].search(line_clean))
-
-                is_label_line = (
-                    is_issuer_line
-                    or is_issued_date_line
-                    or is_expiry_date_line
-                    or is_cred_id_line
-                    or is_cred_url_line
-                )
-
-                # Check if line is a new certification title
-                if not is_label_line:
-                    # Check if line is only a date
-                    date_matches = extract_date_range_matches(line_clean)
-                    is_date_only = bool(date_matches) or bool(parse_single_date(line_clean))
-
-                    if not is_date_only:
-                        # New certification title
-                        if current and current.name_val:
-                            finalize_pending_cert()
-                        if current is None:
+                # Check if line contains pipe-separated certification components
+                if "|" in line_clean and not any(k in line_clean.lower() for k in ["http", "github"]):
+                    cert_parts = [p.strip() for p in line_clean.split("|") if p.strip()]
+                    if len(cert_parts) >= 2:
+                        p0 = cert_parts[0]
+                        if _is_metadata_token(p0):
+                            # Metadata line: attaches to active record
+                            if current is not None:
+                                for p in cert_parts:
+                                    _apply_metadata_to_cert(current, p, blk)
+                        else:
+                            # Title line with inline metadata
+                            if current and current.name_val:
+                                finalize_pending_cert()
                             current = PendingCert()
-
-                        current.name_val = line_clean
-                        c_start = blk.raw_text.find(line_clean)
-                        if c_start != -1:
-                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
-                            current.name_spans.append(span)
-                            all_evidence.append(span)
+                            current.name_val = p0
+                            c0_start = blk.raw_text.find(p0)
+                            if c0_start != -1:
+                                span = _create_evidence_span(artifact_id, blk, c0_start, c0_start + len(p0))
+                                current.name_spans.append(span)
+                                all_evidence.append(span)
+                            for p in cert_parts[1:]:
+                                _apply_metadata_to_cert(current, p, blk)
                         continue
 
-                if current is None:
-                    current = PendingCert()
+                # Check if multi-line title continuation (e.g. "Professional Certificate" after "Meta Front-End Developer")
+                if current and current.name_val and not current.issuer_val and (
+                    line_clean.lower() in ["professional certificate", "certificate", "associate", "specialty", "professional", "foundation level"]
+                    or line_clean.lower().startswith("professional certificate")
+                ):
+                    current.name_val = f"{current.name_val} {line_clean}"
+                    c_start = blk.raw_text.find(line_clean)
+                    if c_start != -1:
+                        span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
+                        current.name_spans.append(span)
+                        all_evidence.append(span)
+                    continue
 
-                # Process labels on the current certification
-                if is_issuer_line:
-                    m = CERTIFICATION_LABEL_PATTERNS["issuer"].search(line_clean)
-                    if m:
-                        val = m.group(1).strip()
-                        current.issuer_val = val
-                        c_start = blk.raw_text.find(val)
+                # Check if line is a metadata label
+                if _is_metadata_token(line_clean):
+                    if current is not None:
+                        _apply_metadata_to_cert(current, line_clean, blk)
+                    continue
+
+                # Check fallback issuer before assuming new cert title
+                matched_fallback_issuer = None
+                matched_fallback_str = None
+                words_in_line = [w.lower().strip(".,:;/-()") for w in line_clean.split()]
+                has_title_kw = any(w in {"developer", "engineer", "architect", "practitioner", "associate", "specialist", "professional", "administrator", "foundation", "certified", "certificate", "expert"} for w in words_in_line)
+
+                if not has_title_kw:
+                    if "meta" in line_clean.lower():
+                        matched_fallback_issuer = "Meta"
+                        matched_fallback_str = "Meta"
+                    else:
+                        for kw, canonical_issuer in KNOWN_CERT_ISSUERS.items():
+                            pattern = r"\b" + re.escape(kw) + r"\b"
+                            match = re.search(pattern, line_clean, re.IGNORECASE)
+                            if match:
+                                matched_fallback_str = match.group(0)
+                                matched_fallback_issuer = canonical_issuer
+                                break
+
+                if matched_fallback_issuer:
+                    if current is not None:
+                        c_start = blk.raw_text.find(matched_fallback_str)
                         if c_start != -1:
-                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
+                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(matched_fallback_str))
                             current.issuer_spans.append(span)
                             all_evidence.append(span)
+                        current.issuer_val = matched_fallback_issuer
                     continue
 
-                if is_issued_date_line:
-                    m = CERTIFICATION_LABEL_PATTERNS["issued_date"].search(line_clean)
-                    if m:
-                        val = m.group(1).strip()
-                        current.issued_date_val = val
-                        c_start = blk.raw_text.find(val)
-                        if c_start != -1:
-                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
-                            current.issued_date_spans.append(span)
-                            all_evidence.append(span)
+                # Check if line is date only
+                date_matches = extract_date_range_matches(line_clean)
+                is_date_only = bool(date_matches) or bool(parse_single_date(line_clean))
+
+                if is_date_only:
+                    if current is not None:
+                        _apply_metadata_to_cert(current, line_clean, blk)
                     continue
 
-                if is_expiry_date_line:
-                    m = CERTIFICATION_LABEL_PATTERNS["expiry_date"].search(line_clean)
-                    if m:
-                        val = m.group(1).strip()
-                        current.expiry_date_val = val
-                        c_start = blk.raw_text.find(val)
-                        if c_start != -1:
-                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
-                            current.expiry_date_spans.append(span)
-                            all_evidence.append(span)
-                    continue
-
-                if is_cred_id_line:
-                    m = CERTIFICATION_LABEL_PATTERNS["credential_id"].search(line_clean)
-                    if m:
-                        val = m.group(1).strip()
-                        current.cred_id_val = val
-                        c_start = blk.raw_text.find(val)
-                        if c_start != -1:
-                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
-                            current.cred_id_spans.append(span)
-                            all_evidence.append(span)
-                    continue
-
-                if is_cred_url_line:
-                    m = CERTIFICATION_LABEL_PATTERNS["credential_url"].search(line_clean)
-                    if m:
-                        val = m.group(1).strip()
-                        current.cred_url_val = val
-                        c_start = blk.raw_text.find(val)
-                        if c_start != -1:
-                            span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(val))
-                            current.cred_url_spans.append(span)
-                            all_evidence.append(span)
-                    continue
-
-                # Fallback issuer matching
-                if not current.issuer_val:
-                    for kw, canonical_issuer in KNOWN_CERT_ISSUERS.items():
-                        pattern = r"\b" + re.escape(kw) + r"\b"
-                        match = re.search(pattern, line_clean, re.IGNORECASE)
-                        if match:
-                            matched_str = match.group(0)
-                            c_start = blk.raw_text.find(matched_str)
-                            if c_start != -1:
-                                span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(matched_str))
-                                current.issuer_spans.append(span)
-                                all_evidence.append(span)
-                            current.issuer_val = canonical_issuer
-                            break
-
-                # Fallback unlabelled date matching
-                if not current.issued_date_val:
-                    date_ranges = extract_date_range_matches(line_clean)
-                    if date_ranges:
-                        c_start, c_end, full_str, raw_start, raw_end = date_ranges[0]
-                        d_span = _create_evidence_span(artifact_id, blk, c_start, c_end)
-                        all_evidence.append(d_span)
-                        current.issued_date_val = raw_start
-                        current.issued_date_spans.append(d_span)
-                        current.expiry_date_val = raw_end
-                        current.expiry_date_spans.append(d_span)
-                    else:
-                        s_d = parse_single_date(line_clean)
-                        if s_d:
-                            c_start = blk.raw_text.find(line_clean)
-                            if c_start != -1:
-                                d_span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
-                                all_evidence.append(d_span)
-                                current.issued_date_val = line_clean
-                                current.issued_date_spans.append(d_span)
+                # New certification title
+                if current and current.name_val:
+                    finalize_pending_cert()
+                current = PendingCert()
+                current.name_val = line_clean
+                c_start = blk.raw_text.find(line_clean)
+                if c_start != -1:
+                    span = _create_evidence_span(artifact_id, blk, c_start, c_start + len(line_clean))
+                    current.name_spans.append(span)
+                    all_evidence.append(span)
 
         finalize_pending_cert()
 
@@ -1096,6 +1147,8 @@ def extract_language_records(
         for idx in range(section.start_sequence_index, section.end_sequence_index + 1):
             if idx in block_map:
                 blk = block_map[idx]
+                if _is_footer_block(blk):
+                    continue
                 if section.heading and section.heading.heading_sequence_index == idx:
                     continue
                 sec_blocks.append(blk)
@@ -1109,18 +1162,19 @@ def extract_language_records(
 
             items: List[str] = []
             for l in lines:
-                if "," in l:
-                    parts = re.split(r",(?![^(]*\))", l)
-                    for p in parts:
-                        p_str = p.strip(" •-*·\t")
-                        if p_str:
-                            items.append(p_str)
-                else:
-                    items.append(l)
+                parts = re.split(r"[,;|](?![^(]*\))", l)
+                for p in parts:
+                    p_str = p.strip(" •-*·\t")
+                    if p_str:
+                        items.append(p_str)
 
             for item in items:
                 item_clean = item.strip()
                 if not item_clean:
+                    continue
+
+                # Skip synthetic fixture / disclaimer boilerplate
+                if any(dk in item_clean.lower() for dk in ["synthetic", "fixture", "candidate data", "confidential", "all rights reserved"]):
                     continue
 
                 # Check if programming language

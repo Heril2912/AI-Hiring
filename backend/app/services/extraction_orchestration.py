@@ -332,9 +332,17 @@ def orchestrate_resume_extraction(
             persist_candidate_profile,
         )
 
+        # Determine deterministic reference as-of date from persisted artifact created_at
+        as_of_date_str = (
+            artifact_locked.created_at.strftime("%Y-%m")
+            if artifact_locked.created_at is not None
+            else None
+        )
+
         assembled_profile = assemble_candidate_profile(
             blocks=blocks_data,
             artifact_id=str(artifact_locked.artifact_id),
+            as_of_date=as_of_date_str,
             extraction_review_required=persisted_extraction.review_required,
         )
 

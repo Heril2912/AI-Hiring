@@ -58,7 +58,7 @@ from app.services.skill_summary_extraction import (
 logger = logging.getLogger("ai_hiring.services.profile_assembly")
 
 PROFILE_PIPELINE_VERSION = (
-    f"pipeline-v1.1[{SECTION_PARSER_VERSION}+{IDENTITY_PARSER_VERSION}+"
+    f"pipeline-v1.3[{SECTION_PARSER_VERSION}+{IDENTITY_PARSER_VERSION}+"
     f"{SKILL_SUMMARY_PARSER_VERSION}+{EMPLOYMENT_PARSER_VERSION}+"
     f"{EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION}]"
 )
@@ -257,12 +257,21 @@ def assemble_candidate_profile(
         )
 
     # 2. Skills & Professional Summary
-    skill_res = extract_skills_and_summary(blocks, sec_res, artifact_id)
+    skill_res = extract_skills_and_summary(
+        blocks,
+        sec_res,
+        artifact_id,
+        candidate_name=ident_res.identity.full_name.value if ident_res.identity.full_name else None,
+    )
     for sw in skill_res.warnings:
         all_warnings.append(
             ProfileAssemblyWarning(
                 code=sw.code.value,
-                category="SKILL_SUMMARY",
+                category=(
+                    "SKILL_NORMALIZATION"
+                    if sw.code.value == "UNRESOLVED_SKILL_CANDIDATE"
+                    else "SKILL_SUMMARY"
+                ),
                 field_name=sw.field_name,
                 count=sw.candidate_count,
                 evidence_id=sw.evidence_id,
@@ -477,11 +486,6 @@ def assemble_candidate_profile(
             if "MISSING" in w.code or "AMBIGUOUS" in w.code or "INVALID" in w.code or "CONFLICT" in w.code:
                 review_required = True
                 break
-
-    # Unresolved skills check
-    has_unresolved_skills = any(sk.review_required for sk in skill_res.skills)
-    if has_unresolved_skills:
-        review_required = True
 
     return ProfileAssemblyResult(
         schema_version="1.0",
