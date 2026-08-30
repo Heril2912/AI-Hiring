@@ -21,6 +21,15 @@ from .integrity import (
     CorpusValidationReport,
     compute_sha256_hash,
 )
+from .evaluator import (
+    APPROVED_BENCHMARK_CORPUS_SIZE,
+    EVALUATION_SCHEMA_VERSION,
+    EVALUATOR_VERSION,
+    FullEvaluationReport,
+    MetricCounts,
+    ParserAccuracyEvaluator,
+    SplitEvaluationResult,
+)
 
 __all__ = [
     "StrictEvaluationSchema",
@@ -42,4 +51,11 @@ __all__ = [
     "compute_sha256_hash",
     "CorpusValidationReport",
     "CorpusIntegrityValidator",
+    "ParserAccuracyEvaluator",
+    "FullEvaluationReport",
+    "SplitEvaluationResult",
+    "MetricCounts",
+    "EVALUATOR_VERSION",
+    "EVALUATION_SCHEMA_VERSION",
+    "APPROVED_BENCHMARK_CORPUS_SIZE",
 ]
