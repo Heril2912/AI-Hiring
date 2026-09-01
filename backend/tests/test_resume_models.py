@@ -26,6 +26,9 @@ def test_models_exported_and_tables_registered():
         "candidate_identities",
         "candidate_profiles",
         "profile_corrections",
+        "users",
+        "user_sessions",
+        "security_audit_events",
     }
 
 

@@ -1,3 +1,22 @@
+from app.schemas.auth import (
+    AuthErrorDetail,
+    BootstrapAdminInput,
+    SecurityAuditEventResponse,
+    UserResponse,
+    UserSessionResponse,
+)
+from app.schemas.candidate import (
+    CandidateIdentity,
+    CandidateProfessionalProfile,
+    EvidenceSpan,
+    ExtractedField,
+)
+from app.schemas.correction import (
+    ProfileCorrectionRequest,
+    ProfileCorrectionResponse,
+    ProfileProvenance,
+    ProfileSummaryResponse,
+)
 from app.schemas.education_project_certification import (
     CertificationExtractionResult,
     CertificationWarning,
@@ -18,12 +37,6 @@ from app.schemas.education_project_certification import (
     ProjectWarning,
     ProjectWarningCode,
 )
-from app.schemas.profile_assembly import (
-    CandidateProfileResponse,
-    ProfileAssemblyResult,
-    ProfileAssemblyWarning,
-    ProfileAssemblyWarningCode,
-)
 from app.schemas.employment import (
     DatePrecision,
     EmploymentExtractionResult,
@@ -37,7 +50,17 @@ from app.schemas.extraction import (
     ExtractionBlockData,
     ExtractionResult,
 )
+from app.schemas.profile_assembly import (
+    CandidateProfileResponse,
+    ProfileAssemblyResult,
+    ProfileAssemblyWarning,
+    ProfileAssemblyWarningCode,
+)
 from app.schemas.resume import (
+    CandidateListItemResponse,
+    ResumeExtractionBlockResponse,
+    ResumeExtractionResponse,
+    ResumeProcessResponse,
     ResumeStatusResponse,
     ResumeUploadErrorDetail,
     ResumeUploadResponse,
@@ -66,6 +89,10 @@ __all__ = [
     "ResumeUploadResponse",
     "ResumeStatusResponse",
     "ResumeUploadErrorDetail",
+    "ResumeProcessResponse",
+    "ResumeExtractionResponse",
+    "ResumeExtractionBlockResponse",
+    "CandidateListItemResponse",
     "ExtractionBlockData",
     "ExtractionResult",
     "SectionType",
@@ -112,7 +139,21 @@ __all__ = [
     "ProfileAssemblyWarning",
     "ProfileAssemblyResult",
     "CandidateProfileResponse",
+    "CandidateIdentity",
+    "CandidateProfessionalProfile",
+    "EvidenceSpan",
+    "ExtractedField",
+    "ProfileCorrectionRequest",
+    "ProfileCorrectionResponse",
+    "ProfileSummaryResponse",
+    "ProfileProvenance",
+    "UserResponse",
+    "UserSessionResponse",
+    "SecurityAuditEventResponse",
+    "BootstrapAdminInput",
+    "AuthErrorDetail",
 ]
+
 
 
 

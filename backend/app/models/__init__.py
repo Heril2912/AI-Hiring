@@ -1,3 +1,13 @@
+from app.models.auth import (
+    AuditEventType,
+    AuditReasonCode,
+    AuditResult,
+    SecurityAuditEventRecord,
+    SessionRevokeReason,
+    UserRecord,
+    UserRole,
+    UserSessionRecord,
+)
 from app.models.base import Base
 from app.models.candidate import (
     CandidateIdentityRecord,
@@ -27,4 +37,13 @@ __all__ = [
     "CandidateIdentityRecord",
     "CandidateProfileRecord",
     "ProfileCorrectionRecord",
+    "UserRole",
+    "SessionRevokeReason",
+    "AuditEventType",
+    "AuditResult",
+    "AuditReasonCode",
+    "UserRecord",
+    "UserSessionRecord",
+    "SecurityAuditEventRecord",
 ]
+

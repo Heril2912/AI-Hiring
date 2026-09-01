@@ -19,10 +19,12 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = Base.metadata
 
-# obtain database URL from application settings and escape percent signs
-settings = get_settings()
-escaped_db_url = settings.database_url.replace("%", "%%")
-config.set_main_option("sqlalchemy.url", escaped_db_url)
+# obtain database URL from application settings and escape percent signs if not already provided
+if not config.get_main_option("sqlalchemy.url"):
+    settings = get_settings()
+    escaped_db_url = settings.database_url.replace("%", "%%")
+    config.set_main_option("sqlalchemy.url", escaped_db_url)
+
 
 
 def run_migrations_offline() -> None:
