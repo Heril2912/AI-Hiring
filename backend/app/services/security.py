@@ -113,6 +113,73 @@ def verify_password(plaintext_password: str, encoded_hash: str) -> bool:
         return False
 
 
+def needs_rehash(
+    encoded_hash: str,
+    target_n: int = 16384,
+    target_r: int = 8,
+    target_p: int = 1,
+    target_dklen: int = 32,
+) -> bool:
+    """
+    Checks if an encoded scrypt hash was created with older/different parameters than the target parameters.
+    """
+    if not encoded_hash:
+        return True
+
+    try:
+        parts = encoded_hash.split("$")
+        if len(parts) != 7:
+            return True
+
+        algo, v_part, n_part, r_part, p_part, salt_hex, expected_key_hex = parts
+
+        if algo != _SCRYPT_PREFIX or v_part != f"v={_SCRYPT_VERSION}":
+            return True
+
+        n = int(n_part.split("=")[1])
+        r = int(r_part.split("=")[1])
+        p = int(p_part.split("=")[1])
+        dklen = len(bytes.fromhex(expected_key_hex))
+
+        return n != target_n or r != target_r or p != target_p or dklen != target_dklen
+    except Exception:
+        return True
+
+
+def hash_token(raw_token: str) -> str:
+    """
+    Computes the standard SHA-256 hex digest for a raw token (session token or CSRF token).
+    Never stores or compares raw tokens directly in persistence layer.
+    """
+    if not raw_token or not isinstance(raw_token, str):
+        raise ValueError("Token must be a non-empty string.")
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def generate_secure_token() -> str:
+    """
+    Generates a cryptographically secure URL-safe random string containing at least 256 bits of entropy.
+    """
+    import secrets
+    return secrets.token_urlsafe(32)
+
+
+# Pre-computed dummy hash using standard parameters for constant-time mitigation when account is absent
+_DUMMY_SCRYPT_HASH = (
+    "scrypt$v=1$n=16384$r=8$p=1$"
+    "00000000000000000000000000000000$"
+    "0000000000000000000000000000000000000000000000000000000000000000"
+)
+
+
+def dummy_verify_password(plaintext_password: str) -> None:
+    """
+    Executes a dummy scrypt verification against a pre-computed hash to normalize response timing
+    and prevent account enumeration via timing side-channels.
+    """
+    _ = verify_password(plaintext_password or "dummy_password_timing_normalizer", _DUMMY_SCRYPT_HASH)
+
+
 def benchmark_scrypt(
     iterations: int = 5,
     n: int = 16384,
@@ -144,3 +211,4 @@ def benchmark_scrypt(
         durations.append((t1 - t0) * 1000.0)
 
     return sum(durations) / len(durations)
+
