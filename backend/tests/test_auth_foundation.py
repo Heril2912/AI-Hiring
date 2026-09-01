@@ -508,6 +508,30 @@ def test_password_and_hash_absence_from_outputs(auth_db, capsys):
     assert admin.password_hash not in captured.err
 
 
+# 21. Interactive password confirmation matching and mismatch testing
+def test_interactive_bootstrap_cli_flow(auth_db, monkeypatch, capsys):
+    import app.cli.bootstrap_admin as b_admin
+
+    # Test password mismatch
+    prompts = ["Password123!", "MismatchPassword123!"]
+    monkeypatch.setattr("getpass.getpass", lambda prompt="": prompts.pop(0))
+    status_mismatch = b_admin.run_bootstrap_cli(["--email", "cli.mismatch@org.test", "--display-name", "CLI Admin"])
+    assert status_mismatch == 1
+    captured_mismatch = capsys.readouterr()
+    assert "Passwords do not match" in captured_mismatch.err
+
+    # Test successful interactive confirmation
+    prompts_success = ["ValidPassword123!", "ValidPassword123!"]
+    monkeypatch.setattr("getpass.getpass", lambda prompt="": prompts_success.pop(0))
+    monkeypatch.setattr(b_admin, "SessionLocal", lambda: auth_db)
+    status_ok = b_admin.run_bootstrap_cli(["--email", "cli.success@org.test", "--display-name", "CLI Admin Success"])
+    assert status_ok == 0
+    captured_ok = capsys.readouterr()
+    assert "Successfully bootstrapped Administrator account" in captured_ok.out
+    assert "ValidPassword123!" not in captured_ok.out
+    assert "ValidPassword123!" not in captured_ok.err
+
+
 # 21. Migration upgrade from Milestone 1 and isolated downgrade
 def test_migration_upgrade_and_downgrade_isolated(capsys):
     from alembic.config import Config

@@ -1,27 +1,44 @@
 import React, { useEffect, useState } from "react";
-import { Icon } from "./components/Icon";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { LoginPage } from "./components/auth/LoginPage";
+import { ChangePasswordPage } from "./components/auth/ChangePasswordPage";
+import { AuthenticatedShell } from "./components/AuthenticatedShell";
+import { AdminWorkspace } from "./components/admin/AdminWorkspace";
+import { ReviewerWorkspace } from "./components/reviewer/ReviewerWorkspace";
 import { CandidatesDirectory, CandidateSummary } from "./components/CandidatesDirectory";
 import { ResumeUpload } from "./components/ResumeUpload";
 import { CandidateProfileReview, CandidateProfileData } from "./components/CandidateProfileReview";
 import { ExtractionReview, ExtractionResultData } from "./components/ExtractionReview";
+import { apiFetch } from "./api/client";
+import { Icon } from "./components/Icon";
 
-type ActiveView = "candidates" | "upload" | "profile" | "extraction";
 type ConnectionState = "checking" | "connected" | "unavailable";
 
-export function App() {
-  const [activeView, setActiveView] = useState<ActiveView>("candidates");
+function AuthenticatedApp() {
+  const { user } = useAuth();
+  const role = user?.role || "REVIEWER";
+
+  // Navigation tab state
+  const [activeNavTab, setActiveNavTab] = useState<string>(
+    role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews"
+  );
+  const [activeView, setActiveView] = useState<"candidates" | "upload" | "profile" | "extraction">("candidates");
+
+  useEffect(() => {
+    setActiveNavTab(role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews");
+  }, [role]);
+
+  // Health check
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
+
+  // Recruiter candidate state
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(false);
-
-  // Selected candidate state
-  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<CandidateProfileData | null>(null);
   const [selectedExtraction, setSelectedExtraction] = useState<ExtractionResultData | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState<boolean>(false);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
 
-  // Health check
   useEffect(() => {
     const controller = new AbortController();
 
@@ -53,15 +70,13 @@ export function App() {
     return () => controller.abort();
   }, []);
 
-  // Fetch candidates list
+  // Fetch candidates if role is RECRUITER
   const fetchCandidates = async () => {
+    if (role !== "RECRUITER") return;
     try {
       setIsLoadingCandidates(true);
-      const res = await fetch("/api/v1/resumes");
-      if (res.ok) {
-        const data: CandidateSummary[] = await res.json();
-        setCandidates(data);
-      }
+      const data = await apiFetch<CandidateSummary[]>("/api/v1/resumes");
+      setCandidates(data || []);
     } catch (e) {
       console.error("Failed to fetch candidates", e);
     } finally {
@@ -70,43 +85,35 @@ export function App() {
   };
 
   useEffect(() => {
-    fetchCandidates();
-  }, []);
+    if (role === "RECRUITER") {
+      fetchCandidates();
+    }
+  }, [role]);
 
-  // Load specific candidate profile
   const handleSelectCandidate = async (artifactId: string) => {
-    setSelectedArtifactId(artifactId);
     setIsLoadingProfile(true);
     setProfileLoadError(null);
 
     try {
-      // 1. Fetch Profile
-      const profRes = await fetch(`/api/v1/resumes/${artifactId}/profile`);
-      if (!profRes.ok) {
-        const err = await profRes.json();
-        setProfileLoadError(err?.detail?.message || "Failed to load candidate profile.");
-        setIsLoadingProfile(false);
-        return;
-      }
-      const profData: CandidateProfileData = await profRes.json();
+      const profData = await apiFetch<CandidateProfileData>(
+        `/api/v1/resumes/${artifactId}/profile`
+      );
       setSelectedProfile(profData);
 
-      // 2. Fetch Extraction Blocks
       try {
-        const extRes = await fetch(`/api/v1/resumes/${artifactId}/extraction`);
-        if (extRes.ok) {
-          const extData: ExtractionResultData = await extRes.json();
-          setSelectedExtraction(extData);
-        }
+        const extData = await apiFetch<ExtractionResultData>(
+          `/api/v1/resumes/${artifactId}/extraction`
+        );
+        setSelectedExtraction(extData);
       } catch {
         setSelectedExtraction(null);
       }
 
       setActiveView("profile");
       fetchCandidates();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to load candidate", err);
-      setProfileLoadError("A network error occurred while loading profile.");
+      setProfileLoadError(err?.message || "A network error occurred while loading profile.");
     } finally {
       setIsLoadingProfile(false);
     }
@@ -117,131 +124,138 @@ export function App() {
     handleSelectCandidate(artifactId);
   };
 
+  const handleNavigateTab = (tab: string) => {
+    setActiveNavTab(tab);
+    if (tab === "candidates") {
+      setActiveView("candidates");
+      fetchCandidates();
+    } else if (tab === "upload") {
+      setActiveView("upload");
+    }
+  };
+
   return (
-    <div className="dashboard-app-container">
-      {/* Top Application Navigation Bar */}
-      <header className="dashboard-top-nav">
-        <div className="nav-brand-section">
-          <div className="brand-logo-icon">
-            <Icon name="sparkles" size={18} />
-          </div>
-          <div className="brand-title-group">
-            <h1 className="brand-title">Smart Hiring Platform</h1>
-            <span className="brand-subtitle">Evidence-Based Parsing &amp; Audited Profiles</span>
-          </div>
-        </div>
+    <AuthenticatedShell
+      activeNavTab={activeNavTab}
+      onNavigateTab={handleNavigateTab}
+      candidateCount={candidates.length}
+      connectionState={connectionState}
+    >
+      {role === "ADMIN" && <AdminWorkspace activeTab={activeNavTab} />}
 
-        {/* Global Navigation Tabs */}
-        <nav className="nav-links-group" aria-label="Main Navigation">
-          <button
-            type="button"
-            className={`nav-tab-btn ${activeView === "candidates" || activeView === "profile" || activeView === "extraction" ? "tab-active" : ""}`}
-            onClick={() => {
-              setActiveView("candidates");
-              fetchCandidates();
-            }}
-          >
-            <Icon name="user" size={15} />
-            <span>Candidates</span>
-            {candidates.length > 0 && (
-              <span className="nav-count-pill">{candidates.length}</span>
-            )}
-          </button>
+      {role === "REVIEWER" && <ReviewerWorkspace />}
 
-          <button
-            type="button"
-            className={`nav-tab-btn ${activeView === "upload" ? "tab-active" : ""}`}
-            onClick={() => setActiveView("upload")}
-          >
-            <Icon name="upload" size={15} />
-            <span>Upload Resume</span>
-          </button>
-        </nav>
-
-        {/* System Health Indicator */}
-        <div className="nav-system-status">
-          <span className={`status-indicator-dot ${connectionState}`} />
-          <span className="status-indicator-text">
-            {connectionState === "checking" && "Connecting..."}
-            {connectionState === "connected" && "System Connected"}
-            {connectionState === "unavailable" && "Service Unavailable"}
-          </span>
-        </div>
-      </header>
-
-      {/* Main Content Viewport */}
-      <main className="dashboard-main-viewport">
-        {isLoadingProfile && (
-          <div className="profile-loading-overlay">
-            <div className="loading-spinner" />
-            <p className="loading-text">Loading candidate profile &amp; verified evidence...</p>
-          </div>
-        )}
-
-        {profileLoadError && (
-          <div className="feedback-box error" style={{ maxWidth: "600px", margin: "32px auto" }}>
-            <Icon name="alert-triangle" size={18} />
-            <div className="error-content">
-              <p className="feedback-text error">{profileLoadError}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveView("candidates");
-                  setProfileLoadError(null);
-                }}
-                className="btn btn-secondary btn-sm"
-                style={{ marginTop: "10px" }}
-              >
-                Back to Candidates
-              </button>
+      {role === "RECRUITER" && (
+        <>
+          {isLoadingProfile && (
+            <div className="profile-loading-overlay">
+              <div className="loading-spinner" />
+              <p className="loading-text">Loading candidate profile &amp; verified evidence...</p>
             </div>
-          </div>
-        )}
+          )}
 
-        {!isLoadingProfile && !profileLoadError && (
-          <>
-            {activeView === "candidates" && (
-              <CandidatesDirectory
-                candidates={candidates}
-                isLoading={isLoadingCandidates}
-                onSelectCandidate={handleSelectCandidate}
-                onNavigateUpload={() => setActiveView("upload")}
-              />
-            )}
+          {profileLoadError && (
+            <div className="feedback-box error" style={{ maxWidth: "600px", margin: "32px auto" }}>
+              <Icon name="alert-triangle" size={18} />
+              <div className="error-content">
+                <p className="feedback-text error">{profileLoadError}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveView("candidates");
+                    setProfileLoadError(null);
+                  }}
+                  className="btn btn-secondary btn-sm"
+                  style={{ marginTop: "10px" }}
+                >
+                  Back to Candidates
+                </button>
+              </div>
+            </div>
+          )}
 
-            {activeView === "upload" && (
-              <ResumeUpload
-                onCandidateProcessed={handleCandidateProcessed}
-                onNavigateCandidates={() => {
-                  setActiveView("candidates");
-                  fetchCandidates();
-                }}
-              />
-            )}
+          {!isLoadingProfile && !profileLoadError && (
+            <>
+              {activeView === "candidates" && (
+                <CandidatesDirectory
+                  candidates={candidates}
+                  isLoading={isLoadingCandidates}
+                  onSelectCandidate={handleSelectCandidate}
+                  onNavigateUpload={() => {
+                    setActiveView("upload");
+                    setActiveNavTab("upload");
+                  }}
+                />
+              )}
 
-            {activeView === "profile" && selectedProfile && (
-              <CandidateProfileReview
-                profile={selectedProfile}
-                extraction={selectedExtraction}
-                onNavigateBack={() => {
-                  setActiveView("candidates");
-                  fetchCandidates();
-                }}
-                onNavigateExtraction={() => setActiveView("extraction")}
-              />
-            )}
+              {activeView === "upload" && (
+                <ResumeUpload
+                  onCandidateProcessed={handleCandidateProcessed}
+                  onNavigateCandidates={() => {
+                    setActiveView("candidates");
+                    setActiveNavTab("candidates");
+                    fetchCandidates();
+                  }}
+                />
+              )}
 
-            {activeView === "extraction" && selectedExtraction && (
-              <ExtractionReview
-                extraction={selectedExtraction}
-                onNavigateBack={() => setActiveView("profile")}
-              />
-            )}
-          </>
-        )}
-      </main>
-    </div>
+              {activeView === "profile" && selectedProfile && (
+                <CandidateProfileReview
+                  profile={selectedProfile}
+                  extraction={selectedExtraction}
+                  onNavigateBack={() => {
+                    setActiveView("candidates");
+                    setActiveNavTab("candidates");
+                    fetchCandidates();
+                  }}
+                  onNavigateExtraction={() => setActiveView("extraction")}
+                />
+              )}
+
+              {activeView === "extraction" && selectedExtraction && (
+                <ExtractionReview
+                  extraction={selectedExtraction}
+                  onNavigateBack={() => setActiveView("profile")}
+                />
+              )}
+            </>
+          )}
+        </>
+      )}
+    </AuthenticatedShell>
+  );
+}
+
+function MainContent() {
+  const { status, refreshSession } = useAuth();
+
+  if (status === "RESTORING_SESSION") {
+    return (
+      <div className="auth-loading-splash" role="status" aria-live="polite">
+        <div className="loading-spinner" />
+        <p className="loading-text">Authenticating hiring workspace session...</p>
+      </div>
+    );
+  }
+
+  if (status === "UNAUTHENTICATED") {
+    return <LoginPage />;
+  }
+
+  if (status === "PASSWORD_CHANGE_REQUIRED") {
+    return <ChangePasswordPage />;
+  }
+
+  return <AuthenticatedApp />;
+}
+
+export function App() {
+  return (
+    <AuthProvider>
+      <MainContent />
+    </AuthProvider>
   );
 }
 
 export default App;
+

@@ -158,3 +158,7 @@ def run_bootstrap_cli(args=None) -> int:
         email=parsed_args.email,
         display_name=parsed_args.display_name,
     )
+
+
+if __name__ == "__main__":
+    sys.exit(run_bootstrap_cli())
