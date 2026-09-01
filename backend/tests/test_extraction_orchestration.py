@@ -338,14 +338,30 @@ def api_client(tmp_path, db_session):
 
     from app.main import app
     from fastapi.testclient import TestClient
-    from app.database import get_db
+    from unittest.mock import MagicMock
+    from app.api.auth import AuthenticatedContext, require_recruiter
+    from app.models.auth import UserRecord, UserRole
     from app.config import get_settings
+    from app.database import get_db
+
+    mock_recruiter = UserRecord(
+        user_id=uuid.uuid4(),
+        email="mock.recruiter@company.test",
+        display_name="Mock Recruiter",
+        password_hash="mock",
+        role=UserRole.RECRUITER,
+        is_active=True,
+        must_change_password=False,
+    )
+    mock_ctx = AuthenticatedContext(user=mock_recruiter, session=MagicMock())
 
     app.dependency_overrides[get_settings] = override_settings
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[require_recruiter] = lambda: mock_ctx
 
     client = TestClient(app)
     yield client, db_session, settings, quarantine_dir
+    app.dependency_overrides.clear()
 
     app.dependency_overrides.clear()
 

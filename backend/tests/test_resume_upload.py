@@ -152,8 +152,23 @@ def test_client(tmp_path, mock_db_session):
         finally:
             mock_db_session.close()
 
+    from app.api.auth import AuthenticatedContext, require_recruiter
+    from app.models.auth import UserRecord, UserRole
+
+    mock_recruiter = UserRecord(
+        user_id=uuid.uuid4(),
+        email="mock.recruiter@company.test",
+        display_name="Mock Recruiter",
+        password_hash="mock",
+        role=UserRole.RECRUITER,
+        is_active=True,
+        must_change_password=False,
+    )
+    mock_ctx = AuthenticatedContext(user=mock_recruiter, session=MagicMock())
+
     app.dependency_overrides[get_settings] = override_get_settings
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[require_recruiter] = lambda: mock_ctx
 
     client = TestClient(app)
     yield client, intake_dir, quarantine_dir, mock_db_session, test_settings
