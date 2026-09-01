@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { apiFetch } from "../api/client";
 import { Icon } from "./Icon";
 import { EvidenceDrawer } from "./EvidenceDrawer";
 import { VersionHistoryDrawer, ProfileSummary } from "./VersionHistoryDrawer";
@@ -208,13 +209,12 @@ export function CandidateProfileReview({
   const fetchHistory = async () => {
     try {
       setIsLoadingHistory(true);
-      const res = await fetch(`/api/v1/resumes/${currentProfile.artifactId}/profiles`);
-      if (res.ok) {
-        const data: ProfileSummary[] = await res.json();
-        setHistoryList(data);
-      }
-    } catch (e) {
-      console.error("Failed to fetch profile history", e);
+      const data = await apiFetch<ProfileSummary[]>(
+        `/api/v1/resumes/${currentProfile.artifactId}/profiles`
+      );
+      setHistoryList(data || []);
+    } catch (err) {
+      console.error("Failed to fetch history", err);
     } finally {
       setIsLoadingHistory(false);
     }
@@ -225,20 +225,17 @@ export function CandidateProfileReview({
   }, [currentProfile.artifactId, currentProfile.profileVersion]);
 
   const handleSelectVersion = async (version: number) => {
-    if (version === currentProfile.profileVersion) return;
     try {
       setIsLoadingHistory(true);
-      const res = await fetch(`/api/v1/resumes/${currentProfile.artifactId}/profile?version=${version}`);
-      if (res.ok) {
-        const data: CandidateProfileData = await res.json();
-        setCurrentProfile(data);
-        setSelectedVersion(version);
-        setIsCorrectionMode(false);
-        setErrorMessage(null);
-        setConflictError(false);
-      }
-    } catch (e) {
-      console.error("Failed to load profile version", e);
+      const data = await apiFetch<CandidateProfileData>(
+        `/api/v1/resumes/${currentProfile.artifactId}/profile?version=${version}`
+      );
+      setCurrentProfile(data);
+      setSelectedVersion(version);
+      setIsCorrectionMode(false);
+      setOperations([]);
+    } catch (err) {
+      console.error("Failed to load profile version", err);
     } finally {
       setIsLoadingHistory(false);
     }
@@ -247,18 +244,17 @@ export function CandidateProfileReview({
   const handleReloadLatest = async () => {
     try {
       setIsLoadingHistory(true);
-      const res = await fetch(`/api/v1/resumes/${currentProfile.artifactId}/profile`);
-      if (res.ok) {
-        const data: CandidateProfileData = await res.json();
-        setCurrentProfile(data);
-        setSelectedVersion(data.profileVersion);
-        setConflictError(false);
-        setErrorMessage(null);
-        setIsCorrectionMode(false);
-        fetchHistory();
-      }
-    } catch (e) {
-      console.error("Failed to reload latest profile", e);
+      const data = await apiFetch<CandidateProfileData>(
+        `/api/v1/resumes/${currentProfile.artifactId}/profile`
+      );
+      setCurrentProfile(data);
+      setSelectedVersion(data.profileVersion);
+      setConflictError(false);
+      setErrorMessage(null);
+      setIsCorrectionMode(false);
+      fetchHistory();
+    } catch (err) {
+      console.error("Failed to reload latest profile", err);
     } finally {
       setIsLoadingHistory(false);
     }
@@ -564,32 +560,14 @@ export function CandidateProfileReview({
         operations: totalOps,
       };
 
-      const res = await fetch(`/api/v1/resumes/${currentProfile.artifactId}/profile-corrections`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.status === 409) {
-        const errJson = await res.json();
-        if (errJson?.detail?.code === "PROFILE_VERSION_CONFLICT") {
-          setConflictError(true);
-          setErrorMessage(
-            "Conflict: A newer profile version exists. Please reload to review the latest changes before correcting."
-          );
-        } else {
-          setErrorMessage(errJson?.detail?.message || "Correction conflict encountered.");
+      const responseData = await apiFetch<any>(
+        `/api/v1/resumes/${currentProfile.artifactId}/profile-corrections`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
         }
-        return;
-      }
+      );
 
-      if (!res.ok) {
-        const errJson = await res.json();
-        setErrorMessage(errJson?.detail?.message || "Failed to submit profile correction.");
-        return;
-      }
-
-      const responseData = await res.json();
       setCurrentProfile(responseData.profile);
       setSelectedVersion(responseData.newProfileVersion);
       setIsCorrectionMode(false);
@@ -597,9 +575,15 @@ export function CandidateProfileReview({
       setSuccessToast(`Profile Version ${responseData.newProfileVersion} created successfully.`);
       fetchHistory();
       setTimeout(() => setSuccessToast(null), 5000);
-    } catch (err) {
-      console.error("Submission error", err);
-      setErrorMessage("An unexpected network or service error occurred.");
+    } catch (err: any) {
+      if (err?.code === "PROFILE_VERSION_CONFLICT") {
+        setConflictError(true);
+        setErrorMessage(
+          "Conflict: A newer profile version exists. Please reload to review the latest changes before correcting."
+        );
+      } else {
+        setErrorMessage(err?.message || "Failed to submit profile correction.");
+      }
     } finally {
       setIsSubmitting(false);
     }

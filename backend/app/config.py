@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     max_docx_extracted_chars: int = 500000
     # Authentication and Session Configuration
     session_cookie_name: str = "ai_hiring_session"
-    session_cookie_secure: bool = True
+    session_cookie_secure: bool = False
     session_cookie_samesite: str = "lax"
     session_idle_lifetime_seconds: int = 1800
     session_absolute_lifetime_seconds: int = 43200

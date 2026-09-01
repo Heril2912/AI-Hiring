@@ -1,4 +1,5 @@
 import React, { useState, useRef, ChangeEvent, FormEvent, DragEvent } from "react";
+import { apiFetch } from "../api/client";
 import { Icon } from "./Icon";
 import { CandidateProfileData } from "./CandidateProfileReview";
 import { ExtractionResultData } from "./ExtractionReview";
@@ -152,48 +153,23 @@ export function ResumeUpload({ onCandidateProcessed, onNavigateCandidates }: Res
 
     try {
       // 1. Upload to intake endpoint
-      const uploadRes = await fetch("/api/v1/resumes", {
+      const uploadRes = await apiFetch<UploadResponseData>("/api/v1/resumes", {
         method: "POST",
         body: formData,
       });
 
-      if (!uploadRes.ok) {
-        const errorData = await uploadRes.json();
-        const code = errorData?.detail?.code;
-        const msg = (code && ERROR_MESSAGES[code]) || errorData?.detail?.message || "Document upload failed.";
-        setUploadState("failed");
-        setErrorMessage(msg);
-        return;
-      }
-
-      const uploadData: UploadResponseData = await uploadRes.json();
-      const artifactId = uploadData.artifactId;
+      setUploadState("validating");
+      const artifactId = uploadRes.artifactId;
       setCurrentArtifactId(artifactId);
 
-      // 2. Validate & Read document
+      // 2. Trigger asynchronous background extraction processing
       setUploadState("reading");
+      const processRes = await apiFetch<ProcessResponseData>(
+        `/api/v1/resumes/${artifactId}/process`,
+        { method: "POST" }
+      );
 
-      // 3. Trigger extraction & profile assembly
-      setUploadState("assembling");
-      const processRes = await fetch(`/api/v1/resumes/${artifactId}/process`, {
-        method: "POST",
-      });
-
-      if (!processRes.ok) {
-        const errorData = await processRes.json();
-        const code = errorData?.detail?.code;
-        const msg =
-          (code && ERROR_MESSAGES[code]) ||
-          errorData?.detail?.message ||
-          "Could not process document text.";
-        setUploadState("failed");
-        setErrorMessage(msg);
-        return;
-      }
-
-      const processData: ProcessResponseData = await processRes.json();
-
-      if (processData.reviewRequired) {
+      if (processRes.reviewRequired) {
         setUploadState("needs_review");
       } else {
         setUploadState("ready");
