@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
+from app.api.auth import AuthenticatedContext, require_recruiter
 from app.config import Settings, get_settings
 from app.database import get_db
 from app.models.extraction import ResumeExtraction
@@ -48,6 +49,7 @@ logger = logging.getLogger("ai_hiring.api.resumes")
 router = APIRouter(
     prefix="/api/v1/resumes",
     tags=["resumes"],
+    dependencies=[Depends(require_recruiter)],
 )
 
 CHUNK_SIZE_BYTES = 1024 * 1024  # 1 MiB chunk size

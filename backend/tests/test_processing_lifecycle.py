@@ -218,8 +218,27 @@ class MockStatusDBSession:
         self.closed = True
 
 
-# 15. Existing artifact status endpoint returns the correct safe fields.
+def _get_mock_recruiter_ctx():
+    from unittest.mock import MagicMock
+    from app.api.auth import AuthenticatedContext
+    from app.models.auth import UserRecord, UserRole
+
+    user = UserRecord(
+        user_id=uuid.uuid4(),
+        email="recruiter.status@company.test",
+        display_name="Recruiter Status",
+        password_hash="mock",
+        role=UserRole.RECRUITER,
+        is_active=True,
+        must_change_password=False,
+    )
+    return AuthenticatedContext(user=user, session=MagicMock())
+
+
+# 15. GET /api/v1/resumes/{artifact_id}/status returns correct status payload.
 def test_get_resume_status_success(tmp_path):
+    from app.api.auth import require_recruiter
+
     art_id = uuid.uuid4()
     job_id = uuid.uuid4()
 
@@ -245,6 +264,7 @@ def test_get_resume_status_success(tmp_path):
     mock_db = MockStatusDBSession(artifact=artifact, job=job)
 
     app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[require_recruiter] = _get_mock_recruiter_ctx
     client = TestClient(app)
 
     try:
@@ -269,8 +289,11 @@ def test_get_resume_status_success(tmp_path):
 
 # 16. Missing artifact returns RESUME_NOT_FOUND.
 def test_get_resume_status_not_found():
+    from app.api.auth import require_recruiter
+
     mock_db = MockStatusDBSession(artifact=None, job=None)
     app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[require_recruiter] = _get_mock_recruiter_ctx
     client = TestClient(app)
 
     try:
@@ -285,8 +308,11 @@ def test_get_resume_status_not_found():
 
 # 17. Database error response does not expose SQL/driver information.
 def test_get_resume_status_db_error_safe_response(caplog):
+    from app.api.auth import require_recruiter
+
     mock_db = MockStatusDBSession(should_fail=True)
     app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[require_recruiter] = _get_mock_recruiter_ctx
     client = TestClient(app)
 
     try:
@@ -303,6 +329,8 @@ def test_get_resume_status_db_error_safe_response(caplog):
 
 # Privacy route test with deliberate sensitive string
 def test_privacy_leakage_prevention(tmp_path, caplog):
+    from app.api.auth import require_recruiter
+
     sensitive_name = "john.doe+confidential_applicant_ssn_12345@corp.test.pdf"
     art_id = uuid.uuid4()
     job_id = uuid.uuid4()
@@ -327,6 +355,7 @@ def test_privacy_leakage_prevention(tmp_path, caplog):
 
     mock_db = MockStatusDBSession(artifact=artifact, job=job)
     app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[require_recruiter] = _get_mock_recruiter_ctx
     client = TestClient(app)
 
     try:
@@ -340,3 +369,4 @@ def test_privacy_leakage_prevention(tmp_path, caplog):
                 assert sensitive_name not in record.getMessage()
     finally:
         app.dependency_overrides.clear()
+

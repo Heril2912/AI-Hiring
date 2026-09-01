@@ -338,7 +338,23 @@ def client_with_db(in_memory_db):
             yield in_memory_db
         finally:
             pass
+    from unittest.mock import MagicMock
+    from app.api.auth import AuthenticatedContext, require_recruiter
+    from app.models.auth import UserRecord, UserRole
+
+    mock_recruiter = UserRecord(
+        user_id=uuid.uuid4(),
+        email="mock.recruiter@company.test",
+        display_name="Mock Recruiter",
+        password_hash="mock",
+        role=UserRole.RECRUITER,
+        is_active=True,
+        must_change_password=False,
+    )
+    mock_ctx = AuthenticatedContext(user=mock_recruiter, session=MagicMock())
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[require_recruiter] = lambda: mock_ctx
     yield TestClient(app)
     app.dependency_overrides.clear()
 

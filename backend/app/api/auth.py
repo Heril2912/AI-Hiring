@@ -191,7 +191,71 @@ async def get_authenticated_context(
     return AuthenticatedContext(user=user, session=user_session)
 
 
+async def require_active_user(
+    auth_ctx: AuthenticatedContext = Depends(get_authenticated_context),
+) -> AuthenticatedContext:
+    """
+    Enforces that the authenticated user is active and does NOT have an outstanding forced password change.
+    If must_change_password is true, access to protected platform routes is denied with 403.
+    """
+    if not auth_ctx.user.is_active:
+        raise UNAUTHENTICATED_ERROR
+
+    if auth_ctx.user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "PASSWORD_CHANGE_REQUIRED",
+                "message": "Password change required before accessing platform features.",
+            },
+        )
+
+    return auth_ctx
+
+
+def require_role(allowed_roles: set[UserRole]):
+    """
+    FastAPI dependency factory enforcing that the authenticated user possesses one of the allowed roles.
+    Denies access with 403 FORBIDDEN and logs a security audit event on unauthorized attempt.
+    """
+    async def _role_checker(
+        auth_ctx: AuthenticatedContext = Depends(require_active_user),
+        db: Session = Depends(get_db),
+    ) -> AuthenticatedContext:
+        if auth_ctx.user.role not in allowed_roles:
+            _record_audit_event(
+                db=db,
+                event_type=AuditEventType.SESSION_REVOKED,
+                result=AuditResult.DENIED,
+                reason_code=AuditReasonCode.UNAUTHORIZED,
+                actor_user_id=auth_ctx.user.user_id,
+                resource_type="role_access",
+                resource_id=auth_ctx.user.role.value,
+                safe_metadata={
+                    "user_role": auth_ctx.user.role.value,
+                    "required_roles": [r.value for r in allowed_roles],
+                },
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "FORBIDDEN",
+                    "message": "Insufficient permissions to access this resource.",
+                },
+            )
+        return auth_ctx
+
+    return _role_checker
+
+
+require_admin = require_role({UserRole.ADMIN})
+require_recruiter = require_role({UserRole.RECRUITER})
+require_reviewer = require_role({UserRole.REVIEWER})
+
+
 def verify_csrf_and_origin(
+
     request: Request,
     auth_ctx: AuthenticatedContext = Depends(get_authenticated_context),
     x_csrf_token: Optional[str] = Header(default=None, alias="X-CSRF-Token"),

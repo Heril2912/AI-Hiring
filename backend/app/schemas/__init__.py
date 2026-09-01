@@ -1,10 +1,14 @@
 from app.schemas.auth import (
+    AdminPasswordResetRequest,
+    AdminUserCreateRequest,
+    AdminUserUpdateRequest,
     AuthErrorDetail,
     AuthMeResponse,
     BootstrapAdminInput,
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
+    PaginatedSecurityAuditEventsResponse,
     SecurityAuditEventResponse,
     UserResponse,
     UserSessionResponse,
@@ -160,6 +164,10 @@ __all__ = [
     "LoginResponse",
     "AuthMeResponse",
     "ChangePasswordRequest",
+    "AdminUserCreateRequest",
+    "AdminUserUpdateRequest",
+    "AdminPasswordResetRequest",
+    "PaginatedSecurityAuditEventsResponse",
 ]
 
 

@@ -125,3 +125,69 @@ class ChangePasswordRequest(StrictSchema):
             raise ValueError("New password cannot be solely whitespace.")
         return v
 
+
+class AdminUserCreateRequest(StrictSchema):
+    email: str = Field(min_length=3, max_length=255)
+    display_name: str = Field(min_length=1, max_length=255)
+    role: UserRole
+    temporary_password: str = Field(min_length=8, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def validate_and_canonicalize_email(cls, v: str) -> str:
+        return canonicalize_email(v)
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Display name cannot be empty or whitespace.")
+        return cleaned
+
+    @field_validator("temporary_password")
+    @classmethod
+    def validate_temp_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Temporary password must be at least 8 characters.")
+        if not v.strip():
+            raise ValueError("Temporary password cannot be solely whitespace.")
+        return v
+
+
+class AdminUserUpdateRequest(StrictSchema):
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            cleaned = v.strip()
+            if not cleaned:
+                raise ValueError("Display name cannot be empty or whitespace.")
+            return cleaned
+        return v
+
+
+class AdminPasswordResetRequest(StrictSchema):
+    temporary_password: str = Field(min_length=8, max_length=255)
+
+    @field_validator("temporary_password")
+    @classmethod
+    def validate_temp_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Temporary password must be at least 8 characters.")
+        if not v.strip():
+            raise ValueError("Temporary password cannot be solely whitespace.")
+        return v
+
+
+class PaginatedSecurityAuditEventsResponse(StrictSchema):
+    items: list[SecurityAuditEventResponse]
+    total: int
+    limit: int
+    offset: int
+
+
