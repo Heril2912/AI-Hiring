@@ -82,3 +82,46 @@ class BootstrapAdminInput(StrictSchema):
 class AuthErrorDetail(StrictSchema):
     code: str
     message: str
+
+
+class LoginRequest(StrictSchema):
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=1, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def validate_and_canonicalize_email(cls, v: str) -> str:
+        return canonicalize_email(v)
+
+
+class LoginResponse(StrictSchema):
+    user: UserResponse
+    csrf_token: str
+
+
+class AuthMeResponse(StrictSchema):
+    user_id: uuid.UUID
+    email: str
+    display_name: str
+    role: UserRole
+    is_active: bool
+    must_change_password: bool
+    idle_expires_at: datetime
+    absolute_expires_at: datetime
+    csrf_token: str
+
+
+class ChangePasswordRequest(StrictSchema):
+    current_password: str = Field(min_length=1, max_length=255)
+    new_password: str = Field(min_length=8, max_length=255)
+    new_password_confirmation: str = Field(min_length=8, max_length=255)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("New password must be at least 8 characters.")
+        if not v.strip():
+            raise ValueError("New password cannot be solely whitespace.")
+        return v
+
