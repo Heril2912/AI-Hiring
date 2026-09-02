@@ -36,7 +36,7 @@ describe("Phase 2A.4: Authentication & Role-Aware Shell Workflow", () => {
     // Resolves to login page
     await waitFor(() => {
       expect(screen.getByText("AI-Driven Smart Hiring")).toBeInTheDocument();
-      expect(screen.getByLabelText(/Work Email Address/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Work email/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument();
     });
 
@@ -96,17 +96,17 @@ describe("Phase 2A.4: Authentication & Role-Aware Shell Workflow", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/Work Email Address/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Work email/i)).toBeInTheDocument();
     });
 
-    const submitBtn = screen.getByRole("button", { name: /Sign In to Platform/i });
+    const submitBtn = screen.getByRole("button", { name: /^Sign in$/i });
 
     // Submit empty
     await userEvent.click(submitBtn);
     expect(screen.getByText(/Please enter your email address/i)).toBeInTheDocument();
 
     // Fill email only
-    await userEvent.type(screen.getByLabelText(/Work Email Address/i), "user@company.com");
+    await userEvent.type(screen.getByLabelText(/Work email/i), "user@company.com");
     await userEvent.click(submitBtn);
     expect(screen.getByText(/Please enter your password/i)).toBeInTheDocument();
 
@@ -337,8 +337,8 @@ describe("Phase 2A.4: Authentication & Role-Aware Shell Workflow", () => {
     await waitFor(() => {
       expect(screen.getByText("Hiring Reviewer")).toBeInTheDocument();
       expect(screen.getByText("REVIEWER")).toBeInTheDocument();
-      expect(screen.getByText(/Candidate Evaluation Queue/i)).toBeInTheDocument();
-      expect(screen.getByText(/Job assignment queues and scorecards are being introduced in Phase 2B/i)).toBeInTheDocument();
+      expect(screen.getByText(/No assigned reviews yet/i)).toBeInTheDocument();
+      expect(screen.getByText(/Assigned job reviews and evaluation scorecards will appear here once job requisitions are configured in Phase 2B/i)).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/Platform Users/i)).not.toBeInTheDocument();
@@ -404,4 +404,51 @@ describe("Phase 2A.4: Authentication & Role-Aware Shell Workflow", () => {
     expect(localStorage.getItem("csrfToken")).toBeNull();
     expect(sessionStorage.getItem("token")).toBeNull();
   });
+
+  it("9. closes user profile dropdown menu on Escape key press and restores focus", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url) => {
+      if (url === "/api/v1/auth/me") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              userId: "recruiter-uuid-2",
+              email: "recruiter2@company.com",
+              displayName: "Alex Recruiter",
+              role: "RECRUITER",
+              isActive: true,
+              mustChangePassword: false,
+              csrfToken: "csrf-token-recruiter-2",
+            }),
+        });
+      }
+      if (url === "/api/v1/resumes") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve([]),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Alex Recruiter")).toBeInTheDocument();
+    });
+
+    const profileBtn = screen.getByRole("button", { name: /User profile and account settings/i });
+    expect(screen.queryByRole("menu", { name: /User options/i })).not.toBeInTheDocument();
+
+    // Open menu
+    await userEvent.click(profileBtn);
+    expect(screen.getByRole("menu", { name: /User options/i })).toBeInTheDocument();
+
+    // Press Escape
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+    expect(screen.queryByRole("menu", { name: /User options/i })).not.toBeInTheDocument();
+  });
 });
+

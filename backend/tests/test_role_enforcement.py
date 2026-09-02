@@ -436,3 +436,83 @@ def test_admin_list_security_events_pagination(client, test_db):
         meta_str = str(item.get("safeMetadata", {}))
         assert "password" not in meta_str
         assert "token_hash" not in meta_str
+
+
+# =========================================================================
+# 7. Security Hardening & Tampering Protection (Phase 2A.5)
+# =========================================================================
+
+def test_tampered_uuid_returns_403_for_non_recruiters(client, test_db):
+    """Verify that unauthorized roles cannot probe for candidate existence using tampered UUIDs.
+    Both nonexistent and existent candidate IDs must return 403 Forbidden to non-recruiters."""
+    admin = _seed_user(test_db, email="admin.tamper@company.test", role=UserRole.ADMIN)
+    admin_csrf, _ = _login_user(client, email="admin.tamper@company.test")
+
+    reviewer = _seed_user(test_db, email="reviewer.tamper@company.test", role=UserRole.REVIEWER)
+    reviewer_csrf, _ = _login_user(client, email="reviewer.tamper@company.test")
+
+    recruiter = _seed_user(test_db, email="recruiter.tamper@company.test", role=UserRole.RECRUITER)
+    recruiter_csrf, _ = _login_user(client, email="recruiter.tamper@company.test")
+
+    # Recruiter creates a candidate artifact
+    now = datetime.now(timezone.utc)
+    artifact = ResumeArtifact(
+        artifact_id=uuid.uuid4(),
+        original_filename="tamper_test.pdf",
+        declared_mime_type="application/pdf",
+        size_bytes=1024,
+        sha256_hash="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        detected_format=ArtifactFormat.pdf,
+        validation_status=ArtifactValidationStatus.VALIDATED,
+        created_at=now,
+    )
+    test_db.add(artifact)
+    test_db.commit()
+
+    real_id = str(artifact.artifact_id)
+    bogus_id = str(uuid.uuid4())
+
+    # 1. Admin querying real ID -> 403 Forbidden
+    _login_user(client, email="admin.tamper@company.test")
+    r1 = client.get(f"/api/v1/resumes/{real_id}/status")
+    assert r1.status_code == status.HTTP_403_FORBIDDEN
+
+    # 2. Admin querying bogus ID -> 403 Forbidden (no 404 leakage to unauthorized roles)
+    r2 = client.get(f"/api/v1/resumes/{bogus_id}/status")
+    assert r2.status_code == status.HTTP_403_FORBIDDEN
+
+    # 3. Reviewer querying real ID -> 403 Forbidden
+    _login_user(client, email="reviewer.tamper@company.test")
+    r3 = client.get(f"/api/v1/resumes/{real_id}/status")
+    assert r3.status_code == status.HTTP_403_FORBIDDEN
+
+    # 4. Reviewer querying bogus ID -> 403 Forbidden
+    r4 = client.get(f"/api/v1/resumes/{bogus_id}/status")
+    assert r4.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_denied_mutations_cause_no_database_state_changes(client, test_db):
+    """Verify that unauthorized state-changing attempts cause zero side-effects in PostgreSQL."""
+    reviewer = _seed_user(test_db, email="reviewer.mut@company.test", role=UserRole.REVIEWER)
+    reviewer_csrf, _ = _login_user(client, email="reviewer.mut@company.test")
+    settings = get_settings()
+
+    initial_users_count = test_db.execute(select(UserRecord)).scalars().all()
+
+    # Reviewer attempts to create a user
+    resp = client.post(
+        "/api/v1/admin/users",
+        headers={"X-CSRF-Token": reviewer_csrf, "Origin": settings.frontend_origin},
+        json={
+            "email": "hacker@test.com",
+            "display_name": "Hacker",
+            "role": "ADMIN",
+            "temporary_password": "TempPassword123!",
+        },
+    )
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
+
+    # Verify no new user was committed
+    post_users_count = test_db.execute(select(UserRecord)).scalars().all()
+    assert len(post_users_count) == len(initial_users_count)
+

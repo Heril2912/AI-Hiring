@@ -8,22 +8,30 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setValidationError(null);
+    setEmailError(null);
+    setPasswordError(null);
     setServerError(null);
     clearSessionError();
 
     const trimmedEmail = email.trim();
+    let hasError = false;
+
     if (!trimmedEmail) {
-      setValidationError("Please enter your email address.");
-      return;
+      setEmailError("Please enter your email address.");
+      hasError = true;
     }
     if (!password) {
-      setValidationError("Please enter your password.");
+      setPasswordError("Please enter your password.");
+      hasError = true;
+    }
+
+    if (hasError) {
       return;
     }
 
@@ -41,115 +49,187 @@ export function LoginPage() {
 
   return (
     <div className="auth-page-container">
-      <div className="auth-card" role="region" aria-label="Sign In Card">
-        <div className="auth-header">
-          <div className="auth-logo-badge" aria-hidden="true">
-            <Icon name="sparkles" size={24} />
+      <div className="auth-split-surface" role="region" aria-label="Staff Sign In Surface">
+        {/* Left Side: Product Context Panel */}
+        <div className="auth-brand-panel">
+          <div className="auth-brand-top">
+            <div className="auth-brand-badge" aria-hidden="true">
+              <Icon name="sparkles" size={20} />
+            </div>
+            <div className="auth-brand-headings">
+              <h1 className="auth-brand-title">AI-Driven Smart Hiring</h1>
+              <p className="auth-brand-subtitle">
+                Internal Recruitment Platform &amp; Audited Candidate Profiles
+              </p>
+            </div>
           </div>
-          <h1 className="auth-title">AI-Driven Smart Hiring</h1>
-          <p className="auth-subtitle">
-            Internal Recruitment Platform &amp; Audited Candidate Profiles
-          </p>
+
+          <div className="auth-capability-list">
+            <div className="auth-capability-item">
+              <div className="auth-cap-icon" aria-hidden="true">
+                <Icon name="check" size={15} />
+              </div>
+              <div className="auth-cap-text">
+                <span className="auth-cap-title">Structured candidate profiles</span>
+                <span className="auth-cap-desc">
+                  Deterministic parsing of multi-page resumes into standardized, audited schema.
+                </span>
+              </div>
+            </div>
+
+            <div className="auth-capability-item">
+              <div className="auth-cap-icon" aria-hidden="true">
+                <Icon name="check" size={15} />
+              </div>
+              <div className="auth-cap-text">
+                <span className="auth-cap-title">Evidence-backed review</span>
+                <span className="auth-cap-desc">
+                  Full text span provenance, confidence scores, and immutable correction logs.
+                </span>
+              </div>
+            </div>
+
+            <div className="auth-capability-item">
+              <div className="auth-cap-icon" aria-hidden="true">
+                <Icon name="check" size={15} />
+              </div>
+              <div className="auth-cap-text">
+                <span className="auth-cap-title">Role-based internal access</span>
+                <span className="auth-cap-desc">
+                  Strict boundaries for Recruiter workspaces, Reviewers, and System Administrators.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-brand-footer">
+            <p className="auth-system-tag">Smart Hiring Core • Phase 2A Staff Portal</p>
+          </div>
         </div>
 
-        {sessionError && (
-          <div className="feedback-box info" role="status" aria-live="polite">
-            <Icon name="info" size={16} />
-            <p className="feedback-text">{sessionError}</p>
-          </div>
-        )}
-
-        {(validationError || serverError) && (
-          <div className="feedback-box error" role="alert" aria-live="polite">
-            <Icon name="alert-triangle" size={16} />
-            <p className="feedback-text error">
-              {validationError || serverError}
+        {/* Right Side: Focused Sign In Form */}
+        <div className="auth-form-panel">
+          <div className="auth-form-header">
+            <h2 className="auth-form-title">Welcome back</h2>
+            <p className="auth-form-subtitle">
+              Sign in to continue to the recruitment workspace.
             </p>
           </div>
-        )}
 
-        <form className="auth-form" onSubmit={handleSubmit} noValidate>
-          <div className="form-group">
-            <label htmlFor="login-email" className="form-label">
-              Work Email Address
-            </label>
-            <div className="input-with-icon">
-              <span className="input-icon-prefix" aria-hidden="true">
-                <Icon name="mail" size={16} />
-              </span>
-              <input
-                id="login-email"
-                type="email"
-                className="form-input"
-                placeholder="name@company.com"
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  if (validationError) setValidationError(null);
-                }}
-                disabled={isSubmitting}
-                autoComplete="email"
-                required
-              />
+          {sessionError && (
+            <div className="compact-alert info" role="status" aria-live="polite">
+              <Icon name="info" size={15} className="alert-icon" />
+              <p className="alert-message">{sessionError}</p>
             </div>
-          </div>
+          )}
 
-          <div className="form-group">
-            <label htmlFor="login-password" className="form-label">
-              Password
-            </label>
-            <div className="input-with-icon">
-              <span className="input-icon-prefix" aria-hidden="true">
-                <Icon name="shield" size={16} />
-              </span>
-              <input
-                id="login-password"
-                type={showPassword ? "text" : "password"}
-                className="form-input"
-                placeholder="••••••••••••"
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  if (validationError) setValidationError(null);
-                }}
-                disabled={isSubmitting}
-                autoComplete="current-password"
-                required
-              />
-              <button
-                type="button"
-                className="password-toggle-btn"
-                onClick={() => setShowPassword(!showPassword)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                title={showPassword ? "Hide password" : "Show password"}
-              >
-                <Icon name={showPassword ? "eye" : "eye"} size={16} />
-              </button>
+          {serverError && (
+            <div className="compact-alert error" role="alert" aria-live="polite">
+              <Icon name="alert-triangle" size={15} className="alert-icon" />
+              <p className="alert-message">{serverError}</p>
             </div>
+          )}
+
+          <form className="auth-form" onSubmit={handleSubmit} noValidate>
+            <div className="form-group">
+              <label htmlFor="login-email" className="form-label">
+                Work email
+              </label>
+              <div className="input-with-icon">
+                <span className="input-icon-prefix" aria-hidden="true">
+                  <Icon name="mail" size={16} />
+                </span>
+                <input
+                  id="login-email"
+                  type="email"
+                  className={`form-input ${emailError ? "input-has-error" : ""}`}
+                  placeholder="name@company.com"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (emailError) setEmailError(null);
+                    if (serverError) setServerError(null);
+                  }}
+                  disabled={isSubmitting}
+                  autoComplete="email"
+                  aria-invalid={!!emailError}
+                  aria-describedby={emailError ? "email-error-msg" : undefined}
+                  required
+                />
+              </div>
+              {emailError && (
+                <p id="email-error-msg" className="field-error-text" role="alert">
+                  {emailError}
+                </p>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="login-password" className="form-label">
+                Password
+              </label>
+              <div className="input-with-icon">
+                <span className="input-icon-prefix" aria-hidden="true">
+                  <Icon name="shield" size={16} />
+                </span>
+                <input
+                  id="login-password"
+                  type={showPassword ? "text" : "password"}
+                  className={`form-input ${passwordError ? "input-has-error" : ""}`}
+                  placeholder="••••••••••••"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (passwordError) setPasswordError(null);
+                    if (serverError) setServerError(null);
+                  }}
+                  disabled={isSubmitting}
+                  autoComplete="current-password"
+                  aria-invalid={!!passwordError}
+                  aria-describedby={passwordError ? "password-error-msg" : undefined}
+                  required
+                />
+                <button
+                  type="button"
+                  className="password-toggle-btn"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  <Icon name={showPassword ? "eye" : "eye"} size={16} />
+                </button>
+              </div>
+              {passwordError && (
+                <p id="password-error-msg" className="field-error-text" role="alert">
+                  {passwordError}
+                </p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary auth-submit-btn"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <>
+                  <span className="loading-spinner-sm" aria-hidden="true" />
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                <span>Sign in</span>
+              )}
+            </button>
+          </form>
+
+          <div className="auth-footer">
+            <p className="auth-footer-note">
+              Access is limited to authorised recruitment staff. Unauthorized access attempts are monitored and logged.
+            </p>
           </div>
-
-          <button
-            type="submit"
-            className="btn btn-primary auth-submit-btn"
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? (
-              <>
-                <span className="loading-spinner-sm" aria-hidden="true" />
-                <span>Signing In...</span>
-              </>
-            ) : (
-              <span>Sign In to Platform</span>
-            )}
-          </button>
-        </form>
-
-        <div className="auth-footer">
-          <p className="auth-footer-note">
-            Protected internal system. Unauthorized access is prohibited and audited.
-          </p>
         </div>
       </div>
     </div>
   );
 }
+
