@@ -11,28 +11,38 @@ export function ChangePasswordPage() {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const [currentError, setCurrentError] = useState<string | null>(null);
+  const [newPasswordError, setNewPasswordError] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setValidationError(null);
+    setCurrentError(null);
+    setNewPasswordError(null);
+    setConfirmError(null);
     setServerError(null);
 
+    let hasError = false;
+
     if (!currentPassword) {
-      setValidationError("Please enter your current or temporary password.");
-      return;
+      setCurrentError("Please enter your current or temporary password.");
+      hasError = true;
     }
     if (newPassword.length < 8) {
-      setValidationError("New password must be at least 8 characters.");
-      return;
+      setNewPasswordError("New password must be at least 8 characters.");
+      hasError = true;
+    } else if (currentPassword && currentPassword === newPassword) {
+      setNewPasswordError("New password cannot be the same as your temporary password.");
+      hasError = true;
     }
+
     if (newPassword !== confirmPassword) {
-      setValidationError("New password confirmation does not match.");
-      return;
+      setConfirmError("New password confirmation does not match.");
+      hasError = true;
     }
-    if (currentPassword === newPassword) {
-      setValidationError("New password cannot be the same as your current temporary password.");
+
+    if (hasError) {
       return;
     }
 
@@ -54,23 +64,21 @@ export function ChangePasswordPage() {
 
   return (
     <div className="auth-page-container">
-      <div className="auth-card" role="region" aria-label="Password Change Required">
+      <div className="auth-card auth-card-narrow" role="region" aria-label="Password Change Required">
         <div className="auth-header">
           <div className="auth-logo-badge warn" aria-hidden="true">
-            <Icon name="shield" size={24} />
+            <Icon name="shield" size={22} />
           </div>
           <h1 className="auth-title">Password Update Required</h1>
           <p className="auth-subtitle">
-            Welcome, <strong>{user?.displayName || "User"}</strong>. For platform security, please set a new permanent password before proceeding.
+            Welcome, <strong>{user?.displayName || "Staff Member"}</strong>. Your account was issued with a one-time temporary credential. Please set a new permanent password to access the platform.
           </p>
         </div>
 
-        {(validationError || serverError) && (
-          <div className="feedback-box error" role="alert" aria-live="polite">
-            <Icon name="alert-triangle" size={16} />
-            <p className="feedback-text error">
-              {validationError || serverError}
-            </p>
+        {serverError && (
+          <div className="compact-alert error" role="alert" aria-live="polite">
+            <Icon name="alert-triangle" size={15} className="alert-icon" />
+            <p className="alert-message">{serverError}</p>
           </div>
         )}
 
@@ -86,14 +94,17 @@ export function ChangePasswordPage() {
               <input
                 id="current-pw"
                 type={showCurrent ? "text" : "password"}
-                className="form-input"
+                className={`form-input ${currentError ? "input-has-error" : ""}`}
                 value={currentPassword}
                 onChange={(e) => {
                   setCurrentPassword(e.target.value);
-                  if (validationError) setValidationError(null);
+                  if (currentError) setCurrentError(null);
+                  if (serverError) setServerError(null);
                 }}
                 disabled={isSubmitting}
                 autoComplete="current-password"
+                aria-invalid={!!currentError}
+                aria-describedby={currentError ? "current-pw-err" : undefined}
                 required
               />
               <button
@@ -103,9 +114,14 @@ export function ChangePasswordPage() {
                 aria-label={showCurrent ? "Hide current password" : "Show current password"}
                 title={showCurrent ? "Hide current password" : "Show current password"}
               >
-                <Icon name="eye" size={16} />
+                <Icon name={showCurrent ? "eye" : "eye"} size={16} />
               </button>
             </div>
+            {currentError && (
+              <p id="current-pw-err" className="field-error-text" role="alert">
+                {currentError}
+              </p>
+            )}
           </div>
 
           <div className="form-group">
@@ -119,14 +135,17 @@ export function ChangePasswordPage() {
               <input
                 id="new-pw"
                 type={showNew ? "text" : "password"}
-                className="form-input"
+                className={`form-input ${newPasswordError ? "input-has-error" : ""}`}
                 value={newPassword}
                 onChange={(e) => {
                   setNewPassword(e.target.value);
-                  if (validationError) setValidationError(null);
+                  if (newPasswordError) setNewPasswordError(null);
+                  if (serverError) setServerError(null);
                 }}
                 disabled={isSubmitting}
                 autoComplete="new-password"
+                aria-invalid={!!newPasswordError}
+                aria-describedby={newPasswordError ? "new-pw-err" : undefined}
                 required
               />
               <button
@@ -136,9 +155,14 @@ export function ChangePasswordPage() {
                 aria-label={showNew ? "Hide new password" : "Show new password"}
                 title={showNew ? "Hide new password" : "Show new password"}
               >
-                <Icon name="eye" size={16} />
+                <Icon name={showNew ? "eye" : "eye"} size={16} />
               </button>
             </div>
+            {newPasswordError && (
+              <p id="new-pw-err" className="field-error-text" role="alert">
+                {newPasswordError}
+              </p>
+            )}
           </div>
 
           <div className="form-group">
@@ -152,14 +176,17 @@ export function ChangePasswordPage() {
               <input
                 id="confirm-pw"
                 type={showConfirm ? "text" : "password"}
-                className="form-input"
+                className={`form-input ${confirmError ? "input-has-error" : ""}`}
                 value={confirmPassword}
                 onChange={(e) => {
                   setConfirmPassword(e.target.value);
-                  if (validationError) setValidationError(null);
+                  if (confirmError) setConfirmError(null);
+                  if (serverError) setServerError(null);
                 }}
                 disabled={isSubmitting}
                 autoComplete="new-password"
+                aria-invalid={!!confirmError}
+                aria-describedby={confirmError ? "confirm-pw-err" : undefined}
                 required
               />
               <button
@@ -169,9 +196,14 @@ export function ChangePasswordPage() {
                 aria-label={showConfirm ? "Hide password confirmation" : "Show password confirmation"}
                 title={showConfirm ? "Hide password confirmation" : "Show password confirmation"}
               >
-                <Icon name="eye" size={16} />
+                <Icon name={showConfirm ? "eye" : "eye"} size={16} />
               </button>
             </div>
+            {confirmError && (
+              <p id="confirm-pw-err" className="field-error-text" role="alert">
+                {confirmError}
+              </p>
+            )}
           </div>
 
           <button
@@ -205,3 +237,4 @@ export function ChangePasswordPage() {
     </div>
   );
 }
+

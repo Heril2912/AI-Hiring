@@ -85,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
+        // Initial visit without session cookie is normal unauthenticated state; do not show session expired error
         clearAuthState();
       } else {
         // Network or server error during restore

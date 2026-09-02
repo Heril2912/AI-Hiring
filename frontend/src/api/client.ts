@@ -61,7 +61,9 @@ export async function apiFetch<T = any>(
   });
 
   if (response.status === 401) {
-    if (onUnauthorizedCallback) {
+    // Only invoke global session-expired callback if this wasn't an expected unauthenticated probe (like /auth/me during restore or /auth/login)
+    const isAuthProbe = endpoint.includes("/auth/me") || endpoint.includes("/auth/login");
+    if (!isAuthProbe && onUnauthorizedCallback) {
       onUnauthorizedCallback();
     }
   }
