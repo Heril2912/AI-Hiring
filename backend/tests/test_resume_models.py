@@ -29,6 +29,8 @@ def test_models_exported_and_tables_registered():
         "users",
         "user_sessions",
         "security_audit_events",
+        "job_requisitions",
+        "job_versions",
     }
 
 
