@@ -19,6 +19,14 @@ from app.schemas.candidate import (
     EvidenceSpan,
     ExtractedField,
 )
+from app.schemas.job import (
+    JobCreateRequest,
+    JobDetailResponse,
+    JobDraftUpdateRequest,
+    JobSummaryResponse,
+    JobVersionDetailResponse,
+    JobVersionSummaryResponse,
+)
 from app.schemas.correction import (
     ProfileCorrectionRequest,
     ProfileCorrectionResponse,
@@ -168,8 +176,10 @@ __all__ = [
     "AdminUserUpdateRequest",
     "AdminPasswordResetRequest",
     "PaginatedSecurityAuditEventsResponse",
+    "JobCreateRequest",
+    "JobDraftUpdateRequest",
+    "JobVersionSummaryResponse",
+    "JobVersionDetailResponse",
+    "JobSummaryResponse",
+    "JobDetailResponse",
 ]
-
-
-
-

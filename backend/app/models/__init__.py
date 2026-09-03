@@ -15,6 +15,14 @@ from app.models.candidate import (
     ProfileCorrectionRecord,
 )
 from app.models.extraction import BlockType, ExtractionBlock, ExtractionMethod, ResumeExtraction
+from app.models.job import (
+    EmploymentType,
+    JobLifecycleStatus,
+    JobRequisition,
+    JobVersion,
+    JobVersionStatus,
+    WorkplaceType,
+)
 from app.models.resume import (
     ArtifactFormat,
     ArtifactValidationStatus,
@@ -45,5 +53,11 @@ __all__ = [
     "UserRecord",
     "UserSessionRecord",
     "SecurityAuditEventRecord",
+    "JobLifecycleStatus",
+    "JobVersionStatus",
+    "EmploymentType",
+    "WorkplaceType",
+    "JobRequisition",
+    "JobVersion",
 ]
 
