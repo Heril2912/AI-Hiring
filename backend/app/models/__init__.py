@@ -30,6 +30,15 @@ from app.models.resume import (
     ProcessingJobStatus,
     ResumeArtifact,
 )
+from app.models.taxonomy import (
+    OccupationAlias,
+    OccupationConcept,
+    OccupationSkillLink,
+    SkillAlias,
+    SkillConcept,
+    TaxonomySnapshot,
+    TaxonomySnapshotState,
+)
 
 __all__ = [
     "Base",
@@ -59,5 +68,12 @@ __all__ = [
     "WorkplaceType",
     "JobRequisition",
     "JobVersion",
+    "TaxonomySnapshotState",
+    "TaxonomySnapshot",
+    "OccupationConcept",
+    "OccupationAlias",
+    "SkillConcept",
+    "SkillAlias",
+    "OccupationSkillLink",
 ]
 

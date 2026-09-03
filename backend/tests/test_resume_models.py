@@ -31,6 +31,12 @@ def test_models_exported_and_tables_registered():
         "security_audit_events",
         "job_requisitions",
         "job_versions",
+        "taxonomy_snapshots",
+        "occupation_concepts",
+        "occupation_aliases",
+        "skill_concepts",
+        "skill_aliases",
+        "occupation_skill_links",
     }
 
 

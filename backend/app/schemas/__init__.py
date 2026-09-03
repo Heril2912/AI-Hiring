@@ -27,6 +27,10 @@ from app.schemas.job import (
     JobVersionDetailResponse,
     JobVersionSummaryResponse,
 )
+from app.schemas.taxonomy import (
+    OccupationSearchItemResponse,
+    SkillSearchItemResponse,
+)
 from app.schemas.correction import (
     ProfileCorrectionRequest,
     ProfileCorrectionResponse,
@@ -182,4 +186,6 @@ __all__ = [
     "JobVersionDetailResponse",
     "JobSummaryResponse",
     "JobDetailResponse",
+    "OccupationSearchItemResponse",
+    "SkillSearchItemResponse",
 ]
