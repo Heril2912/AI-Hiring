@@ -38,6 +38,7 @@ class JobLifecycleStatus(str, enum.Enum):
 
 class JobVersionStatus(str, enum.Enum):
     DRAFT = "DRAFT"
+    READY_FOR_MATCHING = "READY_FOR_MATCHING"
     APPROVED = "APPROVED"
 
 
@@ -202,7 +203,7 @@ class JobVersion(Base):
             name="ck_job_versions_title_not_empty",
         ),
         CheckConstraint(
-            "version_status IN ('DRAFT', 'APPROVED')",
+            "version_status IN ('DRAFT', 'READY_FOR_MATCHING', 'APPROVED')",
             name="ck_job_versions_version_status",
         ),
         CheckConstraint(
@@ -357,6 +358,19 @@ class JobVersion(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    ready_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.user_id",
+            ondelete="SET NULL",
+            name="fk_job_versions_ready_by_user_id_users",
+        ),
+        nullable=True,
+    )
+    ready_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -381,6 +395,10 @@ class JobVersion(Base):
     approver: Mapped[Optional["UserRecord"]] = relationship(
         "UserRecord",
         foreign_keys=[approved_by_user_id],
+    )
+    ready_by_user: Mapped[Optional["UserRecord"]] = relationship(
+        "UserRecord",
+        foreign_keys=[ready_by_user_id],
     )
     occupation: Mapped[Optional["OccupationConcept"]] = relationship(
         "OccupationConcept",

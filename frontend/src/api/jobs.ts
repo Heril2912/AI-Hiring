@@ -3,7 +3,7 @@ import { apiFetch } from "./client";
 export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERNSHIP" | "TEMPORARY";
 export type WorkplaceType = "ON_SITE" | "HYBRID" | "REMOTE";
 export type JobLifecycleStatus = "ACTIVE" | "ARCHIVED";
-export type JobVersionStatus = "DRAFT" | "APPROVED";
+export type JobVersionStatus = "DRAFT" | "READY_FOR_MATCHING" | "APPROVED";
 
 export type RequirementCategory =
   | "SKILL"
@@ -78,6 +78,8 @@ export interface JobVersionSummary {
   openingsCount?: number | null;
   internalReference?: string | null;
   requirementsCount: number;
+  readyByUserId?: string | null;
+  readyAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -103,12 +105,39 @@ export interface JobVersionDetail {
   taxonomyVersion?: string | null;
   parserVersion?: string | null;
   createdByUserId: string;
+  readyByUserId?: string | null;
+  readyAt?: string | null;
   approvedByUserId?: string | null;
   approvedAt?: string | null;
   requirements: RequirementItem[];
   reviewWarnings: JobReviewWarning[];
   createdAt: string;
   updatedAt: string;
+}
+
+export type JobReadinessSeverity = "ERROR" | "WARNING" | "INFO";
+
+export interface JobReadinessFinding {
+  code: string;
+  severity: JobReadinessSeverity;
+  message: string;
+  requirementId?: string | null;
+  field?: string | null;
+  rule?: string | null;
+  blocksReadiness: boolean;
+}
+
+export interface JobReadinessResponse {
+  jobId: string;
+  jobVersionId: string;
+  versionNumber: number;
+  revision: number;
+  versionStatus: JobVersionStatus;
+  ready: boolean;
+  errors: JobReadinessFinding[];
+  warnings: JobReadinessFinding[];
+  info: JobReadinessFinding[];
+  checkedAt: string;
 }
 
 export interface JobSummary {
@@ -208,6 +237,38 @@ export async function saveDraftRequirements(jobId: string, payload: JobRequireme
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export async function checkJobReadiness(
+  jobId: string,
+  expectedRevision?: number
+): Promise<JobReadinessResponse> {
+  const qs = expectedRevision !== undefined ? `?expected_revision=${expectedRevision}` : "";
+  return apiFetch<JobReadinessResponse>(`/api/v1/jobs/${jobId}/readiness${qs}`);
+}
+
+export async function markJobReady(
+  jobId: string,
+  expectedRevision: number
+): Promise<JobDetail> {
+  return apiFetch<JobDetail>(`/api/v1/jobs/${jobId}/ready`, {
+    method: "POST",
+    body: JSON.stringify({ expected_revision: expectedRevision }),
+  });
+}
+
+export async function createSuccessorVersion(
+  jobId: string,
+  fromVersionNumber?: number
+): Promise<JobDetail> {
+  return apiFetch<JobDetail>(`/api/v1/jobs/${jobId}/versions`, {
+    method: "POST",
+    body: JSON.stringify({ from_version_number: fromVersionNumber }),
+  });
+}
+
+export async function fetchJobVersions(jobId: string): Promise<JobVersionSummary[]> {
+  return apiFetch<JobVersionSummary[]>(`/api/v1/jobs/${jobId}/versions`);
 }
 
 export type JobImportSourceType = "PASTED_TEXT" | "PDF" | "DOCX";

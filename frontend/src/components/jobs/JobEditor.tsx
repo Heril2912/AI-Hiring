@@ -4,11 +4,16 @@ import {
   createJobRequisition,
   updateJobDraft,
   saveDraftRequirements,
+  checkJobReadiness,
+  markJobReady,
+  createSuccessorVersion,
   JobDetail,
   JobCreatePayload,
   JobDraftUpdatePayload,
   RequirementItem,
   RequirementCategory,
+  JobReadinessResponse,
+  JobReadinessFinding,
 } from "../../api/jobs";
 import { OccupationSearchItem } from "../../api/taxonomy";
 import { Icon } from "../Icon";
@@ -61,6 +66,18 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
   const [conflictError, setConflictError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  // Readiness & Revision Locking State
+  const [readinessResult, setReadinessResult] = useState<JobReadinessResponse | null>(null);
+  const [isCheckingReadiness, setIsCheckingReadiness] = useState(false);
+  const [readinessError, setReadinessError] = useState<string | null>(null);
+  const [isReadyModalOpen, setIsReadyModalOpen] = useState(false);
+  const [isMarkingReady, setIsMarkingReady] = useState(false);
+  const [isCreatingSuccessor, setIsCreatingSuccessor] = useState(false);
+
+  const versionStatus = jobDetail?.currentVersion?.versionStatus || "DRAFT";
+  const versionNumber = jobDetail?.currentVersion?.versionNumber || 1;
+  const isReadOnly = versionStatus === "READY_FOR_MATCHING";
 
   // Initial Load for Existing Job
   useEffect(() => {
@@ -376,11 +393,112 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
       setCurrentRevision(v.revision || 1);
       setRequirements(v.requirements || []);
       setIsDirty(false);
+      setReadinessResult(null);
       setSaveSuccessMsg("Draft reloaded from server.");
     } catch (err: any) {
       setLoadError(err?.message || "Failed to reload draft.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCheckReadiness = async () => {
+    setReadinessError(null);
+    setSaveSuccessMsg(null);
+    if (!jobId) {
+      setReadinessError("Please save the draft requisition first before checking readiness.");
+      return;
+    }
+    if (isDirty) {
+      setReadinessError("You have unsaved changes. Please save the draft first so server-side checks validate your latest changes.");
+      return;
+    }
+    try {
+      setIsCheckingReadiness(true);
+      const res = await checkJobReadiness(jobId, currentRevision);
+      setReadinessResult(res);
+    } catch (err: any) {
+      setReadinessError(err?.message || "Failed to check readiness.");
+    } finally {
+      setIsCheckingReadiness(false);
+    }
+  };
+
+  const handleConfirmMarkReady = async () => {
+    if (!jobId) return;
+    setSaveError(null);
+    setConflictError(null);
+    try {
+      setIsMarkingReady(true);
+      const updated = await markJobReady(jobId, currentRevision);
+      setJobDetail(updated);
+      setCurrentRevision(updated.currentVersion.revision);
+      setIsDirty(false);
+      setIsReadyModalOpen(false);
+      setSaveSuccessMsg(`Requisition revision #${updated.currentVersion.revision} is now locked as READY_FOR_MATCHING.`);
+      setReadinessResult(null);
+    } catch (err: any) {
+      if (err?.code === "REVISION_CONFLICT") {
+        setConflictError("Draft revision conflict: This requisition was updated or changed status in another session. Please reload.");
+      } else if (err?.code === "JOB_READINESS_FAILED") {
+        setSaveError(err?.message || "Readiness validation failed on server. Please fix blocking errors.");
+      } else {
+        setSaveError(err?.message || "Failed to lock revision as ready for matching.");
+      }
+      setIsReadyModalOpen(false);
+    } finally {
+      setIsMarkingReady(false);
+    }
+  };
+
+  const handleCreateSuccessor = async () => {
+    if (!jobId) return;
+    setSaveError(null);
+    setConflictError(null);
+    try {
+      setIsCreatingSuccessor(true);
+      const updated = await createSuccessorVersion(jobId);
+      setJobDetail(updated);
+      const v = updated.currentVersion;
+      setTitle(v.title || "");
+      setDepartment(v.department || "");
+      setLocation(v.location || "");
+      setEmploymentType(v.employmentType || "FULL_TIME");
+      setWorkplaceType(v.workplaceType || "HYBRID");
+      setOpeningsCount(v.openingsCount ? String(v.openingsCount) : "1");
+      setInternalReference(v.internalReference || "");
+      setSummary(v.summary || "");
+      setResponsibilities(v.responsibilities || "");
+      setJobDescriptionText(v.jobDescriptionText || "");
+      setOccupationConceptId(v.occupationConceptId || null);
+      setOccupationTitle(v.occupationTitle || null);
+      setCurrentRevision(v.revision || 1);
+      setRequirements(v.requirements || []);
+      setIsDirty(false);
+      setReadinessResult(null);
+      setSaveSuccessMsg(`Created new editable draft successor Version ${v.versionNumber}.`);
+    } catch (err: any) {
+      setSaveError(err?.message || "Failed to create editable successor version.");
+    } finally {
+      setIsCreatingSuccessor(false);
+    }
+  };
+
+  const handleFocusField = (fieldOrReqId?: string | null) => {
+    if (!fieldOrReqId) return;
+    if (fieldOrReqId === "title") {
+      const el = document.getElementById("job-title-input");
+      if (el) {
+        if (typeof el.focus === "function") el.focus();
+        if (typeof el.scrollIntoView === "function") {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    } else {
+      const reqEl = document.getElementById("section-requirements-title");
+      if (reqEl && typeof reqEl.scrollIntoView === "function") {
+        reqEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     }
   };
 
@@ -470,7 +588,9 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
               {jobId ? (title || "Job Draft") : "Create New Job Requisition"}
             </h2>
             <div className="editor-status-pills">
-              <span className="badge badge-version">v1 (Draft)</span>
+              <span className={`badge ${isReadOnly ? "badge-ready" : "badge-version"}`}>
+                v{versionNumber} ({isReadOnly ? "Ready for matching" : "Draft"})
+              </span>
               {jobId && <span className="badge badge-revision">Rev #{currentRevision}</span>}
               {isDirty && <span className="badge badge-unsaved">Unsaved Changes</span>}
             </div>
@@ -478,25 +598,63 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
         </div>
 
         <div className="top-bar-right">
-          <button
-            type="button"
-            className="btn btn-secondary btn-md"
-            onClick={() => setIsImportModalOpen(true)}
-          >
-            <Icon name="upload" size={15} />
-            <span>Import from job description</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-md"
-            onClick={handleSave}
-            disabled={isSaving}
-          >
-            <Icon name="check" size={15} />
-            <span>{isSaving ? "Saving..." : "Save Draft"}</span>
-          </button>
+          {isReadOnly ? (
+            <button
+              type="button"
+              className="btn btn-primary btn-md"
+              onClick={handleCreateSuccessor}
+              disabled={isCreatingSuccessor}
+            >
+              <Icon name="plus" size={15} />
+              <span>{isCreatingSuccessor ? "Creating..." : "Create editable revision"}</span>
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary btn-md"
+                onClick={() => setIsImportModalOpen(true)}
+              >
+                <Icon name="upload" size={15} />
+                <span>Import from job description</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-md"
+                onClick={handleSave}
+                disabled={isSaving}
+              >
+                <Icon name="check" size={15} />
+                <span>{isSaving ? "Saving..." : "Save Draft"}</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Locked Ready Notice Banner */}
+      {isReadOnly && (
+        <div className="locked-ready-banner" role="status">
+          <div className="locked-banner-icon-wrap">
+            <Icon name="check" size={20} className="text-success" />
+          </div>
+          <div className="locked-banner-content">
+            <h4 className="locked-banner-title">Revision Locked as Ready for Matching</h4>
+            <p className="locked-banner-desc">
+              This revision (v{versionNumber}, Rev #{currentRevision}) is immutable and frozen as authoritative input for candidate matching. Direct edits are disabled. To make adjustments, create a new editable successor draft.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleCreateSuccessor}
+            disabled={isCreatingSuccessor}
+          >
+            <Icon name="plus" size={14} />
+            <span>Create editable revision</span>
+          </button>
+        </div>
+      )}
 
       {/* Notification Banners */}
       {saveSuccessMsg && (
@@ -534,7 +692,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
         </div>
       )}
 
-      {/* Single-Column Progressive Disclosure Form */}
+      {/* Single-Column Form */}
       <div className="job-editor-single-col">
         {/* Section 1: Job details */}
         <section className="job-section-card" aria-labelledby="section-job-details-title">
@@ -556,6 +714,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                 type="text"
                 className="form-input"
                 placeholder="e.g. Senior Backend Developer"
+                disabled={isReadOnly}
                 value={title}
                 onChange={(e) => {
                   setTitle(e.target.value);
@@ -573,6 +732,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                   type="text"
                   className="form-input"
                   placeholder="e.g. Engineering"
+                  disabled={isReadOnly}
                   value={department}
                   onChange={(e) => {
                     setDepartment(e.target.value);
@@ -588,6 +748,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                   type="text"
                   className="form-input"
                   placeholder="e.g. San Francisco, CA / Remote"
+                  disabled={isReadOnly}
                   value={location}
                   onChange={(e) => {
                     setLocation(e.target.value);
@@ -603,6 +764,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                 <select
                   id="job-emp-type"
                   className="form-input"
+                  disabled={isReadOnly}
                   value={employmentType}
                   onChange={(e) => {
                     setEmploymentType(e.target.value);
@@ -622,6 +784,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                 <select
                   id="job-work-type"
                   className="form-input"
+                  disabled={isReadOnly}
                   value={workplaceType}
                   onChange={(e) => {
                     setWorkplaceType(e.target.value);
@@ -642,6 +805,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                   min={1}
                   max={999}
                   className="form-input"
+                  disabled={isReadOnly}
                   value={openingsCount}
                   onChange={(e) => {
                     setOpeningsCount(e.target.value);
@@ -675,6 +839,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                     type="text"
                     className="form-input"
                     placeholder="e.g. REQ-2026-084"
+                    disabled={isReadOnly}
                     value={internalReference}
                     onChange={(e) => {
                       setInternalReference(e.target.value);
@@ -705,6 +870,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                 className="form-input form-textarea"
                 rows={3}
                 placeholder="Brief summary of the role..."
+                disabled={isReadOnly}
                 value={summary}
                 onChange={(e) => {
                   setSummary(e.target.value);
@@ -720,6 +886,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                 className="form-input form-textarea"
                 rows={4}
                 placeholder="Key duties and day-to-day responsibilities..."
+                disabled={isReadOnly}
                 value={responsibilities}
                 onChange={(e) => {
                   setResponsibilities(e.target.value);
@@ -767,11 +934,17 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
 
           {showOccupationSection && (
             <div className="section-collapsible-content">
-              <OccupationSelector
-                selectedConceptId={occupationConceptId}
-                selectedTitle={occupationTitle}
-                onSelectOccupation={handleSelectOccupation}
-              />
+              {isReadOnly ? (
+                <p className="text-muted" style={{ padding: "8px 0" }}>
+                  {occupationTitle ? `Selected O*NET occupation: ${occupationTitle}` : "No O*NET occupation selected for this revision."}
+                </p>
+              ) : (
+                <OccupationSelector
+                  selectedConceptId={occupationConceptId}
+                  selectedTitle={occupationTitle}
+                  onSelectOccupation={handleSelectOccupation}
+                />
+              )}
             </div>
           )}
         </section>
@@ -806,14 +979,16 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
               </div>
             </div>
 
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => handleAddRequirement("SKILL")}
-            >
-              <Icon name="plus" size={14} />
-              <span>Add Requirement</span>
-            </button>
+            {!isReadOnly && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => handleAddRequirement("SKILL")}
+              >
+                <Icon name="plus" size={14} />
+                <span>Add Requirement</span>
+              </button>
+            )}
           </div>
 
           {requirements.length === 0 ? (
@@ -823,14 +998,16 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
               <p className="empty-desc">
                 Add skills, experience, or qualifications for this requisition.
               </p>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => handleAddRequirement("SKILL")}
-              >
-                <Icon name="plus" size={14} />
-                <span>Add Skill Requirement</span>
-              </button>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleAddRequirement("SKILL")}
+                >
+                  <Icon name="plus" size={14} />
+                  <span>Add Skill Requirement</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="requirements-list-container">
@@ -840,6 +1017,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                   requirement={req}
                   index={idx}
                   totalCount={requirements.length}
+                  readOnly={isReadOnly}
                   onChange={(updated) => handleUpdateRequirement(idx, updated)}
                   onRemove={() => handleRemoveRequirement(idx)}
                   onMoveUp={() => handleMoveRequirement(idx, "up")}
@@ -850,61 +1028,242 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
           )}
         </section>
 
-        {/* Section 4: Draft checks & Save */}
-        <section className="job-section-card draft-checks-section" aria-labelledby="section-checks-title">
-          <div className="section-card-header">
-            <Icon name="check" size={18} className="section-icon" />
-            <div>
-              <h3 id="section-checks-title" className="section-title">4. Draft checks</h3>
-              <p className="section-subtitle">Review actionable notes before saving.</p>
+        {/* Section 4: Requisition Readiness & Revision Locking */}
+        <section className="job-section-card draft-checks-section" aria-labelledby="section-readiness-title">
+          <div className="section-card-header-row">
+            <div className="section-header-left">
+              <Icon name="check" size={18} className="section-icon" />
+              <div>
+                <h3 id="section-readiness-title" className="section-title">4. Requisition readiness & locking</h3>
+                <p className="section-subtitle">Validate authoritative criteria and lock revision for candidate matching.</p>
+              </div>
             </div>
-          </div>
 
-          <div className="draft-checks-container">
-            {/* Must-Have Rationale Check (Correctly avoids false-positive on zero must-haves) */}
-            {reviewSummary.mustHaveCount === 0 ? (
-              <div className="check-item-row neutral">
-                <Icon name="info" size={15} className="check-icon neutral" />
-                <span className="check-item-text">No required criteria added yet.</span>
-              </div>
-            ) : reviewSummary.missingRationaleCount > 0 ? (
-              <div className="check-item-row warn">
-                <Icon name="alert-triangle" size={15} className="check-icon warn" />
-                <span className="check-item-text">
-                  {reviewSummary.missingRationaleCount} required criterion is missing a reason. (Click &quot;Reason suggested&quot; on the requirement card to add one).
-                </span>
-              </div>
-            ) : (
-              <div className="check-item-row pass">
-                <Icon name="check" size={15} className="check-icon pass" />
-                <span className="check-item-text">All required criteria have a reason.</span>
-              </div>
-            )}
-
-            {reviewSummary.reviewRequiredCount > 0 && (
-              <div className="check-item-row warn">
-                <Icon name="info" size={15} className="check-icon warn" />
-                <span className="check-item-text">
-                  {reviewSummary.reviewRequiredCount} requirement(s) have human review suggestions.
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Prominent Save Draft Action */}
-          <div className="draft-save-action-row">
             <button
               type="button"
-              className="btn btn-primary btn-lg save-draft-primary-btn"
-              onClick={handleSave}
-              disabled={isSaving}
+              className="btn btn-secondary btn-sm"
+              onClick={handleCheckReadiness}
+              disabled={isCheckingReadiness}
             >
-              <Icon name="check" size={18} />
-              <span>{isSaving ? "Saving draft..." : "Save Draft Requisition"}</span>
+              <Icon name="refresh" size={14} />
+              <span>{isCheckingReadiness ? "Validating..." : "Check readiness"}</span>
             </button>
+          </div>
+
+          {readinessError && (
+            <div className="feedback-box error" style={{ margin: "12px 0" }} role="alert">
+              <Icon name="alert-triangle" size={16} />
+              <p className="feedback-text error">{readinessError}</p>
+            </div>
+          )}
+
+          {/* Quick Draft Notes when Readiness checks haven't been manually triggered yet */}
+          {!readinessResult && (
+            <div className="draft-checks-container" style={{ marginTop: "14px" }}>
+              {reviewSummary.mustHaveCount === 0 ? (
+                <div className="check-item-row neutral">
+                  <Icon name="info" size={15} className="check-icon neutral" />
+                  <span className="check-item-text">No required criteria added yet.</span>
+                </div>
+              ) : reviewSummary.missingRationaleCount > 0 ? (
+                <div className="check-item-row warn">
+                  <Icon name="alert-triangle" size={15} className="check-icon warn" />
+                  <span className="check-item-text">
+                    {reviewSummary.missingRationaleCount} required criterion is missing a reason. (Click &quot;Reason suggested&quot; on the requirement card to add one).
+                  </span>
+                </div>
+              ) : (
+                <div className="check-item-row pass">
+                  <Icon name="check" size={15} className="check-icon pass" />
+                  <span className="check-item-text">All required criteria have a reason.</span>
+                </div>
+              )}
+
+              {reviewSummary.reviewRequiredCount > 0 && (
+                <div className="check-item-row warn">
+                  <Icon name="info" size={15} className="check-icon warn" />
+                  <span className="check-item-text">
+                    {reviewSummary.reviewRequiredCount} requirement(s) have human review suggestions.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Structured Readiness Findings Display */}
+          {readinessResult && (
+            <div className="readiness-results-container" style={{ marginTop: "16px" }}>
+              {readinessResult.ready ? (
+                <div className="feedback-box success" role="status">
+                  <Icon name="check" size={18} />
+                  <p className="feedback-text">
+                    Requisition passes all readiness checks and is ready to be locked for candidate matching.
+                  </p>
+                </div>
+              ) : (
+                <div className="feedback-box error" role="alert">
+                  <Icon name="alert-triangle" size={18} />
+                  <p className="feedback-text error">
+                    Requisition has {readinessResult.errors.length} blocking error(s) that must be resolved before it can be marked ready.
+                  </p>
+                </div>
+              )}
+
+              {/* Grouped Blocking Errors */}
+              {readinessResult.errors.length > 0 && (
+                <div className="readiness-group errors-group" style={{ marginTop: "12px" }}>
+                  <h4 className="readiness-group-title text-danger">Blocking Errors ({readinessResult.errors.length})</h4>
+                  <div className="readiness-findings-list">
+                    {readinessResult.errors.map((err, errIdx) => (
+                      <div key={errIdx} className="finding-card finding-error">
+                        <Icon name="alert-triangle" size={15} className="finding-icon text-danger" />
+                        <div className="finding-content">
+                          <span className="finding-msg">{err.message}</span>
+                          {(err.field || err.requirementId) && (
+                            <button
+                              type="button"
+                              className="btn-link-action"
+                              onClick={() => handleFocusField(err.field || err.requirementId)}
+                            >
+                              Go to field
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Grouped Advisory Warnings */}
+              {readinessResult.warnings.length > 0 && (
+                <div className="readiness-group warnings-group" style={{ marginTop: "12px" }}>
+                  <h4 className="readiness-group-title text-warning">Advisory Warnings ({readinessResult.warnings.length})</h4>
+                  <div className="readiness-findings-list">
+                    {readinessResult.warnings.map((warn, wIdx) => (
+                      <div key={wIdx} className="finding-card finding-warning">
+                        <Icon name="info" size={15} className="finding-icon text-warning" />
+                        <div className="finding-content">
+                          <span className="finding-msg">{warn.message}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Informational Checks */}
+              {readinessResult.info && readinessResult.info.length > 0 && (
+                <div className="readiness-group info-group" style={{ marginTop: "12px" }}>
+                  <h4 className="readiness-group-title text-muted">Notes ({readinessResult.info.length})</h4>
+                  <div className="readiness-findings-list">
+                    {readinessResult.info.map((inf, iIdx) => (
+                      <div key={iIdx} className="finding-card finding-info">
+                        <Icon name="info" size={15} className="finding-icon text-muted" />
+                        <div className="finding-content">
+                          <span className="finding-msg">{inf.message}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Actions Row */}
+          <div className="draft-save-action-row" style={{ marginTop: "24px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            {isReadOnly ? (
+              <button
+                type="button"
+                className="btn btn-primary btn-lg"
+                onClick={handleCreateSuccessor}
+                disabled={isCreatingSuccessor}
+              >
+                <Icon name="plus" size={18} />
+                <span>{isCreatingSuccessor ? "Creating..." : "Create editable revision"}</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-lg save-draft-primary-btn"
+                  onClick={handleSave}
+                  disabled={isSaving}
+                >
+                  <Icon name="check" size={18} />
+                  <span>{isSaving ? "Saving draft..." : "Save Draft Requisition"}</span>
+                </button>
+                {jobId && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-lg"
+                    onClick={() => setIsReadyModalOpen(true)}
+                  >
+                    <Icon name="badge-check" size={18} />
+                    <span>Mark ready for matching</span>
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </section>
       </div>
+
+      {/* Confirmation Dialog for Locking Revision */}
+      {isReadyModalOpen && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="ready-modal-title">
+          <div className="modal-container" style={{ maxWidth: "540px" }}>
+            <div className="modal-header">
+              <h3 id="ready-modal-title" className="modal-title">Lock Revision for Matching</h3>
+              <button
+                type="button"
+                className="btn-icon-subtle"
+                onClick={() => setIsReadyModalOpen(false)}
+                aria-label="Close dialog"
+              >
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ marginBottom: "12px", color: "var(--color-text-primary)" }}>
+                You are about to freeze <strong>Version {versionNumber} (Revision #{currentRevision})</strong> as <code>READY_FOR_MATCHING</code>.
+              </p>
+              <div className="guidance-box" style={{ background: "var(--color-bg-subtle)", padding: "14px", borderRadius: "6px", marginBottom: "16px" }}>
+                <p style={{ margin: "0 0 8px 0", fontWeight: 600, fontSize: "0.88rem" }}>Important workflow notes:</p>
+                <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "0.85rem", color: "var(--color-text-secondary)" }}>
+                  <li style={{ marginBottom: "6px" }}>This exact revision will be locked as read-only and immutable.</li>
+                  <li style={{ marginBottom: "6px" }}>It will serve as the authoritative input for candidate matching.</li>
+                  <li style={{ marginBottom: "6px" }}>Subsequent edits will require creating a new draft successor revision.</li>
+                  <li>This state does not publish the job externally or make automated hiring decisions.</li>
+                </ul>
+              </div>
+              <p style={{ fontSize: "0.85rem", color: "var(--color-text-secondary)" }}>
+                Server-side validation will re-verify all required fields before committing.
+              </p>
+            </div>
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-md"
+                onClick={() => setIsReadyModalOpen(false)}
+                disabled={isMarkingReady}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-md"
+                onClick={handleConfirmMarkReady}
+                disabled={isMarkingReady}
+              >
+                <Icon name="check" size={15} />
+                <span>{isMarkingReady ? "Validating & Locking..." : "Confirm and Lock Revision"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Optional Job Description Import & Review Modal */}
       {isImportModalOpen && (
