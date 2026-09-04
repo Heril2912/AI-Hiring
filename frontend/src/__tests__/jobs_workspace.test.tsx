@@ -647,4 +647,258 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
   });
+
+  // =========================================================================
+  // Phase 2B.5: Requisition Readiness & Revision Locking
+  // =========================================================================
+  describe("Phase 2B.5: Requisition Readiness & Revision Locking", () => {
+    const mockDraftJobDetail: jobsApi.JobDetail = {
+      jobId: "job-ready-1",
+      createdByUserId: "recruiter-1",
+      status: "ACTIVE",
+      createdAt: "2026-09-04T10:00:00Z",
+      updatedAt: "2026-09-04T10:00:00Z",
+      currentVersion: {
+        jobVersionId: "ver-1",
+        jobId: "job-ready-1",
+        versionNumber: 1,
+        versionStatus: "DRAFT",
+        revision: 1,
+        title: "Senior Fullstack Engineer",
+        department: "Engineering",
+        location: "Remote",
+        employmentType: "FULL_TIME",
+        workplaceType: "REMOTE",
+        openingsCount: 1,
+        createdByUserId: "recruiter-1",
+        requirements: [
+          {
+            requirementId: "req-1",
+            displayOrder: 0,
+            category: "SKILL",
+            label: "Python",
+            necessity: "MUST_HAVE",
+            priority: "HIGH",
+            acceptedEvidenceTypes: ["EMPLOYMENT"],
+            acceptedEquivalents: [],
+            rationale: "Core backend architecture is written in Python.",
+            origin: "RECRUITER_ENTERED",
+          },
+        ],
+        reviewWarnings: [],
+        createdAt: "2026-09-04T10:00:00Z",
+        updatedAt: "2026-09-04T10:00:00Z",
+      },
+    };
+
+    it("checks readiness on draft and displays structured findings", async () => {
+      vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(mockDraftJobDetail);
+      vi.mocked(jobsApi.checkJobReadiness).mockResolvedValue({
+        jobId: "job-ready-1",
+        jobVersionId: "ver-1",
+        versionNumber: 1,
+        revision: 1,
+        versionStatus: "DRAFT",
+        ready: true,
+        errors: [],
+        warnings: [
+          {
+            code: "NO_OCCUPATION_SELECTED",
+            severity: "WARNING",
+            message: "No standard O*NET occupation reference is linked (optional).",
+            blocksReadiness: false,
+          },
+        ],
+        info: [
+          {
+            code: "CUSTOM_REQUIREMENT_USED",
+            severity: "INFO",
+            message: "Custom recruiter-entered requirement 'Python' has no O*NET ID.",
+            blocksReadiness: false,
+          },
+        ],
+        checkedAt: "2026-09-04T10:05:00Z",
+      });
+
+      render(
+        <JobEditor
+          jobId="job-ready-1"
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+        />
+      );
+
+      expect(await screen.findByDisplayValue("Senior Fullstack Engineer")).toBeInTheDocument();
+      expect(screen.getByText("v1 (Draft)")).toBeInTheDocument();
+
+      // Click Check readiness
+      const checkBtn = screen.getByText("Check readiness");
+      fireEvent.click(checkBtn);
+
+      expect(await screen.findByText(/Requisition passes all readiness checks/)).toBeInTheDocument();
+      expect(screen.getByText("Advisory Warnings (1)")).toBeInTheDocument();
+      expect(screen.getByText(/No standard O\*NET occupation reference is linked/)).toBeInTheDocument();
+      expect(screen.getByText("Notes (1)")).toBeInTheDocument();
+    });
+
+    it("displays blocking errors and provides go-to-field focus without showing green success", async () => {
+      vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(mockDraftJobDetail);
+      vi.mocked(jobsApi.checkJobReadiness).mockResolvedValue({
+        jobId: "job-ready-1",
+        jobVersionId: "ver-1",
+        versionNumber: 1,
+        revision: 1,
+        versionStatus: "DRAFT",
+        ready: false,
+        errors: [
+          {
+            code: "MISSING_RATIONALE",
+            severity: "ERROR",
+            message: "Must-have requirement 'Python' lacks a job-related business rationale.",
+            requirementId: "req-1",
+            blocksReadiness: true,
+          },
+        ],
+        warnings: [],
+        info: [],
+        checkedAt: "2026-09-04T10:05:00Z",
+      });
+
+      render(
+        <JobEditor
+          jobId="job-ready-1"
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+        />
+      );
+
+      await screen.findByDisplayValue("Senior Fullstack Engineer");
+
+      const checkBtn = screen.getByText("Check readiness");
+      fireEvent.click(checkBtn);
+
+      expect(await screen.findByText("Blocking Errors (1)")).toBeInTheDocument();
+      expect(screen.getByText(/Must-have requirement 'Python' lacks a job-related business rationale/)).toBeInTheDocument();
+      expect(screen.queryByText(/Requisition passes all readiness checks/)).not.toBeInTheDocument();
+
+      // Click Go to field
+      const goToFieldBtn = screen.getByText("Go to field");
+      expect(goToFieldBtn).toBeInTheDocument();
+      fireEvent.click(goToFieldBtn);
+    });
+
+    it("requires confirmation to lock revision, and canceling does not mutate state", async () => {
+      vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(mockDraftJobDetail);
+
+      render(
+        <JobEditor
+          jobId="job-ready-1"
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+        />
+      );
+
+      await screen.findByDisplayValue("Senior Fullstack Engineer");
+
+      const markReadyBtn = screen.getByText("Mark ready for matching");
+      fireEvent.click(markReadyBtn);
+
+      // Verify modal is open with important workflow guidance
+      expect(screen.getByText("Lock Revision for Matching")).toBeInTheDocument();
+      expect(screen.getByText(/You are about to freeze/)).toBeInTheDocument();
+      expect(screen.getByText(/This exact revision will be locked as read-only and immutable/)).toBeInTheDocument();
+
+      // Click Cancel
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(screen.queryByText("Lock Revision for Matching")).not.toBeInTheDocument();
+      expect(jobsApi.markJobReady).not.toHaveBeenCalled();
+    });
+
+    it("locks revision as READY_FOR_MATCHING, makes form read-only, and creates successor revision", async () => {
+      vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(mockDraftJobDetail);
+      const mockReadyJobDetail: jobsApi.JobDetail = {
+        ...mockDraftJobDetail,
+        currentVersion: {
+          ...mockDraftJobDetail.currentVersion,
+          versionStatus: "READY_FOR_MATCHING",
+          revision: 2,
+          readyByUserId: "recruiter-1",
+          readyAt: "2026-09-04T10:10:00Z",
+        },
+      };
+      vi.mocked(jobsApi.markJobReady).mockResolvedValue(mockReadyJobDetail);
+
+      render(
+        <JobEditor
+          jobId="job-ready-1"
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+        />
+      );
+
+      await screen.findByDisplayValue("Senior Fullstack Engineer");
+
+      // Open modal and confirm
+      fireEvent.click(screen.getByText("Mark ready for matching"));
+      fireEvent.click(screen.getByText("Confirm and Lock Revision"));
+
+      // Check that status changed and locked banner appeared
+      expect(await screen.findByText("Revision Locked as Ready for Matching")).toBeInTheDocument();
+      expect(screen.getByText("v1 (Ready for matching)")).toBeInTheDocument();
+      expect(screen.getByText(/Requisition revision #2 is now locked as READY_FOR_MATCHING/)).toBeInTheDocument();
+
+      // Verify title input is now disabled (read-only)
+      const titleInput = screen.getByLabelText(/Job Title/);
+      expect(titleInput).toBeDisabled();
+
+      // Normal Save draft button is gone
+      expect(screen.queryByText("Save Draft Requisition")).not.toBeInTheDocument();
+
+      // Now create successor version
+      const mockSuccessorJobDetail: jobsApi.JobDetail = {
+        ...mockDraftJobDetail,
+        currentVersion: {
+          ...mockDraftJobDetail.currentVersion,
+          jobVersionId: "ver-2",
+          versionNumber: 2,
+          versionStatus: "DRAFT",
+          revision: 1,
+          readyByUserId: null,
+          readyAt: null,
+        },
+      };
+      vi.mocked(jobsApi.createSuccessorVersion).mockResolvedValue(mockSuccessorJobDetail);
+
+      const createSuccessorBtn = screen.getAllByText("Create editable revision")[0];
+      fireEvent.click(createSuccessorBtn);
+
+      expect(await screen.findByText("v2 (Draft)")).toBeInTheDocument();
+      expect(titleInput).not.toBeDisabled();
+      expect(screen.getByText("Save Draft Requisition")).toBeInTheDocument();
+    });
+
+    it("displays revision conflict message on stale ready attempt", async () => {
+      vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(mockDraftJobDetail);
+      const conflictError: any = new Error("Revision conflict");
+      conflictError.code = "REVISION_CONFLICT";
+      vi.mocked(jobsApi.markJobReady).mockRejectedValue(conflictError);
+
+      render(
+        <JobEditor
+          jobId="job-ready-1"
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+        />
+      );
+
+      await screen.findByDisplayValue("Senior Fullstack Engineer");
+
+      fireEvent.click(screen.getByText("Mark ready for matching"));
+      fireEvent.click(screen.getByText("Confirm and Lock Revision"));
+
+      expect(await screen.findByText("Revision Conflict")).toBeInTheDocument();
+      expect(screen.getByText(/This requisition was updated or changed status in another session/)).toBeInTheDocument();
+    });
+  });
 });
+

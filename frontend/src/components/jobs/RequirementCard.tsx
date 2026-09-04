@@ -15,6 +15,7 @@ interface RequirementCardProps {
   index: number;
   totalCount: number;
   forceExpandMoreOptions?: boolean;
+  readOnly?: boolean;
   onChange: (updated: RequirementItem) => void;
   onRemove: () => void;
   onMoveUp: () => void;
@@ -37,6 +38,7 @@ export function RequirementCard({
   index,
   totalCount,
   forceExpandMoreOptions = false,
+  readOnly = false,
   onChange,
   onRemove,
   onMoveUp,
@@ -161,21 +163,23 @@ export function RequirementCard({
               ) : (
                 <span className="badge badge-custom-entered">Custom</span>
               )}
-              <button
-                type="button"
-                className="btn-icon-subtle"
-                onClick={() => setIsEditingLabel(true)}
-                aria-label={`Edit requirement ${requirement.label}`}
-                title="Edit name"
-              >
-                <Icon name="edit" size={14} />
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  className="btn-icon-subtle"
+                  onClick={() => setIsEditingLabel(true)}
+                  aria-label={`Edit requirement ${requirement.label}`}
+                  title="Edit name"
+                >
+                  <Icon name="edit" size={14} />
+                </button>
+              )}
             </div>
           )}
         </div>
 
         {/* Actionable "Reason required" chip */}
-        {needsRationale && (
+        {!readOnly && needsRationale && (
           <button
             type="button"
             className="actionable-rationale-prompt"
@@ -188,37 +192,39 @@ export function RequirementCard({
         )}
 
         {/* Reordering and Delete Controls */}
-        <div className="requirement-card-actions">
-          <button
-            type="button"
-            className="btn-icon-control"
-            disabled={index === 0}
-            onClick={onMoveUp}
-            aria-label={`Move requirement ${requirement.label || index + 1} up`}
-            title="Move up"
-          >
-            <Icon name="chevron-left" size={14} style={{ transform: "rotate(90deg)" }} />
-          </button>
-          <button
-            type="button"
-            className="btn-icon-control"
-            disabled={index === totalCount - 1}
-            onClick={onMoveDown}
-            aria-label={`Move requirement ${requirement.label || index + 1} down`}
-            title="Move down"
-          >
-            <Icon name="chevron-down" size={14} />
-          </button>
-          <button
-            type="button"
-            className="btn-icon-control text-danger"
-            onClick={onRemove}
-            aria-label={`Remove requirement ${requirement.label || index + 1}`}
-            title="Remove requirement"
-          >
-            <Icon name="trash" size={14} />
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="requirement-card-actions">
+            <button
+              type="button"
+              className="btn-icon-control"
+              disabled={index === 0}
+              onClick={onMoveUp}
+              aria-label={`Move requirement ${requirement.label || index + 1} up`}
+              title="Move up"
+            >
+              <Icon name="chevron-left" size={14} style={{ transform: "rotate(90deg)" }} />
+            </button>
+            <button
+              type="button"
+              className="btn-icon-control"
+              disabled={index === totalCount - 1}
+              onClick={onMoveDown}
+              aria-label={`Move requirement ${requirement.label || index + 1} down`}
+              title="Move down"
+            >
+              <Icon name="chevron-down" size={14} />
+            </button>
+            <button
+              type="button"
+              className="btn-icon-control text-danger"
+              onClick={onRemove}
+              aria-label={`Remove requirement ${requirement.label || index + 1}`}
+              title="Remove requirement"
+            >
+              <Icon name="trash" size={14} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Primary Configuration Grid */}
@@ -229,6 +235,7 @@ export function RequirementCard({
             id={`cat-${index}`}
             className="form-select-sm"
             value={requirement.category}
+            disabled={readOnly}
             onChange={(e) => handleCategoryChange(e.target.value as RequirementCategory)}
           >
             <option value="SKILL">Skill</option>
@@ -247,6 +254,7 @@ export function RequirementCard({
             id={`nec-${index}`}
             className="form-select-sm"
             value={requirement.necessity}
+            disabled={readOnly}
             onChange={(e) =>
               onChange({ ...requirement, necessity: e.target.value as RequirementNecessity })
             }
@@ -262,6 +270,7 @@ export function RequirementCard({
             id={`prio-${index}`}
             className="form-select-sm"
             value={requirement.priority}
+            disabled={readOnly}
             onChange={(e) =>
               onChange({ ...requirement, priority: e.target.value as RequirementPriority })
             }
@@ -282,6 +291,7 @@ export function RequirementCard({
             max={600}
             className="form-input-sm"
             placeholder="e.g. 24"
+            disabled={readOnly}
             value={requirement.minExperienceMonths ?? ""}
             onChange={(e) => {
               const val = e.target.value ? parseInt(e.target.value, 10) : null;
@@ -332,6 +342,7 @@ export function RequirementCard({
               className="form-textarea-sm"
               rows={2}
               placeholder="Why is this requirement necessary for this role?..."
+              disabled={readOnly}
               value={requirement.rationale ?? ""}
               onChange={(e) => onChange({ ...requirement, rationale: e.target.value })}
             />
@@ -350,6 +361,7 @@ export function RequirementCard({
                 max={50}
                 className="form-input-sm"
                 placeholder="e.g. 3 (within last 3 years)"
+                disabled={readOnly}
                 value={requirement.recencyYears ?? ""}
                 onChange={(e) => {
                   const val = e.target.value ? parseInt(e.target.value, 10) : null;
@@ -364,42 +376,46 @@ export function RequirementCard({
             <label htmlFor={`equiv-${index}`} className="form-label-xs">
               Accepted equivalent terms <span className="text-muted">(Alternative titles or synonyms)</span>
             </label>
-            <div className="tag-input-row">
-              <input
-                id={`equiv-${index}`}
-                type="text"
-                className="form-input-sm"
-                placeholder="Add synonym or alias..."
-                value={equivalentInput}
-                onChange={(e) => setEquivalentInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleAddEquivalent();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={handleAddEquivalent}
-              >
-                Add
-              </button>
-            </div>
+            {!readOnly && (
+              <div className="tag-input-row">
+                <input
+                  id={`equiv-${index}`}
+                  type="text"
+                  className="form-input-sm"
+                  placeholder="Add synonym or alias..."
+                  value={equivalentInput}
+                  onChange={(e) => setEquivalentInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddEquivalent();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleAddEquivalent}
+                >
+                  Add
+                </button>
+              </div>
+            )}
             {requirement.acceptedEquivalents && requirement.acceptedEquivalents.length > 0 && (
               <div className="tag-pill-container">
                 {requirement.acceptedEquivalents.map((eq, eqIdx) => (
                   <span key={eqIdx} className="tag-pill">
                     {eq}
-                    <button
-                      type="button"
-                      className="tag-remove-btn"
-                      onClick={() => handleRemoveEquivalent(eq)}
-                      aria-label={`Remove equivalent ${eq}`}
-                    >
-                      <Icon name="x" size={11} />
-                    </button>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        className="tag-remove-btn"
+                        onClick={() => handleRemoveEquivalent(eq)}
+                        aria-label={`Remove equivalent ${eq}`}
+                      >
+                        <Icon name="x" size={11} />
+                      </button>
+                    )}
                   </span>
                 ))}
               </div>
@@ -417,6 +433,7 @@ export function RequirementCard({
                     <input
                       type="checkbox"
                       checked={checked}
+                      disabled={readOnly}
                       onChange={() => handleToggleEvidenceType(type)}
                     />
                     <span>{label}</span>

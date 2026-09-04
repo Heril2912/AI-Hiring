@@ -178,6 +178,8 @@ class JobVersionSummaryResponse(StrictSchema):
     openings_count: Optional[int] = None
     internal_reference: Optional[str] = None
     requirements_count: int = 0
+    ready_by_user_id: Optional[uuid.UUID] = None
+    ready_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -205,6 +207,8 @@ class JobVersionDetailResponse(StrictSchema):
     created_by_user_id: uuid.UUID
     approved_by_user_id: Optional[uuid.UUID] = None
     approved_at: Optional[datetime] = None
+    ready_by_user_id: Optional[uuid.UUID] = None
+    ready_at: Optional[datetime] = None
     requirements: List[RequirementItemResponse] = Field(default_factory=list)
     review_warnings: List[JobReviewWarningResponse] = Field(default_factory=list)
     created_at: datetime
@@ -227,6 +231,36 @@ class JobDetailResponse(StrictSchema):
     created_at: datetime
     updated_at: datetime
     current_version: JobVersionDetailResponse
+
+
+class JobReadinessFindingResponse(StrictSchema):
+    code: str
+    severity: str
+    message: str
+    field: Optional[str] = None
+    requirement_id: Optional[uuid.UUID] = None
+    blocking: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class JobReadinessResponse(StrictSchema):
+    job_id: uuid.UUID
+    job_version_id: uuid.UUID
+    version_number: int
+    revision: int
+    version_status: JobVersionStatus
+    is_ready: bool
+    errors: List[JobReadinessFindingResponse] = Field(default_factory=list)
+    warnings: List[JobReadinessFindingResponse] = Field(default_factory=list)
+    info: List[JobReadinessFindingResponse] = Field(default_factory=list)
+
+
+class JobMarkReadyRequest(StrictSchema):
+    expected_revision: int
+
+
+class JobCreateSuccessorRequest(StrictSchema):
+    from_version_number: Optional[int] = None
 
 
 class JobImportAnalyzeTextRequest(StrictSchema):

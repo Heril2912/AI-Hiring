@@ -28,8 +28,12 @@ from app.models.taxonomy import (
 )
 from app.schemas.job import (
     JobCreateRequest,
+    JobCreateSuccessorRequest,
     JobDetailResponse,
     JobDraftUpdateRequest,
+    JobMarkReadyRequest,
+    JobReadinessFindingResponse,
+    JobReadinessResponse,
     JobRequirementsSaveRequest,
     JobReviewWarningResponse,
     JobSummaryResponse,
@@ -37,6 +41,7 @@ from app.schemas.job import (
     JobVersionSummaryResponse,
     RequirementItemResponse,
 )
+from app.services.job_readiness import evaluate_job_version_readiness
 from app.services.requirement_validation import (
     RequirementValidationError,
     validate_and_prepare_requirements,
@@ -126,6 +131,8 @@ def _build_job_version_detail_response(version: JobVersion) -> JobVersionDetailR
         created_by_user_id=version.created_by_user_id,
         approved_by_user_id=version.approved_by_user_id,
         approved_at=version.approved_at,
+        ready_by_user_id=version.ready_by_user_id,
+        ready_at=version.ready_at,
         requirements=requirements_resp,
         review_warnings=all_warnings,
         created_at=version.created_at,
@@ -147,6 +154,8 @@ def _build_job_version_summary_response(version: JobVersion) -> JobVersionSummar
         openings_count=version.openings_count,
         internal_reference=version.internal_reference,
         requirements_count=len(version.requirements) if version.requirements else 0,
+        ready_by_user_id=version.ready_by_user_id,
+        ready_at=version.ready_at,
         created_at=version.created_at,
         updated_at=version.updated_at,
     )
@@ -605,3 +614,375 @@ async def save_draft_requirements(
         )
 
     return _build_job_detail_response(req, draft_version)
+
+
+@router.get(
+    "/{job_id}/readiness",
+    response_model=JobReadinessResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Check Job Revision Readiness",
+    description="Evaluates server-side readiness validation for the latest job revision without mutating state.",
+)
+async def check_job_readiness(
+    job_id: uuid.UUID,
+    expected_revision: Optional[int] = None,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+) -> JobReadinessResponse:
+    actor = auth_ctx.user
+
+    stmt = (
+        select(JobRequisition)
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
+            selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
+        )
+        .where(JobRequisition.job_id == job_id)
+    )
+    req = db.execute(stmt).scalar_one_or_none()
+
+    if req is None or (actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job not found."},
+        )
+
+    if not req.versions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job version not found."},
+        )
+
+    latest_version = max(req.versions, key=lambda v: v.version_number)
+
+    readiness = evaluate_job_version_readiness(
+        version=latest_version,
+        db=db,
+        expected_revision=expected_revision,
+    )
+
+    return JobReadinessResponse(
+        job_id=readiness.job_id,
+        job_version_id=readiness.job_version_id,
+        version_number=readiness.version_number,
+        revision=readiness.revision,
+        version_status=readiness.version_status,
+        is_ready=readiness.is_ready,
+        errors=[
+            JobReadinessFindingResponse(
+                code=e.code,
+                severity=e.severity.value,
+                message=e.message,
+                field=e.field_name,
+                requirement_id=e.requirement_id,
+                blocking=e.blocking,
+                metadata=e.metadata,
+            )
+            for e in readiness.errors
+        ],
+        warnings=[
+            JobReadinessFindingResponse(
+                code=w.code,
+                severity=w.severity.value,
+                message=w.message,
+                field=w.field_name,
+                requirement_id=w.requirement_id,
+                blocking=w.blocking,
+                metadata=w.metadata,
+            )
+            for w in readiness.warnings
+        ],
+        info=[
+            JobReadinessFindingResponse(
+                code=i.code,
+                severity=i.severity.value,
+                message=i.message,
+                field=i.field_name,
+                requirement_id=i.requirement_id,
+                blocking=i.blocking,
+                metadata=i.metadata,
+            )
+            for i in readiness.info
+        ],
+    )
+
+
+@router.post(
+    "/{job_id}/ready",
+    response_model=JobDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Mark Job Revision Ready for Matching",
+    description="Validates and atomically locks the current DRAFT revision as READY_FOR_MATCHING.",
+)
+async def mark_job_ready(
+    job_id: uuid.UUID,
+    payload: JobMarkReadyRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+) -> JobDetailResponse:
+    actor = auth_ctx.user
+    now = datetime.now(timezone.utc)
+
+    stmt = (
+        select(JobRequisition)
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
+            selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
+        )
+        .where(JobRequisition.job_id == job_id)
+        .with_for_update(of=JobRequisition)
+    )
+    req = db.execute(stmt).scalar_one_or_none()
+
+    if req is None or (actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job not found."},
+        )
+
+    if not req.versions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job version not found."},
+        )
+
+    latest_version = max(req.versions, key=lambda v: v.version_number)
+
+    # Idempotent check: if already READY_FOR_MATCHING and matching expected revision
+    if latest_version.version_status == JobVersionStatus.READY_FOR_MATCHING:
+        if latest_version.revision == payload.expected_revision:
+            return _build_job_detail_response(req, latest_version)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "REVISION_CONFLICT",
+                "message": f"Job version is already locked as READY_FOR_MATCHING with revision {latest_version.revision}.",
+            },
+        )
+
+    if latest_version.version_status != JobVersionStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "JOB_NOT_DRAFT",
+                "message": f"Only DRAFT versions can be marked ready. Current status: {latest_version.version_status}.",
+            },
+        )
+
+    # Concurrency check
+    if latest_version.revision != payload.expected_revision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "REVISION_CONFLICT",
+                "message": f"Draft revision conflict. Expected revision {latest_version.revision}, but received {payload.expected_revision}.",
+            },
+        )
+
+    # Server-side readiness re-validation
+    readiness = evaluate_job_version_readiness(
+        version=latest_version,
+        db=db,
+        expected_revision=payload.expected_revision,
+    )
+
+    if not readiness.is_ready:
+        first_err = readiness.errors[0] if readiness.errors else None
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": first_err.code if first_err else "READINESS_VALIDATION_FAILED",
+                "message": first_err.message if first_err else "Requisition does not meet readiness criteria.",
+                "errors": [
+                    {
+                        "code": e.code,
+                        "message": e.message,
+                        "field": e.field_name,
+                        "requirement_id": str(e.requirement_id) if e.requirement_id else None,
+                    }
+                    for e in readiness.errors
+                ],
+            },
+        )
+
+    # Transition to READY_FOR_MATCHING
+    latest_version.version_status = JobVersionStatus.READY_FOR_MATCHING
+    latest_version.ready_by_user_id = actor.user_id
+    latest_version.ready_at = now
+    latest_version.approved_by_user_id = actor.user_id
+    latest_version.approved_at = now
+    latest_version.updated_at = now
+    req.updated_at = now
+
+    try:
+        db.commit()
+        db.refresh(req)
+        db.refresh(latest_version)
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("Failed to mark job ready", extra={"job_id": str(job_id), "error_type": type(e).__name__})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "JOB_READY_FAILED", "message": "Failed to mark job ready for matching."},
+        )
+
+    return _build_job_detail_response(req, latest_version)
+
+
+@router.post(
+    "/{job_id}/versions",
+    response_model=JobDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Successor Job Version Draft",
+    description="Creates a new DRAFT successor version from a locked READY_FOR_MATCHING version without modifying historical versions.",
+)
+async def create_successor_version(
+    job_id: uuid.UUID,
+    payload: JobCreateSuccessorRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+) -> JobDetailResponse:
+    actor = auth_ctx.user
+    now = datetime.now(timezone.utc)
+
+    stmt = (
+        select(JobRequisition)
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
+            selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
+        )
+        .where(JobRequisition.job_id == job_id)
+        .with_for_update(of=JobRequisition)
+    )
+    req = db.execute(stmt).scalar_one_or_none()
+
+    if req is None or (actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job not found."},
+        )
+
+    if not req.versions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job version not found."},
+        )
+
+    latest_version = max(req.versions, key=lambda v: v.version_number)
+
+    # Check if latest version is already a DRAFT
+    if latest_version.version_status == JobVersionStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "DRAFT_ALREADY_EXISTS",
+                "message": f"Version {latest_version.version_number} is already an active DRAFT. Edit the existing draft or mark it ready before creating a new version.",
+            },
+        )
+
+    # Create successor version (version_number = latest + 1)
+    new_version_number = latest_version.version_number + 1
+    new_version_id = uuid.uuid4()
+
+    successor_version = JobVersion(
+        job_version_id=new_version_id,
+        job_id=req.job_id,
+        version_number=new_version_number,
+        version_status=JobVersionStatus.DRAFT,
+        revision=1,
+        title=latest_version.title,
+        department=latest_version.department,
+        location=latest_version.location,
+        employment_type=latest_version.employment_type,
+        workplace_type=latest_version.workplace_type,
+        openings_count=latest_version.openings_count,
+        internal_reference=latest_version.internal_reference,
+        summary=latest_version.summary,
+        responsibilities=latest_version.responsibilities,
+        job_description_text=latest_version.job_description_text,
+        occupation_concept_id=latest_version.occupation_concept_id,
+        taxonomy_version=latest_version.taxonomy_version,
+        parser_version=latest_version.parser_version,
+        created_by_user_id=actor.user_id,
+        created_at=now,
+        updated_at=now,
+    )
+
+    # Clone requirements with fresh identities and preserved order/data
+    if latest_version.requirements:
+        for r in latest_version.requirements:
+            cloned_req = JobRequirement(
+                requirement_id=uuid.uuid4(),
+                job_version_id=new_version_id,
+                display_order=r.display_order,
+                category=r.category,
+                label=r.label,
+                normalized_label=r.normalized_label,
+                taxonomy_skill_concept_id=r.taxonomy_skill_concept_id,
+                necessity=r.necessity,
+                priority=r.priority,
+                custom_weight_override=r.custom_weight_override,
+                min_experience_months=r.min_experience_months,
+                recency_years=r.recency_years,
+                accepted_evidence_types=list(r.accepted_evidence_types or []),
+                accepted_equivalents=list(r.accepted_equivalents or []),
+                rationale=r.rationale,
+                origin=r.origin,
+                review_required=False,
+                warning_metadata=[],
+                created_at=now,
+                updated_at=now,
+            )
+            successor_version.requirements.append(cloned_req)
+
+    req.updated_at = now
+
+    try:
+        db.add(successor_version)
+        db.commit()
+        db.refresh(req)
+        db.refresh(successor_version)
+        if latest_version.occupation:
+            successor_version.occupation = latest_version.occupation
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("Failed to create successor job version", extra={"job_id": str(job_id), "error_type": type(e).__name__})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "SUCCESSOR_CREATION_FAILED", "message": "Failed to create successor version."},
+        )
+
+    return _build_job_detail_response(req, successor_version)
+
+
+@router.get(
+    "/{job_id}/versions",
+    response_model=List[JobVersionSummaryResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get Job Version History",
+    description="Returns chronological version history for a job requisition accessible to the recruiter.",
+)
+async def list_job_versions(
+    job_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+) -> List[JobVersionSummaryResponse]:
+    actor = auth_ctx.user
+
+    stmt = (
+        select(JobRequisition)
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
+        )
+        .where(JobRequisition.job_id == job_id)
+    )
+    req = db.execute(stmt).scalar_one_or_none()
+
+    if req is None or (actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job not found."},
+        )
+
+    sorted_versions = sorted(req.versions, key=lambda v: v.version_number, reverse=True)
+    return [_build_job_version_summary_response(v) for v in sorted_versions]
