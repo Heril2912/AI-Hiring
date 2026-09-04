@@ -49,12 +49,14 @@ def _escape_like_pattern(text: str) -> str:
     ),
 )
 async def search_occupations(
-    q: str = Query(..., min_length=1, max_length=100, description="Search query string"),
+    q: Optional[str] = Query(default=None, min_length=1, max_length=100, description="Search query string"),
+    query: Optional[str] = Query(default=None, min_length=1, max_length=100, description="Alternative search query parameter"),
     limit: int = Query(default=10, ge=1, le=50, description="Maximum number of results to return"),
     auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
     db: Session = Depends(get_db),
 ) -> List[OccupationSearchItemResponse]:
-    cleaned_q = q.strip()
+    raw_query = q or query
+    cleaned_q = raw_query.strip() if raw_query else ""
     if not cleaned_q:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -63,6 +65,7 @@ async def search_occupations(
 
     norm_q = normalize_search_query(cleaned_q)
     escaped_norm_q = _escape_like_pattern(norm_q)
+
 
     # 1. Fetch active snapshot
     stmt_snap = select(TaxonomySnapshot).where(TaxonomySnapshot.state == TaxonomySnapshotState.ACTIVE)
@@ -162,12 +165,14 @@ async def search_occupations(
     ),
 )
 async def search_skills(
-    q: str = Query(..., min_length=1, max_length=100, description="Search query string"),
+    q: Optional[str] = Query(default=None, min_length=1, max_length=100, description="Search query string"),
+    query: Optional[str] = Query(default=None, min_length=1, max_length=100, description="Alternative search query parameter"),
     limit: int = Query(default=10, ge=1, le=50, description="Maximum number of results to return"),
     auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
     db: Session = Depends(get_db),
 ) -> List[SkillSearchItemResponse]:
-    cleaned_q = q.strip()
+    raw_query = q or query
+    cleaned_q = raw_query.strip() if raw_query else ""
     if not cleaned_q:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -176,6 +181,7 @@ async def search_skills(
 
     norm_q = normalize_search_query(cleaned_q)
     escaped_norm_q = _escape_like_pattern(norm_q)
+
 
     # 1. Fetch active snapshot
     stmt_snap = select(TaxonomySnapshot).where(TaxonomySnapshot.state == TaxonomySnapshotState.ACTIVE)
@@ -244,7 +250,7 @@ async def search_skills(
             matched_alias=item[4],
             category=item[3].category,
             source=item[3].source,
-            source_version=snapshot.source_version if item[3].source.startswith("ONET") else None,
+            source_version=snapshot.source_version,
         )
         for item in scored_items[:limit]
     ]

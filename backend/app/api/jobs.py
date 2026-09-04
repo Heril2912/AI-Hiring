@@ -15,17 +15,31 @@ from app.database import get_db
 from app.models.auth import UserRole
 from app.models.job import (
     JobLifecycleStatus,
+    JobRequirement,
     JobRequisition,
     JobVersion,
     JobVersionStatus,
+)
+from app.models.taxonomy import (
+    OccupationConcept,
+    SkillConcept,
+    TaxonomySnapshot,
+    TaxonomySnapshotState,
 )
 from app.schemas.job import (
     JobCreateRequest,
     JobDetailResponse,
     JobDraftUpdateRequest,
+    JobRequirementsSaveRequest,
+    JobReviewWarningResponse,
     JobSummaryResponse,
     JobVersionDetailResponse,
     JobVersionSummaryResponse,
+    RequirementItemResponse,
+)
+from app.services.requirement_validation import (
+    RequirementValidationError,
+    validate_and_prepare_requirements,
 )
 
 logger = logging.getLogger("ai_hiring.api.jobs")
@@ -46,6 +60,49 @@ def _compute_payload_hash(payload_dict: dict) -> str:
 
 
 def _build_job_version_detail_response(version: JobVersion) -> JobVersionDetailResponse:
+    requirements_resp: List[RequirementItemResponse] = []
+    all_warnings: List[JobReviewWarningResponse] = []
+
+    if version.requirements:
+        for r in version.requirements:
+            r_resp = RequirementItemResponse(
+                requirement_id=r.requirement_id,
+                display_order=r.display_order,
+                category=r.category,
+                label=r.label,
+                normalized_label=r.normalized_label,
+                taxonomy_skill_concept_id=r.taxonomy_skill_concept_id,
+                necessity=r.necessity,
+                priority=r.priority,
+                custom_weight_override=r.custom_weight_override,
+                min_experience_months=r.min_experience_months,
+                recency_years=r.recency_years,
+                accepted_evidence_types=r.accepted_evidence_types or [],
+                accepted_equivalents=r.accepted_equivalents or [],
+                rationale=r.rationale,
+                origin=r.origin,
+                review_required=r.review_required,
+                warning_metadata=r.warning_metadata or [],
+                created_at=r.created_at,
+                updated_at=r.updated_at,
+            )
+            requirements_resp.append(r_resp)
+
+            if r.warning_metadata:
+                for w in r.warning_metadata:
+                    all_warnings.append(
+                        JobReviewWarningResponse(
+                            code=w.get("code", "REVIEW_WARNING"),
+                            message=w.get("message", ""),
+                            severity=w.get("severity", "REVIEW_SUGGESTED"),
+                            requirement_id=r.requirement_id,
+                            rule=w.get("rule"),
+                            matched_term=w.get("matched_term"),
+                        )
+                    )
+
+    occupation_title = version.occupation.canonical_title if version.occupation else None
+
     return JobVersionDetailResponse(
         job_version_id=version.job_version_id,
         job_id=version.job_id,
@@ -62,11 +119,15 @@ def _build_job_version_detail_response(version: JobVersion) -> JobVersionDetailR
         summary=version.summary,
         responsibilities=version.responsibilities,
         job_description_text=version.job_description_text,
+        occupation_concept_id=version.occupation_concept_id,
+        occupation_title=occupation_title,
         taxonomy_version=version.taxonomy_version,
         parser_version=version.parser_version,
         created_by_user_id=version.created_by_user_id,
         approved_by_user_id=version.approved_by_user_id,
         approved_at=version.approved_at,
+        requirements=requirements_resp,
+        review_warnings=all_warnings,
         created_at=version.created_at,
         updated_at=version.updated_at,
     )
@@ -85,6 +146,7 @@ def _build_job_version_summary_response(version: JobVersion) -> JobVersionSummar
         workplace_type=version.workplace_type,
         openings_count=version.openings_count,
         internal_reference=version.internal_reference,
+        requirements_count=len(version.requirements) if version.requirements else 0,
         created_at=version.created_at,
         updated_at=version.updated_at,
     )
@@ -99,6 +161,29 @@ def _build_job_detail_response(req: JobRequisition, version: JobVersion) -> JobD
         updated_at=req.updated_at,
         current_version=_build_job_version_detail_response(version),
     )
+
+
+def _validate_occupation_concept(occupation_concept_id: Optional[uuid.UUID], db: Session) -> Optional[OccupationConcept]:
+    if not occupation_concept_id:
+        return None
+    stmt = (
+        select(OccupationConcept)
+        .join(TaxonomySnapshot, OccupationConcept.snapshot_id == TaxonomySnapshot.snapshot_id)
+        .where(
+            TaxonomySnapshot.state == TaxonomySnapshotState.ACTIVE,
+            OccupationConcept.concept_id == occupation_concept_id,
+        )
+    )
+    occ = db.execute(stmt).scalar_one_or_none()
+    if occ is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_OCCUPATION_CONCEPT",
+                "message": f"Occupation concept '{occupation_concept_id}' not found in active taxonomy snapshot.",
+            },
+        )
+    return occ
 
 
 @router.post(
@@ -136,7 +221,10 @@ async def create_job(
             # Query existing requisition with same idempotency key for this creator
             stmt = (
                 select(JobRequisition)
-                .options(selectinload(JobRequisition.versions))
+                .options(
+                    selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
+                    selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
+                )
                 .where(
                     JobRequisition.created_by_user_id == actor.user_id,
                     JobRequisition.idempotency_key == clean_key,
@@ -157,6 +245,9 @@ async def create_job(
                         "message": "Idempotency key already used with a different job creation payload.",
                     },
                 )
+
+    # Validate optional occupation concept
+    occ = _validate_occupation_concept(create_req.occupation_concept_id, db)
 
     # 2. Atomic creation of JobRequisition and JobVersion v1
     job_id = uuid.uuid4()
@@ -190,6 +281,7 @@ async def create_job(
         summary=create_req.summary,
         responsibilities=create_req.responsibilities,
         job_description_text=create_req.job_description_text,
+        occupation_concept_id=create_req.occupation_concept_id,
         created_by_user_id=actor.user_id,
         created_at=now,
         updated_at=now,
@@ -202,6 +294,8 @@ async def create_job(
         db.commit()
         db.refresh(requisition)
         db.refresh(version_1)
+        if occ:
+            version_1.occupation = occ
     except SQLAlchemyError as e:
         db.rollback()
         logger.error("Failed to create job requisition and version", extra={"error_type": type(e).__name__})
@@ -229,7 +323,9 @@ async def list_jobs(
 ) -> List[JobSummaryResponse]:
     actor = auth_ctx.user
 
-    stmt = select(JobRequisition).options(selectinload(JobRequisition.versions))
+    stmt = select(JobRequisition).options(
+        selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
+    )
 
     # Recruiter sees only their own jobs; Admin sees all
     if actor.role == UserRole.RECRUITER:
@@ -276,7 +372,10 @@ async def get_job(
 
     stmt = (
         select(JobRequisition)
-        .options(selectinload(JobRequisition.versions))
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
+            selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
+        )
         .where(JobRequisition.job_id == job_id)
     )
     req = db.execute(stmt).scalar_one_or_none()
@@ -319,7 +418,10 @@ async def update_job_draft(
 
     stmt = (
         select(JobRequisition)
-        .options(selectinload(JobRequisition.versions))
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
+            selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
+        )
         .where(JobRequisition.job_id == job_id)
     )
     req = db.execute(stmt).scalar_one_or_none()
@@ -359,8 +461,13 @@ async def update_job_draft(
             },
         )
 
-    # 3. Apply partial updates
+    # 3. Validate occupation concept if provided in update
     fields_set = update_req.model_fields_set - {"expected_revision"}
+    if "occupation_concept_id" in fields_set:
+        occ = _validate_occupation_concept(update_req.occupation_concept_id, db)
+        draft_version.occupation = occ
+
+    # 4. Apply partial updates
     for field_name in fields_set:
         val = getattr(update_req, field_name)
         setattr(draft_version, field_name, val)
@@ -380,6 +487,121 @@ async def update_job_draft(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": "JOB_UPDATE_FAILED", "message": "Failed to update draft."},
+        )
+
+    return _build_job_detail_response(req, draft_version)
+
+
+@router.put(
+    "/{job_id}/draft/requirements",
+    response_model=JobDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Save Draft Structured Requirements Atomically",
+    description=(
+        "Atomically replaces the entire requirement list for the current DRAFT job version. "
+        "Validates all requirements before persistence. Requires matching expected_revision "
+        "and increments revision exactly once upon success."
+    ),
+)
+async def save_draft_requirements(
+    job_id: uuid.UUID,
+    save_req: JobRequirementsSaveRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+) -> JobDetailResponse:
+    actor = auth_ctx.user
+    now = datetime.now(timezone.utc)
+
+    stmt = (
+        select(JobRequisition)
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
+            selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
+        )
+        .where(JobRequisition.job_id == job_id)
+    )
+    req = db.execute(stmt).scalar_one_or_none()
+
+    # Enforce ownership / conceal existence
+    if req is None or (actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job not found."},
+        )
+
+    if not req.versions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job version not found."},
+        )
+
+    draft_version = max(req.versions, key=lambda v: v.version_number)
+
+    # 1. Reject if not DRAFT
+    if draft_version.version_status != JobVersionStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "JOB_NOT_DRAFT",
+                "message": "Only job versions in DRAFT status can be updated.",
+            },
+        )
+
+    # 2. Check optimistic revision conflict
+    if draft_version.revision != save_req.expected_revision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "REVISION_CONFLICT",
+                "message": f"Draft revision conflict. Expected revision {draft_version.revision}, but received {save_req.expected_revision}.",
+            },
+        )
+
+    # 3. Validate requirements atomically before making changes
+    req_dicts = [r.model_dump(mode="json") for r in save_req.requirements]
+    try:
+        new_requirement_models = validate_and_prepare_requirements(
+            requirements_data=req_dicts,
+            job_version_id=draft_version.job_version_id,
+            db=db,
+        )
+    except RequirementValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": err.code,
+                "message": err.message,
+                "field": err.field,
+            },
+        )
+
+    # 4. Atomic replacement: delete existing requirements and add new ones
+    try:
+        draft_version.requirements.clear()
+        db.flush()
+        for r_model in new_requirement_models:
+            draft_version.requirements.append(r_model)
+
+        draft_version.revision += 1
+        draft_version.updated_at = now
+        req.updated_at = now
+
+        db.commit()
+        db.refresh(req)
+        db.refresh(draft_version)
+    except IntegrityError as ie:
+        db.rollback()
+        logger.error("Integrity error replacing draft requirements", extra={"job_id": str(job_id)})
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "REQUIREMENT_INTEGRITY_FAILED", "message": "Requirement constraint violated."},
+        )
+    except SQLAlchemyError as se:
+        db.rollback()
+        logger.error("SQLAlchemy error replacing draft requirements", extra={"job_id": str(job_id), "error_type": type(se).__name__})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "REQUIREMENTS_SAVE_FAILED", "message": "Failed to save draft requirements."},
         )
 
     return _build_job_detail_response(req, draft_version)

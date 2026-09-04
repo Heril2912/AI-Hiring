@@ -302,3 +302,44 @@ def test_search_authorization_and_safety(client, test_db):
     # Wildcards % and _ handled safely
     resp_wildcard = client.get("/api/v1/taxonomy/occupations?q=%25_")
     assert resp_wildcard.status_code == status.HTTP_200_OK
+
+
+def test_search_query_parameter_alias_and_inactive_snapshot_filtering(synthetic_onet_dir, client, test_db):
+    import_onet_taxonomy(source_dir=synthetic_onet_dir, version="31.0", session=test_db)
+
+    _seed_user(test_db, email="recruiter.alias@company.test", role=UserRole.RECRUITER)
+    _login_user(client, email="recruiter.alias@company.test")
+
+    # Verify ?query= works identically to ?q= for occupations
+    resp_query_occ = client.get("/api/v1/taxonomy/occupations?query=Software%20Developers")
+    assert resp_query_occ.status_code == status.HTTP_200_OK
+    assert len(resp_query_occ.json()) >= 1
+    assert resp_query_occ.json()[0]["canonicalTitle"] == "Software Developers"
+    assert resp_query_occ.json()[0]["sourceVersion"] == "31.0"
+
+    # Verify ?query= works identically to ?q= for skills
+    resp_query_skill = client.get("/api/v1/taxonomy/skills?query=Python")
+    assert resp_query_skill.status_code == status.HTTP_200_OK
+    assert len(resp_query_skill.json()) >= 1
+    assert resp_query_skill.json()[0]["canonicalLabel"] == "Python"
+    assert resp_query_skill.json()[0]["sourceVersion"] == "31.0"
+
+    # Verify searching with "Software Developer" (singular) finds "Software Developers" via token/substring
+    resp_singular = client.get("/api/v1/taxonomy/occupations?query=Software%20Developer")
+    assert resp_singular.status_code == status.HTTP_200_OK
+    titles = [item["canonicalTitle"] for item in resp_singular.json()]
+    assert "Software Developers" in titles
+
+    # Inactivate snapshot and verify search returns empty list (filtering against active snapshot)
+    snap = test_db.execute(select(TaxonomySnapshot).where(TaxonomySnapshot.state == TaxonomySnapshotState.ACTIVE)).scalar_one()
+    snap.state = TaxonomySnapshotState.SUPERSEDED
+    test_db.commit()
+
+    resp_archived = client.get("/api/v1/taxonomy/occupations?query=Software%20Developers")
+    assert resp_archived.status_code == status.HTTP_200_OK
+    assert resp_archived.json() == []
+
+    resp_archived_skill = client.get("/api/v1/taxonomy/skills?query=Python")
+    assert resp_archived_skill.status_code == status.HTTP_200_OK
+    assert resp_archived_skill.json() == []
+

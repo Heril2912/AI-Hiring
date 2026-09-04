@@ -1,28 +1,34 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
+JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
+
 if TYPE_CHECKING:
     from app.models.auth import UserRecord
+    from app.models.taxonomy import OccupationConcept, SkillConcept
 
 
 class JobLifecycleStatus(str, enum.Enum):
@@ -47,6 +53,44 @@ class WorkplaceType(str, enum.Enum):
     ON_SITE = "ON_SITE"
     HYBRID = "HYBRID"
     REMOTE = "REMOTE"
+
+
+class RequirementCategory(str, enum.Enum):
+    SKILL = "SKILL"
+    EXPERIENCE = "EXPERIENCE"
+    RESPONSIBILITY = "RESPONSIBILITY"
+    EDUCATION = "EDUCATION"
+    CERTIFICATION = "CERTIFICATION"
+    LANGUAGE = "LANGUAGE"
+    OTHER = "OTHER"
+
+
+class RequirementNecessity(str, enum.Enum):
+    MUST_HAVE = "MUST_HAVE"
+    PREFERRED = "PREFERRED"
+
+
+class RequirementPriority(str, enum.Enum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+class RequirementOrigin(str, enum.Enum):
+    RECRUITER_ENTERED = "RECRUITER_ENTERED"
+    TAXONOMY_SUGGESTED_RECRUITER_CONFIRMED = "TAXONOMY_SUGGESTED_RECRUITER_CONFIRMED"
+
+
+class RequirementEvidenceType(str, enum.Enum):
+    EMPLOYMENT = "EMPLOYMENT"
+    PROJECT = "PROJECT"
+    EDUCATION = "EDUCATION"
+    CERTIFICATION = "CERTIFICATION"
+    SKILL_LIST = "SKILL_LIST"
+    PUBLICATION = "PUBLICATION"
+    PATENT = "PATENT"
+    OTHER = "OTHER"
 
 
 class JobRequisition(Base):
@@ -172,6 +216,7 @@ class JobVersion(Base):
         Index("ix_job_versions_job_id", "job_id"),
         Index("ix_job_versions_created_by_user_id", "created_by_user_id"),
         Index("ix_job_versions_version_status", "version_status"),
+        Index("ix_job_versions_occupation_concept_id", "occupation_concept_id"),
     )
 
     job_version_id: Mapped[uuid.UUID] = mapped_column(
@@ -261,6 +306,15 @@ class JobVersion(Base):
         Text,
         nullable=True,
     )
+    occupation_concept_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "occupation_concepts.concept_id",
+            ondelete="SET NULL",
+            name="fk_job_versions_occupation_concept_id_occupation_concepts",
+        ),
+        nullable=True,
+    )
     taxonomy_version: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
@@ -315,4 +369,210 @@ class JobVersion(Base):
     approver: Mapped[Optional["UserRecord"]] = relationship(
         "UserRecord",
         foreign_keys=[approved_by_user_id],
+    )
+    occupation: Mapped[Optional["OccupationConcept"]] = relationship(
+        "OccupationConcept",
+        foreign_keys=[occupation_concept_id],
+    )
+    requirements: Mapped[List["JobRequirement"]] = relationship(
+        "JobRequirement",
+        back_populates="job_version",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="JobRequirement.display_order.asc()",
+    )
+
+
+class JobRequirement(Base):
+    __tablename__ = "job_requirements"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_version_id",
+            "category",
+            "normalized_label",
+            name="uq_job_requirements_version_category_normalized_label",
+        ),
+        CheckConstraint(
+            "display_order >= 0",
+            name="ck_job_requirements_display_order_non_negative",
+        ),
+        CheckConstraint(
+            "length(trim(label)) > 0",
+            name="ck_job_requirements_label_not_empty",
+        ),
+        CheckConstraint(
+            "length(trim(normalized_label)) > 0",
+            name="ck_job_requirements_normalized_label_not_empty",
+        ),
+        CheckConstraint(
+            "category IN ('SKILL', 'EXPERIENCE', 'RESPONSIBILITY', 'EDUCATION', 'CERTIFICATION', 'LANGUAGE', 'OTHER')",
+            name="ck_job_requirements_category",
+        ),
+        CheckConstraint(
+            "necessity IN ('MUST_HAVE', 'PREFERRED')",
+            name="ck_job_requirements_necessity",
+        ),
+        CheckConstraint(
+            "priority IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')",
+            name="ck_job_requirements_priority",
+        ),
+        CheckConstraint(
+            "min_experience_months IS NULL OR min_experience_months > 0",
+            name="ck_job_requirements_min_experience_positive",
+        ),
+        CheckConstraint(
+            "recency_years IS NULL OR (recency_years >= 1 AND recency_years <= 50)",
+            name="ck_job_requirements_recency_years_bounded",
+        ),
+        CheckConstraint(
+            "custom_weight_override IS NULL OR (custom_weight_override >= 0.0 AND custom_weight_override <= 10.0)",
+            name="ck_job_requirements_custom_weight_bounded",
+        ),
+        CheckConstraint(
+            "rationale IS NULL OR length(rationale) <= 2000",
+            name="ck_job_requirements_rationale_length",
+        ),
+        Index("ix_job_requirements_job_version_id", "job_version_id"),
+        Index("ix_job_requirements_display_order", "job_version_id", "display_order"),
+        Index("ix_job_requirements_taxonomy_skill_concept_id", "taxonomy_skill_concept_id"),
+    )
+
+    requirement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    job_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "job_versions.job_version_id",
+            ondelete="CASCADE",
+            name="fk_job_requirements_job_version_id_job_versions",
+        ),
+        nullable=False,
+    )
+    display_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    category: Mapped[RequirementCategory] = mapped_column(
+        Enum(
+            RequirementCategory,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_job_requirements_category_enum",
+        ),
+        nullable=False,
+        default=RequirementCategory.SKILL,
+    )
+    label: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    normalized_label: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    taxonomy_skill_concept_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "skill_concepts.concept_id",
+            ondelete="SET NULL",
+            name="fk_job_requirements_taxonomy_skill_concept_id_skill_concepts",
+        ),
+        nullable=True,
+    )
+    necessity: Mapped[RequirementNecessity] = mapped_column(
+        Enum(
+            RequirementNecessity,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_job_requirements_necessity_enum",
+        ),
+        nullable=False,
+        default=RequirementNecessity.MUST_HAVE,
+    )
+    priority: Mapped[RequirementPriority] = mapped_column(
+        Enum(
+            RequirementPriority,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_job_requirements_priority_enum",
+        ),
+        nullable=False,
+        default=RequirementPriority.MEDIUM,
+    )
+    custom_weight_override: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    min_experience_months: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    recency_years: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    accepted_evidence_types: Mapped[List[str]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    accepted_equivalents: Mapped[List[str]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    rationale: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    origin: Mapped[RequirementOrigin] = mapped_column(
+        Enum(
+            RequirementOrigin,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_job_requirements_origin_enum",
+        ),
+        nullable=False,
+        default=RequirementOrigin.RECRUITER_ENTERED,
+        server_default=text("'RECRUITER_ENTERED'"),
+    )
+    review_required: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    warning_metadata: Mapped[List[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    job_version: Mapped["JobVersion"] = relationship(
+        "JobVersion",
+        back_populates="requirements",
+    )
+    taxonomy_skill: Mapped[Optional["SkillConcept"]] = relationship(
+        "SkillConcept",
+        foreign_keys=[taxonomy_skill_concept_id],
     )
