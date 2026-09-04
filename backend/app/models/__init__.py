@@ -19,8 +19,14 @@ from app.models.job import (
     EmploymentType,
     JobLifecycleStatus,
     JobRequisition,
+    JobRequirement,
     JobVersion,
     JobVersionStatus,
+    RequirementCategory,
+    RequirementEvidenceType,
+    RequirementNecessity,
+    RequirementOrigin,
+    RequirementPriority,
     WorkplaceType,
 )
 from app.models.resume import (
@@ -68,6 +74,12 @@ __all__ = [
     "WorkplaceType",
     "JobRequisition",
     "JobVersion",
+    "JobRequirement",
+    "RequirementCategory",
+    "RequirementNecessity",
+    "RequirementPriority",
+    "RequirementOrigin",
+    "RequirementEvidenceType",
     "TaxonomySnapshotState",
     "TaxonomySnapshot",
     "OccupationConcept",
@@ -76,4 +88,3 @@ __all__ = [
     "SkillAlias",
     "OccupationSkillLink",
 ]
-

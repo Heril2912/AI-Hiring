@@ -7,6 +7,7 @@ interface AuthenticatedShellProps {
   activeNavTab?: string;
   onNavigateTab?: (tab: string) => void;
   candidateCount?: number;
+  jobsCount?: number;
   connectionState?: "checking" | "connected" | "unavailable";
 }
 
@@ -15,6 +16,7 @@ export function AuthenticatedShell({
   activeNavTab,
   onNavigateTab,
   candidateCount = 0,
+  jobsCount = 0,
   connectionState = "connected",
 }: AuthenticatedShellProps) {
   const { user, logout } = useAuth();
@@ -84,6 +86,20 @@ export function AuthenticatedShell({
               <button
                 type="button"
                 className={`nav-tab-btn ${
+                  activeNavTab === "jobs" || activeNavTab === "new_job" || activeNavTab === "edit_job"
+                    ? "tab-active"
+                    : ""
+                }`}
+                onClick={() => onNavigateTab?.("jobs")}
+              >
+                <Icon name="briefcase" size={15} />
+                <span>Jobs</span>
+                {jobsCount > 0 && <span className="nav-count-pill">{jobsCount}</span>}
+              </button>
+
+              <button
+                type="button"
+                className={`nav-tab-btn ${
                   activeNavTab === "candidates" || activeNavTab === "profile" || activeNavTab === "extraction"
                     ? "tab-active"
                     : ""
@@ -110,6 +126,19 @@ export function AuthenticatedShell({
 
           {role === "ADMIN" && (
             <>
+              <button
+                type="button"
+                className={`nav-tab-btn ${
+                  activeNavTab === "jobs" || activeNavTab === "new_job" || activeNavTab === "edit_job"
+                    ? "tab-active"
+                    : ""
+                }`}
+                onClick={() => onNavigateTab?.("jobs")}
+              >
+                <Icon name="briefcase" size={15} />
+                <span>Jobs</span>
+                {jobsCount > 0 && <span className="nav-count-pill">{jobsCount}</span>}
+              </button>
               <button
                 type="button"
                 className={`nav-tab-btn ${activeNavTab === "users" ? "tab-active" : ""}`}

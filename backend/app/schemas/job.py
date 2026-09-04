@@ -1,15 +1,87 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from pydantic import Field, field_validator
 
 from app.models.job import (
     EmploymentType,
     JobLifecycleStatus,
     JobVersionStatus,
+    RequirementCategory,
+    RequirementEvidenceType,
+    RequirementNecessity,
+    RequirementOrigin,
+    RequirementPriority,
     WorkplaceType,
 )
 from app.schemas.candidate import StrictSchema
+
+
+class RequirementItemRequest(StrictSchema):
+    display_order: Optional[int] = Field(default=0, ge=0)
+    category: RequirementCategory = RequirementCategory.SKILL
+    label: str = Field(min_length=1, max_length=255)
+    taxonomy_skill_concept_id: Optional[uuid.UUID] = None
+    necessity: RequirementNecessity = RequirementNecessity.MUST_HAVE
+    priority: RequirementPriority = RequirementPriority.MEDIUM
+    custom_weight_override: Optional[float] = Field(default=None, ge=0.0, le=10.0)
+    min_experience_months: Optional[int] = Field(default=None, ge=1)
+    recency_years: Optional[int] = Field(default=None, ge=1, le=50)
+    accepted_evidence_types: List[RequirementEvidenceType] = Field(default_factory=list)
+    accepted_equivalents: List[str] = Field(default_factory=list)
+    rationale: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Requirement label cannot be empty or whitespace.")
+        return cleaned
+
+    @field_validator("rationale")
+    @classmethod
+    def trim_rationale(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            cleaned = v.strip()
+            return cleaned if cleaned else None
+        return None
+
+
+class JobRequirementsSaveRequest(StrictSchema):
+    expected_revision: int = Field(ge=1)
+    requirements: List[RequirementItemRequest] = Field(default_factory=list)
+
+
+class RequirementItemResponse(StrictSchema):
+    requirement_id: uuid.UUID
+    display_order: int
+    category: RequirementCategory
+    label: str
+    normalized_label: str
+    taxonomy_skill_concept_id: Optional[uuid.UUID] = None
+    necessity: RequirementNecessity
+    priority: RequirementPriority
+    custom_weight_override: Optional[float] = None
+    min_experience_months: Optional[int] = None
+    recency_years: Optional[int] = None
+    accepted_evidence_types: List[str] = Field(default_factory=list)
+    accepted_equivalents: List[str] = Field(default_factory=list)
+    rationale: Optional[str] = None
+    origin: RequirementOrigin
+    review_required: bool
+    warning_metadata: List[Dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobReviewWarningResponse(StrictSchema):
+    code: str
+    message: str
+    severity: str
+    requirement_id: Optional[uuid.UUID] = None
+    rule: Optional[str] = None
+    matched_term: Optional[str] = None
 
 
 class JobCreateRequest(StrictSchema):
@@ -23,6 +95,7 @@ class JobCreateRequest(StrictSchema):
     summary: Optional[str] = Field(default=None, max_length=10000)
     responsibilities: Optional[str] = Field(default=None, max_length=50000)
     job_description_text: Optional[str] = Field(default=None, max_length=100000)
+    occupation_concept_id: Optional[uuid.UUID] = None
 
     @field_validator("title")
     @classmethod
@@ -61,6 +134,7 @@ class JobDraftUpdateRequest(StrictSchema):
     summary: Optional[str] = Field(default=None, max_length=10000)
     responsibilities: Optional[str] = Field(default=None, max_length=50000)
     job_description_text: Optional[str] = Field(default=None, max_length=100000)
+    occupation_concept_id: Optional[uuid.UUID] = None
 
     @field_validator("title")
     @classmethod
@@ -101,6 +175,7 @@ class JobVersionSummaryResponse(StrictSchema):
     workplace_type: Optional[WorkplaceType] = None
     openings_count: Optional[int] = None
     internal_reference: Optional[str] = None
+    requirements_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -121,11 +196,15 @@ class JobVersionDetailResponse(StrictSchema):
     summary: Optional[str] = None
     responsibilities: Optional[str] = None
     job_description_text: Optional[str] = None
+    occupation_concept_id: Optional[uuid.UUID] = None
+    occupation_title: Optional[str] = None
     taxonomy_version: Optional[str] = None
     parser_version: Optional[str] = None
     created_by_user_id: uuid.UUID
     approved_by_user_id: Optional[uuid.UUID] = None
     approved_at: Optional[datetime] = None
+    requirements: List[RequirementItemResponse] = Field(default_factory=list)
+    review_warnings: List[JobReviewWarningResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
