@@ -38,6 +38,7 @@ def test_models_exported_and_tables_registered():
         "skill_concepts",
         "skill_aliases",
         "occupation_skill_links",
+        "job_description_imports",
     }
 
 

@@ -209,3 +209,140 @@ export async function saveDraftRequirements(jobId: string, payload: JobRequireme
     body: JSON.stringify(payload),
   });
 }
+
+export type JobImportSourceType = "PASTED_TEXT" | "PDF" | "DOCX";
+export type JobImportStatus = "PENDING_REVIEW" | "APPLIED" | "DISCARDED";
+
+export interface JobSuggestionItem {
+  suggestionId: string;
+  targetField: "TITLE" | "DEPARTMENT" | "LOCATION" | "EMPLOYMENT_TYPE" | "WORKPLACE_TYPE" | "OPENINGS_COUNT" | "SUMMARY" | "RESPONSIBILITY" | "REQUIREMENT";
+  proposedValue: any;
+  normalizedValue?: string | null;
+  sourceExcerpt: string;
+  startOffset: number;
+  endOffset: number;
+  extractionMethod: string;
+  confidence: string;
+  reviewStatus: "PENDING" | "ACCEPTED" | "REJECTED" | "EDITED";
+}
+
+export interface JobImportWarning {
+  code: string;
+  message: string;
+  sourceExcerpt?: string | null;
+  startOffset?: number | null;
+  endOffset?: number | null;
+  rule?: string | null;
+  matchedTerm?: string | null;
+}
+
+export interface JobImportAnalyzeResponse {
+  sessionId: string;
+  jobId?: string | null;
+  jobVersionId?: string | null;
+  expectedRevision?: number | null;
+  sourceType: JobImportSourceType;
+  sourceFilename?: string | null;
+  sourceText: string;
+  parserVersion: string;
+  taxonomyVersion?: string | null;
+  status: JobImportStatus;
+  suggestions: JobSuggestionItem[];
+  warnings: JobImportWarning[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function analyzeJobDescriptionText(
+  text: string,
+  jobId?: string | null,
+  expectedRevision?: number | null
+): Promise<JobImportAnalyzeResponse> {
+  const params = new URLSearchParams();
+  if (jobId) params.append("job_id", jobId);
+  if (expectedRevision) params.append("expected_revision", String(expectedRevision));
+
+  const qs = params.toString();
+  const url = `/api/v1/jobs/imports/analyze-text${qs ? `?${qs}` : ""}`;
+
+  return apiFetch<JobImportAnalyzeResponse>(url, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function analyzeJobDescriptionFile(
+  file: File,
+  jobId?: string | null,
+  expectedRevision?: number | null
+): Promise<JobImportAnalyzeResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (jobId) formData.append("job_id", jobId);
+  if (expectedRevision) formData.append("expected_revision", String(expectedRevision));
+
+  // Use raw fetch for multipart/form-data with credentials
+  const resp = await fetch("/api/v1/jobs/imports/analyze-file", {
+    method: "POST",
+    body: formData,
+    credentials: "include",
+  });
+
+  if (!resp.ok) {
+    let errData: any = {};
+    try {
+      errData = await resp.json();
+    } catch {
+      // ignore
+    }
+    const msg = errData?.detail?.message || errData?.message || `File analysis failed with status ${resp.status}`;
+    const code = errData?.detail?.code || errData?.code;
+    const err = new Error(msg);
+    (err as any).code = code;
+    (err as any).status = resp.status;
+    throw err;
+  }
+
+  return resp.json();
+}
+
+export async function getImportSession(sessionId: string): Promise<JobImportAnalyzeResponse> {
+  return apiFetch<JobImportAnalyzeResponse>(`/api/v1/jobs/imports/${sessionId}`);
+}
+
+export async function updateSuggestionStatus(
+  sessionId: string,
+  suggestionId: string,
+  reviewStatus: string,
+  editedValue?: any
+): Promise<JobImportAnalyzeResponse> {
+  return apiFetch<JobImportAnalyzeResponse>(`/api/v1/jobs/imports/${sessionId}/suggestions/${suggestionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ review_status: reviewStatus, edited_value: editedValue }),
+  });
+}
+
+export async function applyImportSuggestions(
+  sessionId: string,
+  payload: {
+    expectedRevision?: number | null;
+    acceptedSuggestionIds: string[];
+    editedSuggestions?: Record<string, any>;
+  }
+): Promise<{ status: string; sessionId: string; appliedCount: number; appliedItems: any[] }> {
+  return apiFetch(`/api/v1/jobs/imports/${sessionId}/apply`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_revision: payload.expectedRevision,
+      accepted_suggestion_ids: payload.acceptedSuggestionIds,
+      edited_suggestions: payload.editedSuggestions,
+    }),
+  });
+}
+
+export async function discardImportSession(sessionId: string): Promise<void> {
+  return apiFetch<void>(`/api/v1/jobs/imports/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+

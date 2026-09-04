@@ -390,4 +390,261 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
       expect(onJobCreated).toHaveBeenCalledWith("new-job-999");
     });
   });
+
+  // =========================================================================
+  // 8. Phase 2B.4: Optional Job Description Import & Recruiter Review
+  // =========================================================================
+  describe("Phase 2B.4: Optional Job Description Import and Recruiter Review", () => {
+    it("provides optional import action, opens modal with pasted-text default, and displays unselected suggestions with evidence", async () => {
+      const mockAnalyzeResponse: jobsApi.JobImportAnalyzeResponse = {
+        sessionId: "sess-123",
+        sourceType: "PASTED_TEXT",
+        sourceText: "Senior Backend Developer\n\nAbout the role\nBuild backend services.\n\nResponsibilities\n- Develop REST APIs.\n\nRequired qualifications\n- 3 years of Python experience.",
+        parserVersion: "2B.4-deterministic-v1",
+        taxonomyVersion: "31.0",
+        status: "PENDING_REVIEW",
+        suggestions: [
+          {
+            suggestionId: "sug-title",
+            targetField: "TITLE",
+            proposedValue: "Senior Backend Developer",
+            sourceExcerpt: "Senior Backend Developer",
+            startOffset: 0,
+            endOffset: 24,
+            extractionMethod: "HEADING_PATTERN",
+            confidence: "HIGH",
+            reviewStatus: "PENDING",
+          },
+          {
+            suggestionId: "sug-summary",
+            targetField: "SUMMARY",
+            proposedValue: "Build backend services.",
+            sourceExcerpt: "Build backend services.",
+            startOffset: 41,
+            endOffset: 64,
+            extractionMethod: "BOUNDED_SECTION",
+            confidence: "HIGH",
+            reviewStatus: "PENDING",
+          },
+          {
+            suggestionId: "sug-resp-1",
+            targetField: "RESPONSIBILITY",
+            proposedValue: "Develop REST APIs.",
+            sourceExcerpt: "Develop REST APIs.",
+            startOffset: 83,
+            endOffset: 101,
+            extractionMethod: "BULLET_PATTERN",
+            confidence: "HIGH",
+            reviewStatus: "PENDING",
+          },
+          {
+            suggestionId: "sug-req-py",
+            targetField: "REQUIREMENT",
+            proposedValue: {
+              category: "EXPERIENCE",
+              label: "Python",
+              taxonomySkillConceptId: "sk-py-1",
+              necessity: "MUST_HAVE",
+              priority: "MEDIUM",
+              minExperienceMonths: 36,
+              isUndecidedNecessity: false,
+              taxonomyProvenance: "ONET_31_0",
+            },
+            sourceExcerpt: "3 years of Python experience.",
+            startOffset: 126,
+            endOffset: 155,
+            extractionMethod: "TAXONOMY_NORMALIZED",
+            confidence: "HIGH",
+            reviewStatus: "PENDING",
+          },
+        ],
+        warnings: [],
+        createdAt: "2026-09-04T12:00:00Z",
+        updatedAt: "2026-09-04T12:00:00Z",
+      };
+
+      vi.mocked(jobsApi.analyzeJobDescriptionText).mockResolvedValue(mockAnalyzeResponse);
+      vi.mocked(jobsApi.applyImportSuggestions).mockResolvedValue({
+        status: "APPLIED",
+        sessionId: "sess-123",
+        appliedCount: 2,
+        appliedItems: [],
+      });
+
+      render(
+        <JobEditor
+          jobId={null}
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+        />
+      );
+
+      // Verify import button is present as an optional action
+      const importBtn = screen.getByText("Import from job description");
+      expect(importBtn).toBeInTheDocument();
+
+      // Open Modal
+      fireEvent.click(importBtn);
+
+      // Verify modal is open and Paste Plain Text is default
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getByText("Paste plain text (Default)")).toBeInTheDocument();
+      const textArea = screen.getByLabelText("Job Description Text");
+      expect(textArea).toBeInTheDocument();
+
+      // Enter text and click Analyse
+      fireEvent.change(textArea, { target: { value: "Senior Backend Developer..." } });
+      const analyzeBtn = screen.getByText("Analyse job description");
+      fireEvent.click(analyzeBtn);
+
+      // Wait for suggestions review screen
+      expect(await screen.findByText("Job Details")).toBeInTheDocument();
+      expect(screen.getByText("About the role")).toBeInTheDocument();
+      expect(screen.getByText(/Responsibilities \(1 items\)/)).toBeInTheDocument();
+      expect(screen.getByText(/Structured Requirements \(1 items\)/)).toBeInTheDocument();
+
+      // Verify suggestions are unselected by default
+      expect(screen.getByText(/of 4 suggestions selected/)).toHaveTextContent("0 of 4 suggestions selected");
+      const applyBtn = screen.getByRole("button", { name: /Apply selected suggestions/ });
+      expect(applyBtn).toBeDisabled();
+
+      // Verify source evidence is visible
+      expect(screen.getByText(/“Senior Backend Developer”/)).toBeInTheDocument();
+      expect(screen.getByText(/“3 years of Python experience.”/)).toBeInTheDocument();
+      expect(screen.getByText("O*NET 31.0 Skill")).toBeInTheDocument();
+
+      // Select Title and Requirement suggestions
+      const titleRow = screen.getAllByText("TITLE")[0].closest(".suggestion-item-row");
+      const titleCheckbox = titleRow?.querySelector("input[type='checkbox']");
+      if (titleCheckbox) fireEvent.click(titleCheckbox);
+
+      const reqCheckbox = screen.getByText("O*NET 31.0 Skill").closest(".suggestion-item-row")?.querySelector("input[type='checkbox']");
+      if (reqCheckbox) fireEvent.click(reqCheckbox);
+
+      expect(screen.getByText(/of 4 suggestions selected/)).toHaveTextContent("2 of 4 suggestions selected");
+
+      // Click Apply Selected Suggestions to view preview
+      const activeApplyBtn = screen.getByRole("button", { name: /Apply selected suggestions/ });
+      expect(activeApplyBtn).not.toBeDisabled();
+      fireEvent.click(activeApplyBtn);
+
+      // Confirmation preview step
+      expect(screen.getByText("Confirm Applying Suggestions to Form")).toBeInTheDocument();
+      expect(screen.getByText(/“Senior Backend Developer”/)).toBeInTheDocument();
+      expect(screen.getByText(/1 requirements \(Python\)/)).toBeInTheDocument();
+
+      // Confirm apply
+      const confirmBtn = screen.getByText("Confirm & Apply to Form");
+      fireEvent.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(jobsApi.applyImportSuggestions).toHaveBeenCalledWith(
+          "sess-123",
+          expect.objectContaining({
+            acceptedSuggestionIds: expect.arrayContaining(["sug-title", "sug-req-py"]),
+          })
+        );
+      });
+
+      // Verify form was updated in memory without saving to API
+      expect(jobsApi.createJobRequisition).not.toHaveBeenCalled();
+      const titleInput = screen.getByLabelText(/Job Title/);
+      expect(titleInput).toHaveValue("Senior Backend Developer");
+      expect(screen.getByText("Unsaved Changes")).toBeInTheDocument();
+    });
+
+    it("displays conflict comparison and protected information warnings", async () => {
+      const mockConflictResponse: jobsApi.JobImportAnalyzeResponse = {
+        sessionId: "sess-conflict",
+        sourceType: "PASTED_TEXT",
+        sourceText: "Lead Architect\nLooking for young energetic candidates.",
+        parserVersion: "2B.4-deterministic-v1",
+        status: "PENDING_REVIEW",
+        suggestions: [
+          {
+            suggestionId: "sug-conflict-title",
+            targetField: "TITLE",
+            proposedValue: "Lead Architect",
+            sourceExcerpt: "Lead Architect",
+            startOffset: 0,
+            endOffset: 14,
+            extractionMethod: "HEADING_PATTERN",
+            confidence: "HIGH",
+            reviewStatus: "PENDING",
+          },
+        ],
+        warnings: [
+          {
+            code: "PROTECTED_AGE_TERM",
+            message: "Age-related term detected: 'young'. Safeguard applied: Protected characteristics are never converted to structured criteria.",
+            sourceExcerpt: "young energetic candidates",
+            matchedTerm: "young",
+          },
+        ],
+        createdAt: "2026-09-04T12:00:00Z",
+        updatedAt: "2026-09-04T12:00:00Z",
+      };
+
+      vi.mocked(jobsApi.analyzeJobDescriptionText).mockResolvedValue(mockConflictResponse);
+
+      render(
+        <JobEditor
+          jobId={null}
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+        />
+      );
+
+      // Populate title in form first to induce conflict
+      const titleInput = screen.getByLabelText(/Job Title/);
+      fireEvent.change(titleInput, { target: { value: "Principal Engineer" } });
+
+      // Open import modal
+      fireEvent.click(screen.getByText("Import from job description"));
+      fireEvent.change(screen.getByLabelText("Job Description Text"), {
+        target: { value: "Lead Architect..." },
+      });
+      fireEvent.click(screen.getByText("Analyse job description"));
+
+      // Verify protected information warning banner is rendered
+      expect(await screen.findByText("Sensitive / Protected Information Detected")).toBeInTheDocument();
+      expect(screen.getByText(/Age-related term detected: 'young'/)).toBeInTheDocument();
+      expect(screen.getByText(/“young energetic candidates”/)).toBeInTheDocument();
+
+      // Verify conflict box is rendered
+      expect(screen.getByText("Conflict with current form:")).toBeInTheDocument();
+      expect(screen.getByText(/“Principal Engineer”/)).toBeInTheDocument();
+      expect(screen.getAllByText(/“Lead Architect”/).length).toBeGreaterThanOrEqual(1);
+
+      // Cancel modal - form value remains unchanged
+      fireEvent.click(screen.getByText("Cancel"));
+      expect(titleInput).toHaveValue("Principal Engineer");
+    });
+
+    it("displays error feedback on analysis failure and supports discarding", async () => {
+      vi.mocked(jobsApi.analyzeJobDescriptionText).mockRejectedValue(new Error("Document length exceeds limit"));
+      vi.mocked(jobsApi.discardImportSession).mockResolvedValue(undefined);
+
+      render(
+        <JobEditor
+          jobId={null}
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+        />
+      );
+
+      fireEvent.click(screen.getByText("Import from job description"));
+      fireEvent.change(screen.getByLabelText("Job Description Text"), {
+        target: { value: "Oversized content..." },
+      });
+      fireEvent.click(screen.getByText("Analyse job description"));
+
+      expect(await screen.findByText("Document length exceeds limit")).toBeInTheDocument();
+
+      // Close modal
+      const closeBtn = screen.getByLabelText("Close import dialog");
+      fireEvent.click(closeBtn);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
 });

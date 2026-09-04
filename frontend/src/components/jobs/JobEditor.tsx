@@ -14,6 +14,11 @@ import { OccupationSearchItem } from "../../api/taxonomy";
 import { Icon } from "../Icon";
 import { OccupationSelector } from "./OccupationSelector";
 import { RequirementCard } from "./RequirementCard";
+import {
+  JobDescriptionImportModal,
+  AppliedSuggestionsPayload,
+  CurrentFormValues,
+} from "./JobDescriptionImportModal";
 
 interface JobEditorProps {
   jobId?: string | null; // null if creating a new job
@@ -55,6 +60,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   // Initial Load for Existing Job
   useEffect(() => {
@@ -378,6 +384,43 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
     }
   };
 
+  const handleApplySuggestions = (applied: AppliedSuggestionsPayload) => {
+    if (applied.title !== undefined) setTitle(applied.title);
+    if (applied.department !== undefined) setDepartment(applied.department);
+    if (applied.location !== undefined) setLocation(applied.location);
+    if (applied.employmentType !== undefined) setEmploymentType(applied.employmentType);
+    if (applied.workplaceType !== undefined) setWorkplaceType(applied.workplaceType);
+    if (applied.openingsCount !== undefined) setOpeningsCount(applied.openingsCount);
+    if (applied.summary !== undefined) setSummary(applied.summary);
+    if (applied.responsibilities && applied.responsibilities.length > 0) {
+      const formattedResp = applied.responsibilities.map((r) => `- ${r}`).join("\n");
+      setResponsibilities((prev) => (prev ? `${prev}\n${formattedResp}` : formattedResp));
+    }
+    if (applied.newRequirements && applied.newRequirements.length > 0) {
+      setRequirements((prev) => [
+        ...prev,
+        ...applied.newRequirements.map((r, i) => ({
+          ...r,
+          displayOrder: prev.length + i,
+        })),
+      ]);
+    }
+    setIsDirty(true);
+    setSaveSuccessMsg("Imported suggestions applied to editable draft. Click 'Save Draft' to persist changes.");
+  };
+
+  const currentFormValues: CurrentFormValues = {
+    title,
+    department,
+    location,
+    employmentType,
+    workplaceType,
+    openingsCount,
+    summary,
+    responsibilities,
+    requirements,
+  };
+
   const handleSafeNavigateBack = () => {
     if (isDirty) {
       if (
@@ -435,6 +478,14 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
         </div>
 
         <div className="top-bar-right">
+          <button
+            type="button"
+            className="btn btn-secondary btn-md"
+            onClick={() => setIsImportModalOpen(true)}
+          >
+            <Icon name="upload" size={15} />
+            <span>Import from job description</span>
+          </button>
           <button
             type="button"
             className="btn btn-primary btn-md"
@@ -854,6 +905,18 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
           </div>
         </section>
       </div>
+
+      {/* Optional Job Description Import & Review Modal */}
+      {isImportModalOpen && (
+        <JobDescriptionImportModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          jobId={jobId}
+          currentRevision={currentRevision}
+          currentFormValues={currentFormValues}
+          onApplySuggestions={handleApplySuggestions}
+        />
+      )}
     </div>
   );
 }
