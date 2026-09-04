@@ -17,6 +17,9 @@ from app.models.candidate import (
 from app.models.extraction import BlockType, ExtractionBlock, ExtractionMethod, ResumeExtraction
 from app.models.job import (
     EmploymentType,
+    JobDescriptionImport,
+    JobImportSourceType,
+    JobImportStatus,
     JobLifecycleStatus,
     JobRequisition,
     JobRequirement,
@@ -72,9 +75,12 @@ __all__ = [
     "JobVersionStatus",
     "EmploymentType",
     "WorkplaceType",
+    "JobImportSourceType",
+    "JobImportStatus",
     "JobRequisition",
     "JobVersion",
     "JobRequirement",
+    "JobDescriptionImport",
     "RequirementCategory",
     "RequirementNecessity",
     "RequirementPriority",

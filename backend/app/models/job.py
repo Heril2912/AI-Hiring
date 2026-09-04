@@ -55,6 +55,18 @@ class WorkplaceType(str, enum.Enum):
     REMOTE = "REMOTE"
 
 
+class JobImportSourceType(str, enum.Enum):
+    PASTED_TEXT = "PASTED_TEXT"
+    PDF = "PDF"
+    DOCX = "DOCX"
+
+
+class JobImportStatus(str, enum.Enum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPLIED = "APPLIED"
+    DISCARDED = "DISCARDED"
+
+
 class RequirementCategory(str, enum.Enum):
     SKILL = "SKILL"
     EXPERIENCE = "EXPERIENCE"
@@ -576,3 +588,132 @@ class JobRequirement(Base):
         "SkillConcept",
         foreign_keys=[taxonomy_skill_concept_id],
     )
+
+
+class JobDescriptionImport(Base):
+    __tablename__ = "job_description_imports"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('PASTED_TEXT', 'PDF', 'DOCX')",
+            name="ck_job_description_imports_source_type",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING_REVIEW', 'APPLIED', 'DISCARDED')",
+            name="ck_job_description_imports_status",
+        ),
+        CheckConstraint(
+            "length(trim(source_text)) > 0",
+            name="ck_job_description_imports_source_text_not_empty",
+        ),
+        Index("ix_job_description_imports_created_by_user_id", "created_by_user_id"),
+        Index("ix_job_description_imports_job_id", "job_id"),
+        Index("ix_job_description_imports_job_version_id", "job_version_id"),
+    )
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "job_requisitions.job_id",
+            ondelete="CASCADE",
+            name="fk_job_description_imports_job_id_job_requisitions",
+        ),
+        nullable=True,
+    )
+    job_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "job_versions.job_version_id",
+            ondelete="CASCADE",
+            name="fk_job_description_imports_job_version_id_job_versions",
+        ),
+        nullable=True,
+    )
+    expected_revision: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.user_id",
+            ondelete="RESTRICT",
+            name="fk_job_description_imports_created_by_user_id_users",
+        ),
+        nullable=False,
+    )
+    source_type: Mapped[JobImportSourceType] = mapped_column(
+        Enum(
+            JobImportSourceType,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_job_description_imports_source_type_enum",
+        ),
+        nullable=False,
+        default=JobImportSourceType.PASTED_TEXT,
+    )
+    source_filename: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    source_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    parser_version: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="1.0.0",
+        server_default=text("'1.0.0'"),
+    )
+    taxonomy_version: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    status: Mapped[JobImportStatus] = mapped_column(
+        Enum(
+            JobImportStatus,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_job_description_imports_status_enum",
+        ),
+        nullable=False,
+        default=JobImportStatus.PENDING_REVIEW,
+        server_default=text("'PENDING_REVIEW'"),
+    )
+    suggestions: Mapped[List[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    creator: Mapped["UserRecord"] = relationship(
+        "UserRecord",
+        foreign_keys=[created_by_user_id],
+    )
+    job: Mapped[Optional["JobRequisition"]] = relationship(
+        "JobRequisition",
+        foreign_keys=[job_id],
+    )
+    version: Mapped[Optional["JobVersion"]] = relationship(
+        "JobVersion",
+        foreign_keys=[job_version_id],
+    )
+

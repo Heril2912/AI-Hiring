@@ -5,6 +5,8 @@ from pydantic import Field, field_validator
 
 from app.models.job import (
     EmploymentType,
+    JobImportSourceType,
+    JobImportStatus,
     JobLifecycleStatus,
     JobVersionStatus,
     RequirementCategory,
@@ -225,3 +227,67 @@ class JobDetailResponse(StrictSchema):
     created_at: datetime
     updated_at: datetime
     current_version: JobVersionDetailResponse
+
+
+class JobImportAnalyzeTextRequest(StrictSchema):
+    text: str = Field(min_length=10, max_length=100000)
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        cleaned = v.strip()
+        if len(cleaned) < 10:
+            raise ValueError("Job description text must contain at least 10 non-whitespace characters.")
+        return cleaned
+
+
+class JobSuggestionResponse(StrictSchema):
+    suggestion_id: str
+    target_field: str
+    proposed_value: Any
+    normalized_value: Optional[str] = None
+    source_excerpt: str
+    start_offset: int
+    end_offset: int
+    extraction_method: str
+    confidence: str = "HIGH"
+    review_status: str = "PENDING"
+
+
+class JobImportWarningResponse(StrictSchema):
+    code: str
+    message: str
+    source_excerpt: Optional[str] = None
+    start_offset: Optional[int] = None
+    end_offset: Optional[int] = None
+    rule: Optional[str] = None
+    matched_term: Optional[str] = None
+
+
+class JobImportAnalyzeResponse(StrictSchema):
+    session_id: uuid.UUID
+    job_id: Optional[uuid.UUID] = None
+    job_version_id: Optional[uuid.UUID] = None
+    expected_revision: Optional[int] = None
+    source_type: JobImportSourceType
+    source_filename: Optional[str] = None
+    source_text: str
+    parser_version: str
+    taxonomy_version: Optional[str] = None
+    status: JobImportStatus
+    suggestions: List[JobSuggestionResponse] = Field(default_factory=list)
+    warnings: List[JobImportWarningResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobImportUpdateSuggestionRequest(StrictSchema):
+    review_status: str
+    edited_value: Optional[Any] = None
+
+
+class JobImportApplyRequest(StrictSchema):
+    expected_revision: Optional[int] = None
+    accepted_suggestion_ids: List[str] = Field(default_factory=list)
+    edited_suggestions: Optional[Dict[str, Any]] = None
+

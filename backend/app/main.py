@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Response, status
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.job_imports import router as job_imports_router
 from app.api.jobs import router as jobs_router
 from app.api.resumes import router as resumes_router
 from app.api.taxonomy import router as taxonomy_router
@@ -11,6 +12,7 @@ app = FastAPI(title="AI-Driven Smart Hiring Platform")
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(jobs_router)
+app.include_router(job_imports_router)
 app.include_router(taxonomy_router)
 app.include_router(resumes_router)
 
