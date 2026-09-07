@@ -151,6 +151,15 @@ from app.services.matching_preflight import (
     prepare_match_input_snapshot,
     project_candidate_feature_view,
 )
+from app.services.deterministic_matching import (
+    DeterministicMatchingError,
+    ForeignEvidenceReferenceError,
+    InvalidRequirementConfigurationError,
+    MATCHER_RULES_VERSION,
+    MissingEvaluationDateError,
+    UnsupportedRequirementCategoryError,
+    match_requisition_requirements,
+)
 
 __all__ = [
     "DOCXArchiveLimitExceededError",
@@ -265,6 +274,13 @@ __all__ = [
     "project_candidate_feature_view",
     "build_frozen_requisition_matching_view",
     "prepare_match_input_snapshot",
+    "MATCHER_RULES_VERSION",
+    "DeterministicMatchingError",
+    "UnsupportedRequirementCategoryError",
+    "InvalidRequirementConfigurationError",
+    "ForeignEvidenceReferenceError",
+    "MissingEvaluationDateError",
+    "match_requisition_requirements",
 ]
 
 
