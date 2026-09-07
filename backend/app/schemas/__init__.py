@@ -48,6 +48,12 @@ from app.schemas.matching import (
     RequirementMatchingItem,
     verify_no_prohibited_keys,
 )
+from app.schemas.requirement_match import (
+    MatchComparisonMethod,
+    MatchResultState,
+    RequirementMatch,
+    RequirementMatchResultSet,
+)
 from app.schemas.correction import (
     ProfileCorrectionRequest,
     ProfileCorrectionResponse,
@@ -220,4 +226,8 @@ __all__ = [
     "MatchInputSnapshot",
     "RequirementMatchingItem",
     "verify_no_prohibited_keys",
+    "MatchResultState",
+    "MatchComparisonMethod",
+    "RequirementMatch",
+    "RequirementMatchResultSet",
 ]
