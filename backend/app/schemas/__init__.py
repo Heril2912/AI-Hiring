@@ -54,6 +54,20 @@ from app.schemas.requirement_match import (
     RequirementMatch,
     RequirementMatchResultSet,
 )
+from app.schemas.scoring import (
+    DECIMAL_CALCULATION_PRECISION,
+    DISPLAY_ROUNDING_PRECISION,
+    SCORING_POLICY_VERSION,
+    AssessmentConfidenceDiagnostics,
+    AssessmentConfidenceTier,
+    CompatibilityScoreResult,
+    ComponentScore,
+    ImportanceSource,
+    RequirementContribution,
+    ScoringCalculationMethod,
+    ScoringWarning,
+    ScoringWarningCode,
+)
 from app.schemas.correction import (
     ProfileCorrectionRequest,
     ProfileCorrectionResponse,
@@ -230,4 +244,16 @@ __all__ = [
     "MatchComparisonMethod",
     "RequirementMatch",
     "RequirementMatchResultSet",
+    "ScoringCalculationMethod",
+    "ImportanceSource",
+    "AssessmentConfidenceTier",
+    "ScoringWarningCode",
+    "ScoringWarning",
+    "RequirementContribution",
+    "ComponentScore",
+    "AssessmentConfidenceDiagnostics",
+    "CompatibilityScoreResult",
+    "SCORING_POLICY_VERSION",
+    "DECIMAL_CALCULATION_PRECISION",
+    "DISPLAY_ROUNDING_PRECISION",
 ]
