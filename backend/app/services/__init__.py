@@ -172,6 +172,25 @@ from app.services.scoring import (
     calculate_compatibility_score,
     resolve_requirement_importance,
 )
+from app.services.match_orchestration import (
+    CandidateProfileNotFoundError as MatchCandidateNotFoundError,
+    DuplicateCandidateError,
+    IdempotencyConflictError as MatchIdempotencyConflictError,
+    InvalidEvaluationDateError,
+    MatchOrchestrationError,
+    MatchResultNotFoundError,
+    MatchRunNotFoundError,
+    RankedCandidateResult,
+    UnauthorizedMatchAccessError,
+    compute_candidate_input_fingerprint,
+    compute_canonical_match_fingerprint,
+    compute_deterministic_ranking,
+    get_match_result_detail_for_actor,
+    get_match_run_for_actor,
+    list_match_results_for_actor,
+    orchestrate_match_run,
+    record_match_audit_event,
+)
 
 __all__ = [
     "DOCXArchiveLimitExceededError",
@@ -303,6 +322,23 @@ __all__ = [
     "PRIORITY_IMPORTANCE_MAP",
     "resolve_requirement_importance",
     "calculate_compatibility_score",
+    "MatchOrchestrationError",
+    "DuplicateCandidateError",
+    "MatchCandidateNotFoundError",
+    "MatchIdempotencyConflictError",
+    "MatchRunNotFoundError",
+    "MatchResultNotFoundError",
+    "InvalidEvaluationDateError",
+    "UnauthorizedMatchAccessError",
+    "compute_candidate_input_fingerprint",
+    "compute_canonical_match_fingerprint",
+    "compute_deterministic_ranking",
+    "RankedCandidateResult",
+    "record_match_audit_event",
+    "orchestrate_match_run",
+    "get_match_run_for_actor",
+    "list_match_results_for_actor",
+    "get_match_result_detail_for_actor",
 ]
 
 

@@ -68,6 +68,15 @@ from app.schemas.scoring import (
     ScoringWarning,
     ScoringWarningCode,
 )
+from app.schemas.match_run import (
+    CandidateProfileSelection,
+    MatchResultDetailResponse,
+    MatchResultRankingItemResponse,
+    MatchRunCreateRequest,
+    MatchRunDetailResponse,
+    MatchRunSummaryResponse,
+    PaginatedMatchResultsResponse,
+)
 from app.schemas.correction import (
     ProfileCorrectionRequest,
     ProfileCorrectionResponse,
@@ -256,4 +265,11 @@ __all__ = [
     "SCORING_POLICY_VERSION",
     "DECIMAL_CALCULATION_PRECISION",
     "DISPLAY_ROUNDING_PRECISION",
+    "CandidateProfileSelection",
+    "MatchRunCreateRequest",
+    "MatchRunSummaryResponse",
+    "MatchRunDetailResponse",
+    "MatchResultRankingItemResponse",
+    "PaginatedMatchResultsResponse",
+    "MatchResultDetailResponse",
 ]
