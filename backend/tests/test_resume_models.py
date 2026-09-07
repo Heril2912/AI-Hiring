@@ -39,6 +39,9 @@ def test_models_exported_and_tables_registered():
         "skill_aliases",
         "occupation_skill_links",
         "job_description_imports",
+        "match_runs",
+        "match_results",
+        "match_audit_events",
     }
 
 

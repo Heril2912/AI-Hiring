@@ -3,6 +3,7 @@ from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.job_imports import router as job_imports_router
 from app.api.jobs import router as jobs_router
+from app.api.matches import router as matches_router
 from app.api.resumes import router as resumes_router
 from app.api.taxonomy import router as taxonomy_router
 from app.database import check_database_connection
@@ -15,6 +16,7 @@ app.include_router(jobs_router)
 app.include_router(job_imports_router)
 app.include_router(taxonomy_router)
 app.include_router(resumes_router)
+app.include_router(matches_router)
 
 
 @app.get("/api/v1/health")

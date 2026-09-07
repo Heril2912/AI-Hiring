@@ -32,7 +32,15 @@ from app.models.job import (
     RequirementPriority,
     WorkplaceType,
 )
+from app.models.matching import (
+    MatchAuditEventRecord,
+    MatchAuditEventType,
+    MatchResultRecord,
+    MatchRunLifecycleStatus,
+    MatchRunRecord,
+)
 from app.models.resume import (
+
     ArtifactFormat,
     ArtifactValidationStatus,
     ProcessingJob,
@@ -93,4 +101,9 @@ __all__ = [
     "SkillConcept",
     "SkillAlias",
     "OccupationSkillLink",
+    "MatchRunLifecycleStatus",
+    "MatchRunRecord",
+    "MatchResultRecord",
+    "MatchAuditEventType",
+    "MatchAuditEventRecord",
 ]
