@@ -77,6 +77,34 @@ from app.schemas.match_run import (
     MatchRunSummaryResponse,
     PaginatedMatchResultsResponse,
 )
+from app.schemas.explanation import (
+    CalculationSummary,
+    ComponentCalculationItem,
+    ControlledStateLanguage,
+    DISCLAIMER_TEXT,
+    EXPLANATION_TEMPLATE_VERSION,
+    MatchExplanationResponse,
+    MustHaveWarningItem,
+    PartialMatchItem,
+    StrengthItem,
+    UncertaintyItem,
+    compute_explanation_checksum,
+)
+from app.schemas.evaluation import (
+    EVALUATION_MANIFEST_SCHEMA_VERSION,
+    EvaluationAccuracyStatus,
+    EvaluationErrorCategory,
+    EvaluationManifest,
+    EvaluationManifestRecord,
+    EvaluationReport,
+    EvaluationSplit,
+    InterRaterAgreementReport,
+    MacroF1Report,
+    NDCG5Report,
+    RelevanceLabel,
+    SpearmanReport,
+    compute_manifest_checksum,
+)
 from app.schemas.correction import (
     ProfileCorrectionRequest,
     ProfileCorrectionResponse,

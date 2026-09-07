@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import AuthenticatedContext, require_role
 from app.database import get_db
 from app.models.auth import UserRole
+from app.schemas.explanation import MatchExplanationResponse
 from app.schemas.match_run import (
     MatchResultDetailResponse,
     MatchResultRankingItemResponse,
@@ -16,6 +17,7 @@ from app.schemas.match_run import (
     MatchRunSummaryResponse,
     PaginatedMatchResultsResponse,
 )
+from app.services.explanation import generate_match_explanation
 from app.services.match_orchestration import (
     DuplicateCandidateError,
     IdempotencyConflictError,
@@ -311,3 +313,40 @@ async def get_match_result_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": ne.code, "message": ne.message},
         )
+
+
+@router.get(
+    "/runs/{run_id}/results/{result_id}/explanation",
+    response_model=MatchExplanationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Deterministic Match Explanation",
+    description=(
+        "Retrieves a deterministic, evidence-addressable explanation for an immutable match result. "
+        "Consumes only the stored score decomposition; never recalculates scores or creates hiring decisions."
+    ),
+)
+async def get_match_result_explanation(
+    run_id: uuid.UUID,
+    result_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+) -> MatchExplanationResponse:
+    actor = auth_ctx.user
+    try:
+        run_rec = get_match_run_for_actor(run_id=run_id, actor=actor, db=db)
+        result_rec = get_match_result_detail_for_actor(
+            run_id=run_id,
+            result_id=result_id,
+            actor=actor,
+            db=db,
+        )
+        return generate_match_explanation(
+            result_record=result_rec,
+            run_record=run_rec,
+        )
+    except (MatchRunNotFoundError, MatchResultNotFoundError) as ne:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": ne.code, "message": ne.message},
+        )
+
