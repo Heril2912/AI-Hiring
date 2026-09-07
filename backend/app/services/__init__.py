@@ -160,6 +160,18 @@ from app.services.deterministic_matching import (
     UnsupportedRequirementCategoryError,
     match_requisition_requirements,
 )
+from app.services.scoring import (
+    DuplicateRequirementResultError,
+    EmptyApplicableRequirementSetError,
+    InvalidWeightError,
+    MissingImportanceConfigurationError,
+    MissingRequirementResultError,
+    PRIORITY_IMPORTANCE_MAP,
+    ScoringDomainError,
+    ZeroAggregateDenominatorError,
+    calculate_compatibility_score,
+    resolve_requirement_importance,
+)
 
 __all__ = [
     "DOCXArchiveLimitExceededError",
@@ -281,6 +293,16 @@ __all__ = [
     "ForeignEvidenceReferenceError",
     "MissingEvaluationDateError",
     "match_requisition_requirements",
+    "ScoringDomainError",
+    "InvalidWeightError",
+    "MissingImportanceConfigurationError",
+    "ZeroAggregateDenominatorError",
+    "EmptyApplicableRequirementSetError",
+    "MissingRequirementResultError",
+    "DuplicateRequirementResultError",
+    "PRIORITY_IMPORTANCE_MAP",
+    "resolve_requirement_importance",
+    "calculate_compatibility_score",
 ]
 
 
