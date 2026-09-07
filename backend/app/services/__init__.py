@@ -134,6 +134,23 @@ from app.services.profile_correction import (
     ProfileVersionConflictError,
     apply_profile_correction,
 )
+from app.services.matching_preflight import (
+    CandidateProfileNotFoundError,
+    EmptyRequirementCollectionError,
+    ExplicitProfileVersionRequiredError,
+    ExplicitRevisionRequiredError,
+    InvalidLocalTaxonomyReferenceError,
+    InvalidRequirementDataError,
+    MatchPreflightError,
+    ProhibitedFeatureDetectedError,
+    RequisitionNotFoundError,
+    RequisitionNotReadyError,
+    UnauthorizedPreflightError,
+    UnsupportedMatchingContractVersionError,
+    build_frozen_requisition_matching_view,
+    prepare_match_input_snapshot,
+    project_candidate_feature_view,
+)
 
 __all__ = [
     "DOCXArchiveLimitExceededError",
@@ -233,6 +250,21 @@ __all__ = [
     "InvalidCorrectionOperationError",
     "InvalidEvidenceReferenceError",
     "apply_profile_correction",
+    "MatchPreflightError",
+    "RequisitionNotFoundError",
+    "RequisitionNotReadyError",
+    "ExplicitRevisionRequiredError",
+    "CandidateProfileNotFoundError",
+    "ExplicitProfileVersionRequiredError",
+    "EmptyRequirementCollectionError",
+    "InvalidRequirementDataError",
+    "InvalidLocalTaxonomyReferenceError",
+    "UnsupportedMatchingContractVersionError",
+    "ProhibitedFeatureDetectedError",
+    "UnauthorizedPreflightError",
+    "project_candidate_feature_view",
+    "build_frozen_requisition_matching_view",
+    "prepare_match_input_snapshot",
 ]
 
 
