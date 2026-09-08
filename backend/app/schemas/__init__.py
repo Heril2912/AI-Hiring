@@ -77,6 +77,14 @@ from app.schemas.match_run import (
     MatchRunSummaryResponse,
     PaginatedMatchResultsResponse,
 )
+from app.schemas.requirement_gap import (
+    GAP_POLICY_VERSION,
+    GAP_SCHEMA_VERSION,
+    MATCH_STATE_TO_GAP_STATE_MAP,
+    RequirementGapRecord,
+    RequirementGapSetContract,
+    RequirementGapState,
+)
 from app.schemas.explanation import (
     CalculationSummary,
     ComponentCalculationItem,
@@ -300,4 +308,10 @@ __all__ = [
     "MatchResultRankingItemResponse",
     "PaginatedMatchResultsResponse",
     "MatchResultDetailResponse",
+    "GAP_SCHEMA_VERSION",
+    "GAP_POLICY_VERSION",
+    "RequirementGapState",
+    "MATCH_STATE_TO_GAP_STATE_MAP",
+    "RequirementGapRecord",
+    "RequirementGapSetContract",
 ]
