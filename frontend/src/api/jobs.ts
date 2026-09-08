@@ -271,139 +271,102 @@ export async function fetchJobVersions(jobId: string): Promise<JobVersionSummary
   return apiFetch<JobVersionSummary[]>(`/api/v1/jobs/${jobId}/versions`);
 }
 
-export type JobImportSourceType = "PASTED_TEXT" | "PDF" | "DOCX";
-export type JobImportStatus = "PENDING_REVIEW" | "APPLIED" | "DISCARDED";
+// =========================================================================
+// Match Run & Candidate Comparison API Helpers
+// =========================================================================
 
-export interface JobSuggestionItem {
-  suggestionId: string;
-  targetField: "TITLE" | "DEPARTMENT" | "LOCATION" | "EMPLOYMENT_TYPE" | "WORKPLACE_TYPE" | "OPENINGS_COUNT" | "SUMMARY" | "RESPONSIBILITY" | "REQUIREMENT";
-  proposedValue: any;
-  normalizedValue?: string | null;
-  sourceExcerpt: string;
-  startOffset: number;
-  endOffset: number;
-  extractionMethod: string;
-  confidence: string;
-  reviewStatus: "PENDING" | "ACCEPTED" | "REJECTED" | "EDITED";
+export interface CandidateSelectorItem {
+  profile_id: string;
+  profile_version: number;
 }
 
-export interface JobImportWarning {
-  code: string;
-  message: string;
-  sourceExcerpt?: string | null;
-  startOffset?: number | null;
-  endOffset?: number | null;
-  rule?: string | null;
-  matchedTerm?: string | null;
+export interface MatchRunCreatePayload {
+  jobId: string;
+  expectedRevision: number;
+  candidates: CandidateSelectorItem[];
+  evaluationDate?: string | null;
+  idempotencyKey?: string | null;
 }
 
-export interface JobImportAnalyzeResponse {
-  sessionId: string;
-  jobId?: string | null;
-  jobVersionId?: string | null;
-  expectedRevision?: number | null;
-  sourceType: JobImportSourceType;
-  sourceFilename?: string | null;
-  sourceText: string;
-  parserVersion: string;
-  taxonomyVersion?: string | null;
-  status: JobImportStatus;
-  suggestions: JobSuggestionItem[];
-  warnings: JobImportWarning[];
+export interface MatchRunSummary {
+  runId: string;
+  lifecycleStatus: string;
+  jobId: string;
+  jobVersionId: string;
+  revision: number;
+  candidateCount: number;
+  matcherAlgorithmVersion: string;
+  matchingRuleVersion: string;
+  scoringPolicyVersion: string;
+  matchInputSchemaVersion: string;
+  inputFingerprint: string;
+  candidateInputFingerprint: string;
+  reused: boolean;
   createdAt: string;
-  updatedAt: string;
+  resultsUrl: string;
 }
 
-export async function analyzeJobDescriptionText(
-  text: string,
-  jobId?: string | null,
-  expectedRevision?: number | null
-): Promise<JobImportAnalyzeResponse> {
-  const params = new URLSearchParams();
-  if (jobId) params.append("job_id", jobId);
-  if (expectedRevision) params.append("expected_revision", String(expectedRevision));
-
-  const qs = params.toString();
-  const url = `/api/v1/jobs/imports/analyze-text${qs ? `?${qs}` : ""}`;
-
-  return apiFetch<JobImportAnalyzeResponse>(url, {
-    method: "POST",
-    body: JSON.stringify({ text }),
-  });
+export interface MatchResultRankingItem {
+  resultId: string;
+  runId: string;
+  profileId: string;
+  profileVersion: number;
+  rank: number;
+  isTied: boolean;
+  tieGroupId?: string | null;
+  rawCompatibilityScore: number;
+  displayCompatibilityScore: number;
+  confidenceTier: string;
+  warningCount: number;
+  mustHaveWarningCount: number;
+  componentScores: Record<string, number>;
+  confidenceDiagnostics: Record<string, any>;
+  mustHaveWarnings: Array<{
+    rule_code: string;
+    requirement_id: string;
+    requirement_name: string;
+    safe_explanation: string;
+  }>;
+  generalWarnings: Array<{
+    rule_code: string;
+    safe_explanation: string;
+  }>;
+  detailUrl: string;
 }
 
-export async function analyzeJobDescriptionFile(
-  file: File,
-  jobId?: string | null,
-  expectedRevision?: number | null
-): Promise<JobImportAnalyzeResponse> {
-  const formData = new FormData();
-  formData.append("file", file);
-  if (jobId) formData.append("job_id", jobId);
-  if (expectedRevision) formData.append("expected_revision", String(expectedRevision));
+export interface PaginatedMatchResults {
+  items: MatchResultRankingItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  runId: string;
+  jobId: string;
+  revision: number;
+}
 
-  // Use raw fetch for multipart/form-data with credentials
-  const resp = await fetch("/api/v1/jobs/imports/analyze-file", {
-    method: "POST",
-    body: formData,
-    credentials: "include",
-  });
-
-  if (!resp.ok) {
-    let errData: any = {};
-    try {
-      errData = await resp.json();
-    } catch {
-      // ignore
-    }
-    const msg = errData?.detail?.message || errData?.message || `File analysis failed with status ${resp.status}`;
-    const code = errData?.detail?.code || errData?.code;
-    const err = new Error(msg);
-    (err as any).code = code;
-    (err as any).status = resp.status;
-    throw err;
+export async function createMatchRun(payload: MatchRunCreatePayload): Promise<MatchRunSummary> {
+  const headers: Record<string, string> = {};
+  if (payload.idempotencyKey) {
+    headers["Idempotency-Key"] = payload.idempotencyKey;
   }
-
-  return resp.json();
-}
-
-export async function getImportSession(sessionId: string): Promise<JobImportAnalyzeResponse> {
-  return apiFetch<JobImportAnalyzeResponse>(`/api/v1/jobs/imports/${sessionId}`);
-}
-
-export async function updateSuggestionStatus(
-  sessionId: string,
-  suggestionId: string,
-  reviewStatus: string,
-  editedValue?: any
-): Promise<JobImportAnalyzeResponse> {
-  return apiFetch<JobImportAnalyzeResponse>(`/api/v1/jobs/imports/${sessionId}/suggestions/${suggestionId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ review_status: reviewStatus, edited_value: editedValue }),
-  });
-}
-
-export async function applyImportSuggestions(
-  sessionId: string,
-  payload: {
-    expectedRevision?: number | null;
-    acceptedSuggestionIds: string[];
-    editedSuggestions?: Record<string, any>;
-  }
-): Promise<{ status: string; sessionId: string; appliedCount: number; appliedItems: any[] }> {
-  return apiFetch(`/api/v1/jobs/imports/${sessionId}/apply`, {
+  return apiFetch<MatchRunSummary>("/api/v1/matches/runs", {
     method: "POST",
+    headers,
     body: JSON.stringify({
+      job_id: payload.jobId,
       expected_revision: payload.expectedRevision,
-      accepted_suggestion_ids: payload.acceptedSuggestionIds,
-      edited_suggestions: payload.editedSuggestions,
+      candidates: payload.candidates,
+      evaluation_date: payload.evaluationDate,
+      idempotency_key: payload.idempotencyKey,
     }),
   });
 }
 
-export async function discardImportSession(sessionId: string): Promise<void> {
-  return apiFetch<void>(`/api/v1/jobs/imports/${sessionId}`, {
-    method: "DELETE",
-  });
+export async function fetchMatchResults(runId: string, limit = 50, offset = 0): Promise<PaginatedMatchResults> {
+  return apiFetch<PaginatedMatchResults>(`/api/v1/matches/runs/${runId}/results?limit=${limit}&offset=${offset}`);
+}
+
+export async function fetchMatchRun(runId: string): Promise<MatchRunSummary> {
+  return apiFetch<MatchRunSummary>(`/api/v1/matches/runs/${runId}`);
 }
 

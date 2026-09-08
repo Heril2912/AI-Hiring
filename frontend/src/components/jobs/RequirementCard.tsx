@@ -14,8 +14,9 @@ interface RequirementCardProps {
   requirement: RequirementItem;
   index: number;
   totalCount: number;
-  forceExpandMoreOptions?: boolean;
+  isExpanded: boolean;
   readOnly?: boolean;
+  onToggleExpand: () => void;
   onChange: (updated: RequirementItem) => void;
   onRemove: () => void;
   onMoveUp: () => void;
@@ -37,14 +38,15 @@ export function RequirementCard({
   requirement,
   index,
   totalCount,
-  forceExpandMoreOptions = false,
+  isExpanded,
   readOnly = false,
+  onToggleExpand,
   onChange,
   onRemove,
   onMoveUp,
   onMoveDown,
 }: RequirementCardProps) {
-  const [showMoreOptions, setShowMoreOptions] = useState(forceExpandMoreOptions);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [isEditingLabel, setIsEditingLabel] = useState(!requirement.label.trim());
   const [equivalentInput, setEquivalentInput] = useState("");
   const rationaleTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -53,6 +55,7 @@ export function RequirementCard({
   const isMustHave = requirement.necessity === "MUST_HAVE";
   const isCritical = requirement.priority === "CRITICAL";
   const needsRationale = (isMustHave || isCritical) && !requirement.rationale?.trim();
+  const hasWarnings = requirement.warningMetadata && requirement.warningMetadata.length > 0;
 
   const handleSelectTaxonomySkill = (skill: SkillSearchItem) => {
     onChange({
@@ -80,7 +83,6 @@ export function RequirementCard({
     onChange({
       ...requirement,
       category: newCat,
-      // If changed to non-skill, clear taxonomy skill link
       taxonomySkillConceptId: isNewSkill ? requirement.taxonomySkillConceptId : null,
       origin: isNewSkill && requirement.taxonomySkillConceptId ? "TAXONOMY_SUGGESTED_RECRUITER_CONFIRMED" : "RECRUITER_ENTERED",
     });
@@ -109,18 +111,108 @@ export function RequirementCard({
     onChange({ ...requirement, acceptedEquivalents: current.filter((e) => e !== eq) });
   };
 
-  const handleFocusRationale = () => {
-    setShowMoreOptions(true);
-    setTimeout(() => {
-      rationaleTextareaRef.current?.focus();
-    }, 50);
-  };
+  const displayTitle = requirement.label.trim() || `(Untitled requirement #${index + 1})`;
 
-  const hasWarnings = requirement.warningMetadata && requirement.warningMetadata.length > 0;
+  // =========================================================================
+  // 1. Collapsed Compact Row Mode
+  // =========================================================================
+  if (!isExpanded) {
+    return (
+      <div
+        className={`requirement-card-compact ${hasWarnings ? "has-review-warning" : ""}`}
+        data-testid={`requirement-card-${index}`}
+      >
+        <div className="req-compact-left">
+          <div className="requirement-order-badge">#{index + 1}</div>
+          <span className="req-compact-title" title={displayTitle}>
+            {displayTitle}
+          </span>
+          <div className="req-compact-badges">
+            <span className="badge badge-custom-entered">{requirement.category}</span>
+            <span
+              className={requirement.necessity === "MUST_HAVE" ? "badge-necessity-must" : "badge-necessity-pref"}
+            >
+              {requirement.necessity === "MUST_HAVE" ? "Must-have" : "Preferred"}
+            </span>
+            <span className={`badge-prio ${requirement.priority === "CRITICAL" ? "badge-prio-critical" : ""}`}>
+              {requirement.priority}
+            </span>
+            {requirement.minExperienceMonths && requirement.minExperienceMonths > 0 && (
+              <span className="badge-exp-months">{requirement.minExperienceMonths}m exp</span>
+            )}
+            {requirement.origin === "TAXONOMY_SUGGESTED_RECRUITER_CONFIRMED" && (
+              <span className="badge badge-onet-confirmed">O*NET</span>
+            )}
+            {needsRationale && (
+              <span className="badge badge-meta" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>
+                Needs reason
+              </span>
+            )}
+            {hasWarnings && (
+              <span className="badge badge-meta" style={{ backgroundColor: "#fee2e2", color: "#991b1b" }}>
+                Review warning
+              </span>
+            )}
+          </div>
+        </div>
 
+        <div className="req-compact-actions">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onToggleExpand}
+            aria-label={`Edit requirement #${index + 1}: ${displayTitle}`}
+          >
+            <Icon name="edit" size={13} />
+            <span>Edit</span>
+          </button>
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                className="btn-icon-control"
+                disabled={index === 0}
+                onClick={onMoveUp}
+                aria-label={`Move requirement ${index + 1} up`}
+                title="Move up"
+              >
+                <Icon name="chevron-left" size={14} style={{ transform: "rotate(90deg)" }} />
+              </button>
+              <button
+                type="button"
+                className="btn-icon-control"
+                disabled={index === totalCount - 1}
+                onClick={onMoveDown}
+                aria-label={`Move requirement ${index + 1} down`}
+                title="Move down"
+              >
+                <Icon name="chevron-down" size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn-icon-control text-danger"
+                onClick={onRemove}
+                aria-label={`Remove requirement #${index + 1}`}
+                title="Remove requirement"
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // 2. Expanded Editing Mode
+  // =========================================================================
   return (
-    <div className={`requirement-card ${hasWarnings ? "has-review-warning" : ""}`}>
-      {/* Header Row: Order Number, Name/Autocomplete, Badges, Reorder/Delete */}
+    <div
+      className={`requirement-card ${hasWarnings ? "has-review-warning" : ""}`}
+      data-testid={`requirement-card-${index}`}
+    >
+      {/* Header Row: Order Number, Name/Autocomplete, Badges, Collapse & Actions */}
       <div className="requirement-card-header">
         <div className="requirement-order-badge">#{index + 1}</div>
 
@@ -141,7 +233,14 @@ export function RequirementCard({
                   className="form-input"
                   placeholder={`Enter ${requirement.category.toLowerCase()} requirement...`}
                   value={requirement.label}
-                  onChange={(e) => onChange({ ...requirement, label: e.target.value, origin: "RECRUITER_ENTERED", taxonomySkillConceptId: null })}
+                  onChange={(e) =>
+                    onChange({
+                      ...requirement,
+                      label: e.target.value,
+                      origin: "RECRUITER_ENTERED",
+                      taxonomySkillConceptId: null,
+                    })
+                  }
                   onBlur={() => {
                     if (requirement.label.trim()) setIsEditingLabel(false);
                   }}
@@ -168,8 +267,8 @@ export function RequirementCard({
                   type="button"
                   className="btn-icon-subtle"
                   onClick={() => setIsEditingLabel(true)}
-                  aria-label={`Edit requirement ${requirement.label}`}
-                  title="Edit name"
+                  aria-label={`Edit title for requirement ${requirement.label || index + 1}`}
+                  title="Edit title"
                 >
                   <Icon name="edit" size={14} />
                 </button>
@@ -178,59 +277,60 @@ export function RequirementCard({
           )}
         </div>
 
-        {/* Actionable "Reason required" chip */}
-        {!readOnly && needsRationale && (
+        {/* Action Controls: Done/Collapse button, Reorder, Delete */}
+        <div className="requirement-card-actions">
           <button
             type="button"
-            className="actionable-rationale-prompt"
-            onClick={handleFocusRationale}
-            title="Add business reason for this required criterion"
+            className="btn btn-secondary btn-sm"
+            onClick={onToggleExpand}
+            aria-label={`Done editing requirement #${index + 1}`}
           >
-            <Icon name="alert-triangle" size={12} />
-            <span>Reason suggested</span>
+            <Icon name="check" size={13} />
+            <span>Done</span>
           </button>
-        )}
-
-        {/* Reordering and Delete Controls */}
-        {!readOnly && (
-          <div className="requirement-card-actions">
-            <button
-              type="button"
-              className="btn-icon-control"
-              disabled={index === 0}
-              onClick={onMoveUp}
-              aria-label={`Move requirement ${requirement.label || index + 1} up`}
-              title="Move up"
-            >
-              <Icon name="chevron-left" size={14} style={{ transform: "rotate(90deg)" }} />
-            </button>
-            <button
-              type="button"
-              className="btn-icon-control"
-              disabled={index === totalCount - 1}
-              onClick={onMoveDown}
-              aria-label={`Move requirement ${requirement.label || index + 1} down`}
-              title="Move down"
-            >
-              <Icon name="chevron-down" size={14} />
-            </button>
-            <button
-              type="button"
-              className="btn-icon-control text-danger"
-              onClick={onRemove}
-              aria-label={`Remove requirement ${requirement.label || index + 1}`}
-              title="Remove requirement"
-            >
-              <Icon name="trash" size={14} />
-            </button>
-          </div>
-        )}
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                className="btn-icon-control"
+                disabled={index === 0}
+                onClick={onMoveUp}
+                aria-label={`Move requirement ${requirement.label || index + 1} up`}
+                title="Move up"
+              >
+                <Icon name="chevron-left" size={14} style={{ transform: "rotate(90deg)" }} />
+              </button>
+              <button
+                type="button"
+                className="btn-icon-control"
+                disabled={index === totalCount - 1}
+                onClick={onMoveDown}
+                aria-label={`Move requirement ${requirement.label || index + 1} down`}
+                title="Move down"
+              >
+                <Icon name="chevron-down" size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn-icon-control text-danger"
+                onClick={onRemove}
+                aria-label={`Remove requirement ${requirement.label || index + 1}`}
+                title="Remove requirement"
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Primary Configuration Grid */}
-      <div className="requirement-primary-controls-grid">
+      {/* Streamlined Primary Configuration Grid with Segmented Controls */}
+      <div className="requirement-primary-controls-grid" style={{ alignItems: "flex-end" }}>
+        {/* Category Dropdown */}
         <div className="form-group-compact">
-          <label htmlFor={`cat-${index}`} className="form-label-xs">Category</label>
+          <label htmlFor={`cat-${index}`} className="form-label-xs">
+            Category
+          </label>
           <select
             id={`cat-${index}`}
             className="form-select-sm"
@@ -248,42 +348,55 @@ export function RequirementCard({
           </select>
         </div>
 
+        {/* Necessity: Segmented Controls [Must-have] [Preferred] */}
         <div className="form-group-compact">
-          <label htmlFor={`nec-${index}`} className="form-label-xs">Requirement Type</label>
-          <select
-            id={`nec-${index}`}
-            className="form-select-sm"
-            value={requirement.necessity}
-            disabled={readOnly}
-            onChange={(e) =>
-              onChange({ ...requirement, necessity: e.target.value as RequirementNecessity })
-            }
-          >
-            <option value="MUST_HAVE">Required</option>
-            <option value="PREFERRED">Preferred</option>
-          </select>
+          <span className="form-label-xs">Necessity</span>
+          <div className="segmented-control" role="group" aria-label="Requirement necessity">
+            <button
+              type="button"
+              className={`segmented-btn ${requirement.necessity === "MUST_HAVE" ? "active must-have" : ""}`}
+              onClick={() => onChange({ ...requirement, necessity: "MUST_HAVE" })}
+              disabled={readOnly}
+              aria-pressed={requirement.necessity === "MUST_HAVE"}
+            >
+              Must-have
+            </button>
+            <button
+              type="button"
+              className={`segmented-btn ${requirement.necessity === "PREFERRED" ? "active preferred" : ""}`}
+              onClick={() => onChange({ ...requirement, necessity: "PREFERRED" })}
+              disabled={readOnly}
+              aria-pressed={requirement.necessity === "PREFERRED"}
+            >
+              Preferred
+            </button>
+          </div>
         </div>
 
+        {/* Priority: Segmented Controls [Critical] [High] [Medium] [Low] */}
         <div className="form-group-compact">
-          <label htmlFor={`prio-${index}`} className="form-label-xs">Priority</label>
-          <select
-            id={`prio-${index}`}
-            className="form-select-sm"
-            value={requirement.priority}
-            disabled={readOnly}
-            onChange={(e) =>
-              onChange({ ...requirement, priority: e.target.value as RequirementPriority })
-            }
-          >
-            <option value="CRITICAL">Critical</option>
-            <option value="HIGH">High</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="LOW">Low</option>
-          </select>
+          <span className="form-label-xs">Priority</span>
+          <div className="segmented-control" role="group" aria-label="Requirement priority">
+            {(["CRITICAL", "HIGH", "MEDIUM", "LOW"] as RequirementPriority[]).map((prio) => (
+              <button
+                key={prio}
+                type="button"
+                className={`segmented-btn ${requirement.priority === prio ? "active" : ""}`}
+                onClick={() => onChange({ ...requirement, priority: prio })}
+                disabled={readOnly}
+                aria-pressed={requirement.priority === prio}
+              >
+                {prio === "CRITICAL" ? "Critical" : prio === "HIGH" ? "High" : prio === "MEDIUM" ? "Med" : "Low"}
+              </button>
+            ))}
+          </div>
         </div>
 
+        {/* Min Experience Months */}
         <div className="form-group-compact">
-          <label htmlFor={`exp-${index}`} className="form-label-xs">Min. Experience (Months)</label>
+          <label htmlFor={`exp-${index}`} className="form-label-xs">
+            Min. Experience (Months)
+          </label>
           <input
             id={`exp-${index}`}
             type="number"
@@ -301,6 +414,32 @@ export function RequirementCard({
         </div>
       </div>
 
+      {/* Immediate Mandatory Rationale when Must-Have or Critical */}
+      {isMustHave && (
+        <div className="rationale-mandatory-box">
+          <label htmlFor={`rat-${index}`} className="rationale-label-required">
+            <Icon name="alert-triangle" size={14} />
+            <span>
+              Must-Have Rationale <span className="text-danger">*</span>
+            </span>
+          </label>
+          <p style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "6px" }}>
+            State why this criterion is an absolute requirement for this role to maintain defensible, job-related criteria.
+          </p>
+          <textarea
+            id={`rat-${index}`}
+            ref={rationaleTextareaRef}
+            className="form-textarea-sm"
+            rows={2}
+            placeholder="e.g., Required for immediate production microservices maintenance and on-call rotation..."
+            disabled={readOnly}
+            value={requirement.rationale ?? ""}
+            onChange={(e) => onChange({ ...requirement, rationale: e.target.value })}
+            aria-required="true"
+          />
+        </div>
+      )}
+
       {/* Review Warnings Indicator */}
       {hasWarnings && (
         <div className="requirement-warning-banner" role="alert">
@@ -315,44 +454,44 @@ export function RequirementCard({
         </div>
       )}
 
-      {/* Collapsed More Options Toggle */}
+      {/* Advanced Options Disclosure */}
       <div className="requirement-advanced-toggle-row">
         <button
           type="button"
           className="advanced-toggle-btn"
-          onClick={() => setShowMoreOptions(!showMoreOptions)}
-          aria-expanded={showMoreOptions}
+          onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+          aria-expanded={showAdvancedOptions}
         >
-          <Icon name={showMoreOptions ? "chevron-down" : "chevron-right"} size={13} />
-          <span>More options (reason, recency, synonyms, evidence locations)</span>
+          <Icon name={showAdvancedOptions ? "chevron-down" : "chevron-right"} size={13} />
+          <span>Advanced options (recency, equivalents, evidence locations)</span>
         </button>
       </div>
 
-      {/* Collapsed More Options Panel */}
-      {showMoreOptions && (
+      {showAdvancedOptions && (
         <div className="requirement-advanced-panel">
-          {/* Plain Language Rationale */}
-          <div className="form-group">
-            <label htmlFor={`rat-${index}`} className="form-label-xs">
-              Why is this required? <span className="text-muted">(Job-related reason)</span>
-            </label>
-            <textarea
-              id={`rat-${index}`}
-              ref={rationaleTextareaRef}
-              className="form-textarea-sm"
-              rows={2}
-              placeholder="Why is this requirement necessary for this role?..."
-              disabled={readOnly}
-              value={requirement.rationale ?? ""}
-              onChange={(e) => onChange({ ...requirement, rationale: e.target.value })}
-            />
-          </div>
+          {/* Optional Rationale for Preferred criteria if not already shown */}
+          {!isMustHave && (
+            <div className="form-group">
+              <label htmlFor={`rat-opt-${index}`} className="form-label-xs">
+                Job-related reason <span className="text-muted">(optional)</span>
+              </label>
+              <textarea
+                id={`rat-opt-${index}`}
+                className="form-textarea-sm"
+                rows={2}
+                placeholder="Optional explanation for why this preferred criterion is valued..."
+                disabled={readOnly}
+                value={requirement.rationale ?? ""}
+                onChange={(e) => onChange({ ...requirement, rationale: e.target.value })}
+              />
+            </div>
+          )}
 
           <div className="advanced-two-col-grid">
             {/* Recency Input */}
             <div className="form-group-compact">
               <label htmlFor={`rec-${index}`} className="form-label-xs">
-                How recently should it have been used? (Years)
+                Recency requirement (Years)
               </label>
               <input
                 id={`rec-${index}`}
@@ -424,7 +563,7 @@ export function RequirementCard({
 
           {/* Accepted Evidence Types Checkboxes */}
           <div className="form-group">
-            <label className="form-label-xs">Where can this be shown?</label>
+            <label className="form-label-xs">Accepted Evidence Locations</label>
             <div className="evidence-checkboxes-grid">
               {ALL_EVIDENCE_TYPES.map(({ type, label }) => {
                 const checked = (requirement.acceptedEvidenceTypes || []).includes(type);

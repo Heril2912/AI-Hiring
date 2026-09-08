@@ -100,6 +100,7 @@ class CandidateListItemResponse(BaseModel):
     created_at: str
     has_extraction: bool
     latest_profile_version: Optional[int] = None
+    latest_profile_id: Optional[UUID] = None
     full_name: Optional[str] = None
     headline: Optional[str] = None
     review_required: bool = False
