@@ -80,11 +80,17 @@ from app.schemas.match_run import (
 from app.schemas.requirement_gap import (
     GAP_POLICY_VERSION,
     GAP_SCHEMA_VERSION,
+    WORDING_TEMPLATE_VERSION,
     GapReviewActionCode,
     MATCH_STATE_TO_GAP_STATE_MAP,
     RequirementGapRecord,
     RequirementGapSetContract,
     RequirementGapState,
+    GapReportCreateRequest,
+    GapReportItemResponse,
+    GapReportSummaryResponse,
+    GapReportDetailResponse,
+    CanonicalGapReportResponse,
 )
 from app.schemas.explanation import (
     CalculationSummary,
@@ -311,9 +317,15 @@ __all__ = [
     "MatchResultDetailResponse",
     "GAP_SCHEMA_VERSION",
     "GAP_POLICY_VERSION",
+    "WORDING_TEMPLATE_VERSION",
     "RequirementGapState",
     "GapReviewActionCode",
     "MATCH_STATE_TO_GAP_STATE_MAP",
     "RequirementGapRecord",
     "RequirementGapSetContract",
+    "GapReportCreateRequest",
+    "GapReportItemResponse",
+    "GapReportSummaryResponse",
+    "GapReportDetailResponse",
+    "CanonicalGapReportResponse",
 ]

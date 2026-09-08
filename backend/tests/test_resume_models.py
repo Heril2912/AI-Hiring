@@ -42,6 +42,9 @@ def test_models_exported_and_tables_registered():
         "match_runs",
         "match_results",
         "match_audit_events",
+        "gap_reports",
+        "gap_report_items",
+        "gap_audit_events",
     }
 
 
