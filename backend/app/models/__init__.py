@@ -39,6 +39,12 @@ from app.models.matching import (
     MatchRunLifecycleStatus,
     MatchRunRecord,
 )
+from app.models.gap_report import (
+    GapAuditEventRecord,
+    GapAuditEventType,
+    GapReportItemRecord,
+    GapReportRecord,
+)
 from app.models.resume import (
 
     ArtifactFormat,
@@ -106,4 +112,8 @@ __all__ = [
     "MatchResultRecord",
     "MatchAuditEventType",
     "MatchAuditEventRecord",
+    "GapReportRecord",
+    "GapReportItemRecord",
+    "GapAuditEventType",
+    "GapAuditEventRecord",
 ]

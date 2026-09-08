@@ -16,6 +16,7 @@ from app.schemas.requirement_match import MatchResultState
 
 GAP_SCHEMA_VERSION: str = "1.0.0"
 GAP_POLICY_VERSION: str = "phase2d2_gap_v1"
+WORDING_TEMPLATE_VERSION: str = "phase2d2_wording_v1"
 
 PROHIBITED_DECISION_PHRASES = [
     "unqualified",
@@ -214,3 +215,167 @@ class RequirementGapSetContract(FrozenSchema):
 
         verify_no_prohibited_keys(self.model_dump(mode="json"))
         return self
+
+
+# Phase 2D.3 API & Canonical Report Response Schemas
+class GapReportCreateRequest(StrictSchema):
+    match_result_id: UUID
+    idempotency_key: Optional[str] = Field(default=None, max_length=255)
+
+
+class GapReportItemResponse(StrictSchema):
+    item_id: UUID
+    report_id: UUID
+    requirement_id: UUID
+    display_order: int
+    category: RequirementCategory
+    necessity: RequirementNecessity
+    priority: RequirementPriority
+    source_match_state: MatchResultState
+    source_match_value: float
+    gap_state: RequirementGapState
+    required_value: Optional[str] = None
+    documented_value: Optional[str] = None
+    measurable_shortfall_value: Optional[float] = None
+    shortfall_unit: Optional[str] = None
+    shortfall_reason_code: Optional[str] = None
+    evidence_references: List[str] = Field(default_factory=list)
+    review_required: bool
+    review_action_code: GapReviewActionCode
+    must_have_warning_reference: Optional[str] = None
+    recruiter_wording: str
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def validate_privacy(self) -> "GapReportItemResponse":
+        verify_no_prohibited_keys(self.model_dump(mode="json"))
+        return self
+
+
+class GapReportSummaryResponse(StrictSchema):
+    report_id: UUID
+    match_run_id: UUID
+    match_result_id: UUID
+    job_id: UUID
+    job_version_id: UUID
+    revision: int
+    profile_id: UUID
+    profile_version: int
+    evaluation_date: datetime
+    matcher_algorithm_version: str
+    matching_rule_version: str
+    scoring_policy_version: str
+    match_input_schema_version: str
+    taxonomy_version: Optional[str] = None
+    gap_schema_version: str
+    gap_policy_version: str
+    wording_template_version: str
+    source_fingerprint: str
+    report_fingerprint: str
+    total_requirements: int
+    covered_count: int
+    partially_covered_count: int
+    not_evidenced_count: int
+    unverified_count: int
+    conflicting_count: int
+    not_applicable_count: int
+    must_have_warning_count: int
+    reused: bool = False
+    created_at: datetime
+    report_url: str
+
+    @model_validator(mode="after")
+    def validate_privacy(self) -> "GapReportSummaryResponse":
+        verify_no_prohibited_keys(self.model_dump(mode="json"))
+        return self
+
+
+class GapReportDetailResponse(StrictSchema):
+    report_id: UUID
+    match_run_id: UUID
+    match_result_id: UUID
+    job_id: UUID
+    job_version_id: UUID
+    revision: int
+    profile_id: UUID
+    profile_version: int
+    evaluation_date: datetime
+    matcher_algorithm_version: str
+    matching_rule_version: str
+    scoring_policy_version: str
+    match_input_schema_version: str
+    taxonomy_version: Optional[str] = None
+    gap_schema_version: str
+    gap_policy_version: str
+    wording_template_version: str
+    source_fingerprint: str
+    report_fingerprint: str
+    total_requirements: int
+    covered_count: int
+    partially_covered_count: int
+    not_evidenced_count: int
+    unverified_count: int
+    conflicting_count: int
+    not_applicable_count: int
+    must_have_warning_count: int
+    created_at: datetime
+    items: List[GapReportItemResponse]
+
+    @model_validator(mode="after")
+    def validate_privacy(self) -> "GapReportDetailResponse":
+        verify_no_prohibited_keys(self.model_dump(mode="json"))
+        return self
+
+
+class CanonicalGapReportResponse(StrictSchema):
+    report_id: UUID
+    match_run_id: UUID
+    match_result_id: UUID
+    job_id: UUID
+    job_version_id: UUID
+    revision: int
+    profile_id: UUID
+    profile_version: int
+    evaluation_date: datetime
+    matcher_algorithm_version: str
+    matching_rule_version: str
+    scoring_policy_version: str
+    match_input_schema_version: str
+    taxonomy_version: Optional[str] = None
+    gap_schema_version: str
+    gap_policy_version: str
+    wording_template_version: str
+    source_fingerprint: str
+    report_fingerprint: str
+    total_requirements: int
+    summary_counts: Dict[str, int]
+    must_have_warning_count: int
+    gaps: List[GapReportItemResponse]
+    all_evidence_references: List[str]
+    disclaimer: str = (
+        "This requirement-gap report compares documented professional evidence against recruiter-approved "
+        "job requirements based on an immutable Phase 2C match result. It supports human review and is not an "
+        "employment decision. Missing evidence does not prove that a candidate lacks a qualification."
+    )
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def validate_invariants(self) -> "CanonicalGapReportResponse":
+        # Invariant: total_requirements == sum of gap state counts
+        counts = self.summary_counts
+        covered = counts.get(RequirementGapState.COVERED.value, 0)
+        partially = counts.get(RequirementGapState.PARTIALLY_COVERED.value, 0)
+        not_ev = counts.get(RequirementGapState.NOT_EVIDENCED.value, 0)
+        unver = counts.get(RequirementGapState.UNVERIFIED.value, 0)
+        conflict = counts.get(RequirementGapState.CONFLICTING_REVIEW_REQUIRED.value, 0)
+        not_app = counts.get(RequirementGapState.NOT_APPLICABLE.value, 0)
+
+        sum_counts = covered + partially + not_ev + unver + conflict + not_app
+        if self.total_requirements != sum_counts:
+            raise ValueError(
+                f"total_requirements ({self.total_requirements}) must equal sum of state counts ({sum_counts})."
+            )
+
+        verify_no_prohibited_keys(self.model_dump(mode="json"))
+        return self
+
