@@ -15,7 +15,38 @@ from app.schemas.matching import FrozenSchema, verify_no_prohibited_keys
 from app.schemas.requirement_match import MatchResultState
 
 GAP_SCHEMA_VERSION: str = "1.0.0"
-GAP_POLICY_VERSION: str = "phase2d1_gap_v1"
+GAP_POLICY_VERSION: str = "phase2d2_gap_v1"
+
+PROHIBITED_DECISION_PHRASES = [
+    "unqualified",
+    "reject this candidate",
+    "reject candidate",
+    "should not proceed",
+    "do not hire",
+    "hire this candidate",
+    "best candidate",
+    "worst candidate",
+    "cultural fit",
+    "culture fit",
+    "lacks ability",
+    "lacks a skill",
+    "lacks skill",
+    "poor fit",
+    "excellent fit",
+    "will perform well",
+    "personality",
+    "intelligence",
+    "honesty",
+    "employability guarantee",
+]
+
+
+def verify_no_prohibited_decision_phrasing(text: str) -> None:
+    """Verifies that generated text contains no prohibited employment decision, speculative, or character assessment phrasing."""
+    text_lower = text.lower()
+    for phrase in PROHIBITED_DECISION_PHRASES:
+        if phrase in text_lower:
+            raise ValueError(f"Prohibited decision, speculative, or evaluative phrasing detected: '{phrase}'")
 
 
 class RequirementGapState(str, enum.Enum):
@@ -47,6 +78,17 @@ MATCH_STATE_TO_GAP_STATE_MAP: Dict[MatchResultState, RequirementGapState] = {
     MatchResultState.CONFLICTING_EVIDENCE: RequirementGapState.CONFLICTING_REVIEW_REQUIRED,
     MatchResultState.NOT_APPLICABLE: RequirementGapState.NOT_APPLICABLE,
 }
+
+
+class GapReviewActionCode(str, enum.Enum):
+    """Controlled recruiter review action recommendations for gap findings."""
+
+    NO_ACTION_REQUIRED = "NO_ACTION_REQUIRED"
+    VERIFY_THRESHOLD_SHORTFALL = "VERIFY_THRESHOLD_SHORTFALL"
+    VERIFY_ADDITIONAL_DOCUMENTATION = "VERIFY_ADDITIONAL_DOCUMENTATION"
+    CONFIRM_UNCERTAIN_EVIDENCE = "CONFIRM_UNCERTAIN_EVIDENCE"
+    RESOLVE_EVIDENCE_CONFLICT = "RESOLVE_EVIDENCE_CONFLICT"
+    REVIEW_EVIDENCE_OPTIONAL = "REVIEW_EVIDENCE_OPTIONAL"
 
 
 class RequirementGapRecord(FrozenSchema):
@@ -87,9 +129,12 @@ class RequirementGapRecord(FrozenSchema):
     documented_value: Optional[str] = None
     measurable_shortfall_value: Optional[float] = Field(default=None, ge=0.0)
     shortfall_unit: Optional[str] = None
+    shortfall_reason_code: Optional[str] = None
     evidence_references: List[str] = Field(default_factory=list)
     review_required: bool = False
+    review_action_code: GapReviewActionCode = GapReviewActionCode.NO_ACTION_REQUIRED
     must_have_warning_reference: Optional[str] = None
+    recruiter_wording: Optional[str] = None
     recruiter_wording_placeholder: Optional[str] = None
     gap_schema_version: str = GAP_SCHEMA_VERSION
     gap_policy_version: str = GAP_POLICY_VERSION
@@ -120,7 +165,11 @@ class RequirementGapRecord(FrozenSchema):
                     f"Gap state '{self.gap_state}' must contain qualifying evidence references."
                 )
 
-        # 3. Verify no prohibited identity or protected keys exist
+        # 3. Controlled wording validation
+        if self.recruiter_wording is not None:
+            verify_no_prohibited_decision_phrasing(self.recruiter_wording)
+
+        # 4. Verify no prohibited identity or protected keys exist
         verify_no_prohibited_keys(self.model_dump(mode="json"))
 
         return self
