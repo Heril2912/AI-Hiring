@@ -11,6 +11,7 @@ import { CandidateProfileReview, CandidateProfileData } from "./components/Candi
 import { ExtractionReview, ExtractionResultData } from "./components/ExtractionReview";
 import { JobsDirectory } from "./components/jobs/JobsDirectory";
 import { JobEditor } from "./components/jobs/JobEditor";
+import { CandidateComparisonView } from "./components/jobs/CandidateComparisonView";
 import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
@@ -26,7 +27,7 @@ function AuthenticatedApp() {
     role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews"
   );
   const [activeView, setActiveView] = useState<
-    "jobs" | "new_job" | "edit_job" | "candidates" | "upload" | "profile" | "extraction"
+    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "candidates" | "upload" | "profile" | "extraction"
   >("candidates");
 
   // Health check
@@ -37,6 +38,13 @@ function AuthenticatedApp() {
   const [isLoadingJobs, setIsLoadingJobs] = useState<boolean>(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [comparisonParams, setComparisonParams] = useState<{
+    jobId: string;
+    jobTitle: string;
+    jobVersionId: string;
+    revision: number;
+    requirementsCount: number;
+  } | null>(null);
 
   // Candidates state
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
@@ -285,6 +293,21 @@ function AuthenticatedApp() {
                     setActiveView("jobs");
                     loadJobsList();
                   }}
+                  onCompareCandidates={(params) => {
+                    setComparisonParams(params);
+                    setActiveView("compare_candidates");
+                  }}
+                />
+              )}
+
+              {activeView === "compare_candidates" && comparisonParams && (
+                <CandidateComparisonView
+                  jobId={comparisonParams.jobId}
+                  jobTitle={comparisonParams.jobTitle}
+                  jobVersionId={comparisonParams.jobVersionId}
+                  revision={comparisonParams.revision}
+                  requirementsCount={comparisonParams.requirementsCount}
+                  onNavigateBack={() => setActiveView("edit_job")}
                 />
               )}
 

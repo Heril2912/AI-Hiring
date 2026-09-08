@@ -79,6 +79,14 @@ export async function apiFetch<T = any>(
       if (data?.detail) {
         if (typeof data.detail === "string") {
           errorDetail.message = data.detail;
+        } else if (Array.isArray(data.detail) && data.detail.length > 0) {
+          // FastAPI / Pydantic validation error array: [{loc, msg, type}]
+          const messages = data.detail.map((d: any) => {
+            const field = Array.isArray(d.loc) ? d.loc.slice(1).join(".") : "";
+            return field ? `${field}: ${d.msg}` : d.msg;
+          });
+          errorDetail.message = messages.join("; ");
+          errorDetail.code = "VALIDATION_ERROR";
         } else if (typeof data.detail === "object") {
           errorDetail.code = data.detail.code || errorDetail.code;
           errorDetail.message = data.detail.message || errorDetail.message;

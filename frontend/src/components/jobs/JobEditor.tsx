@@ -19,19 +19,21 @@ import { OccupationSearchItem } from "../../api/taxonomy";
 import { Icon } from "../Icon";
 import { OccupationSelector } from "./OccupationSelector";
 import { RequirementCard } from "./RequirementCard";
-import {
-  JobDescriptionImportModal,
-  AppliedSuggestionsPayload,
-  CurrentFormValues,
-} from "./JobDescriptionImportModal";
 
 interface JobEditorProps {
   jobId?: string | null; // null if creating a new job
   onNavigateBack: () => void;
   onJobCreated?: (newJobId: string) => void;
+  onCompareCandidates?: (params: {
+    jobId: string;
+    jobTitle: string;
+    jobVersionId: string;
+    revision: number;
+    requirementsCount: number;
+  }) => void;
 }
 
-export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProps) {
+export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandidates }: JobEditorProps) {
   // Main Draft Data
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(jobId));
@@ -57,6 +59,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
 
   // Requirements State
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
+  const [expandedReqIndex, setExpandedReqIndex] = useState<number | null>(null);
 
   // Revision & Status Tracking
   const [currentRevision, setCurrentRevision] = useState<number>(1);
@@ -65,7 +68,6 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
   // Readiness & Revision Locking State
   const [readinessResult, setReadinessResult] = useState<JobReadinessResponse | null>(null);
@@ -158,17 +160,21 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
 
   // Requirement Handlers
   const handleAddRequirement = (category: RequirementCategory = "SKILL") => {
+    const newIndex = requirements.length;
     const newReq: RequirementItem = {
-      displayOrder: requirements.length,
+      displayOrder: newIndex,
       category,
       label: "",
-      necessity: "MUST_HAVE",
+      necessity: "PREFERRED",
       priority: "MEDIUM",
+      minExperienceMonths: null,
+      recencyYears: null,
       acceptedEvidenceTypes: ["EMPLOYMENT", "PROJECT"],
       acceptedEquivalents: [],
       origin: "RECRUITER_ENTERED",
     };
     setRequirements([...requirements, newReq]);
+    setExpandedReqIndex(newIndex);
     setIsDirty(true);
   };
 
@@ -183,6 +189,11 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
     const filtered = requirements.filter((_, i) => i !== idx);
     const reordered = filtered.map((r, i) => ({ ...r, displayOrder: i }));
     setRequirements(reordered);
+    if (expandedReqIndex === idx) {
+      setExpandedReqIndex(null);
+    } else if (expandedReqIndex !== null && expandedReqIndex > idx) {
+      setExpandedReqIndex(expandedReqIndex - 1);
+    }
     setIsDirty(true);
   };
 
@@ -197,6 +208,11 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
 
     const reordered = copy.map((r, i) => ({ ...r, displayOrder: i }));
     setRequirements(reordered);
+    if (expandedReqIndex === idx) {
+      setExpandedReqIndex(targetIdx);
+    } else if (expandedReqIndex === targetIdx) {
+      setExpandedReqIndex(idx);
+    }
     setIsDirty(true);
   };
 
@@ -248,11 +264,34 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
       return;
     }
 
-    // Validate requirements labels
+    // Validate requirements labels and constraints
+    const seenReqs = new Set<string>();
     for (let i = 0; i < requirements.length; i++) {
-      if (!requirements[i].label.trim()) {
+      const r = requirements[i];
+      const trimmedLabel = r.label.trim();
+      if (!trimmedLabel) {
         setSaveError(`Requirement #${i + 1} has an empty name.`);
         return;
+      }
+      const normKey = `${r.category}:${trimmedLabel.toLowerCase()}`;
+      if (seenReqs.has(normKey)) {
+        setSaveError(`Duplicate requirement "${trimmedLabel}" in category "${r.category}". Requirements must be unique per category.`);
+        return;
+      }
+      seenReqs.add(normKey);
+
+      if (r.minExperienceMonths !== undefined && r.minExperienceMonths !== null) {
+        if (isNaN(r.minExperienceMonths) || r.minExperienceMonths < 1) {
+          setSaveError(`Requirement #${i + 1} ("${trimmedLabel}"): Minimum experience must be at least 1 month.`);
+          return;
+        }
+      }
+
+      if (r.recencyYears !== undefined && r.recencyYears !== null) {
+        if (isNaN(r.recencyYears) || r.recencyYears < 1 || r.recencyYears > 50) {
+          setSaveError(`Requirement #${i + 1} ("${trimmedLabel}"): Recency must be between 1 and 50 years.`);
+          return;
+        }
       }
     }
 
@@ -289,12 +328,23 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
               taxonomySkillConceptId: r.taxonomySkillConceptId || null,
               necessity: r.necessity,
               priority: r.priority,
-              customWeightOverride: r.customWeightOverride ?? null,
-              minExperienceMonths: r.minExperienceMonths ?? null,
-              recencyYears: r.recencyYears ?? null,
-              acceptedEvidenceTypes: r.acceptedEvidenceTypes,
-              acceptedEquivalents: r.acceptedEquivalents,
-              rationale: r.rationale ? r.rationale.trim() : null,
+              customWeightOverride:
+                typeof r.customWeightOverride === "number" && !isNaN(r.customWeightOverride)
+                  ? r.customWeightOverride
+                  : null,
+              minExperienceMonths:
+                typeof r.minExperienceMonths === "number" && !isNaN(r.minExperienceMonths) && r.minExperienceMonths > 0
+                  ? r.minExperienceMonths
+                  : null,
+              recencyYears:
+                typeof r.recencyYears === "number" && !isNaN(r.recencyYears) && r.recencyYears > 0
+                  ? r.recencyYears
+                  : null,
+              acceptedEvidenceTypes: Array.isArray(r.acceptedEvidenceTypes) ? r.acceptedEvidenceTypes : [],
+              acceptedEquivalents: Array.isArray(r.acceptedEquivalents)
+                ? r.acceptedEquivalents.filter((eq) => typeof eq === "string" && eq.trim())
+                : [],
+              rationale: r.rationale && r.rationale.trim() ? r.rationale.trim() : null,
             })),
           };
           const updatedWithReqs = await saveDraftRequirements(newJobId, reqPayload);
@@ -340,12 +390,23 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
             taxonomySkillConceptId: r.taxonomySkillConceptId || null,
             necessity: r.necessity,
             priority: r.priority,
-            customWeightOverride: r.customWeightOverride ?? null,
-            minExperienceMonths: r.minExperienceMonths ?? null,
-            recencyYears: r.recencyYears ?? null,
-            acceptedEvidenceTypes: r.acceptedEvidenceTypes,
-            acceptedEquivalents: r.acceptedEquivalents,
-            rationale: r.rationale ? r.rationale.trim() : null,
+            customWeightOverride:
+              typeof r.customWeightOverride === "number" && !isNaN(r.customWeightOverride)
+                ? r.customWeightOverride
+                : null,
+            minExperienceMonths:
+              typeof r.minExperienceMonths === "number" && !isNaN(r.minExperienceMonths) && r.minExperienceMonths > 0
+                ? r.minExperienceMonths
+                : null,
+            recencyYears:
+              typeof r.recencyYears === "number" && !isNaN(r.recencyYears) && r.recencyYears > 0
+                ? r.recencyYears
+                : null,
+            acceptedEvidenceTypes: Array.isArray(r.acceptedEvidenceTypes) ? r.acceptedEvidenceTypes : [],
+            acceptedEquivalents: Array.isArray(r.acceptedEquivalents)
+              ? r.acceptedEquivalents.filter((eq) => typeof eq === "string" && eq.trim())
+              : [],
+            rationale: r.rationale && r.rationale.trim() ? r.rationale.trim() : null,
           })),
         };
 
@@ -502,43 +563,6 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
     }
   };
 
-  const handleApplySuggestions = (applied: AppliedSuggestionsPayload) => {
-    if (applied.title !== undefined) setTitle(applied.title);
-    if (applied.department !== undefined) setDepartment(applied.department);
-    if (applied.location !== undefined) setLocation(applied.location);
-    if (applied.employmentType !== undefined) setEmploymentType(applied.employmentType);
-    if (applied.workplaceType !== undefined) setWorkplaceType(applied.workplaceType);
-    if (applied.openingsCount !== undefined) setOpeningsCount(applied.openingsCount);
-    if (applied.summary !== undefined) setSummary(applied.summary);
-    if (applied.responsibilities && applied.responsibilities.length > 0) {
-      const formattedResp = applied.responsibilities.map((r) => `- ${r}`).join("\n");
-      setResponsibilities((prev) => (prev ? `${prev}\n${formattedResp}` : formattedResp));
-    }
-    if (applied.newRequirements && applied.newRequirements.length > 0) {
-      setRequirements((prev) => [
-        ...prev,
-        ...applied.newRequirements.map((r, i) => ({
-          ...r,
-          displayOrder: prev.length + i,
-        })),
-      ]);
-    }
-    setIsDirty(true);
-    setSaveSuccessMsg("Imported suggestions applied to editable draft. Click 'Save Draft' to persist changes.");
-  };
-
-  const currentFormValues: CurrentFormValues = {
-    title,
-    department,
-    location,
-    employmentType,
-    workplaceType,
-    openingsCount,
-    summary,
-    responsibilities,
-    requirements,
-  };
-
   const handleSafeNavigateBack = () => {
     if (isDirty) {
       if (
@@ -599,60 +623,55 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
 
         <div className="top-bar-right">
           {isReadOnly ? (
-            <button
-              type="button"
-              className="btn btn-primary btn-md"
-              onClick={handleCreateSuccessor}
-              disabled={isCreatingSuccessor}
-            >
-              <Icon name="plus" size={15} />
-              <span>{isCreatingSuccessor ? "Creating..." : "Create editable revision"}</span>
-            </button>
-          ) : (
             <>
               <button
                 type="button"
                 className="btn btn-secondary btn-md"
-                onClick={() => setIsImportModalOpen(true)}
+                onClick={handleCreateSuccessor}
+                disabled={isCreatingSuccessor}
               >
-                <Icon name="upload" size={15} />
-                <span>Import from job description</span>
+                <Icon name="plus" size={14} />
+                <span>{isCreatingSuccessor ? "Creating..." : "Create new revision"}</span>
               </button>
               <button
                 type="button"
                 className="btn btn-primary btn-md"
-                onClick={handleSave}
-                disabled={isSaving}
+                onClick={() =>
+                  onCompareCandidates &&
+                  onCompareCandidates({
+                    jobId: jobId || "",
+                    jobTitle: title || "Job Requisition",
+                    jobVersionId: jobDetail?.currentVersion?.jobVersionId || "",
+                    revision: currentRevision,
+                    requirementsCount: requirements.length,
+                  })
+                }
               >
-                <Icon name="check" size={15} />
-                <span>{isSaving ? "Saving..." : "Save Draft"}</span>
+                <Icon name="badge-check" size={15} />
+                <span>Compare candidates</span>
               </button>
             </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary btn-md"
+              onClick={handleSave}
+              disabled={isSaving}
+            >
+              <Icon name="check" size={15} />
+              <span>{isSaving ? "Saving..." : "Save Draft"}</span>
+            </button>
           )}
         </div>
       </div>
 
-      {/* Locked Ready Notice Banner */}
+      {/* Locked Ready Informational Strip */}
       {isReadOnly && (
-        <div className="locked-ready-banner" role="status">
-          <div className="locked-banner-icon-wrap">
-            <Icon name="check" size={20} className="text-success" />
-          </div>
-          <div className="locked-banner-content">
-            <h4 className="locked-banner-title">Revision Locked as Ready for Matching</h4>
-            <p className="locked-banner-desc">
-              This revision (v{versionNumber}, Rev #{currentRevision}) is immutable and frozen as authoritative input for candidate matching. Direct edits are disabled. To make adjustments, create a new editable successor draft.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={handleCreateSuccessor}
-            disabled={isCreatingSuccessor}
-          >
-            <Icon name="plus" size={14} />
-            <span>Create editable revision</span>
-          </button>
+        <div className="locked-strip-compact" role="status">
+          <Icon name="check" size={16} className="strip-icon" />
+          <span>
+            This revision (v{versionNumber}, Rev #{currentRevision}) is locked and ready for candidate comparison. Create a new revision to change its requirements.
+          </span>
         </div>
       )}
 
@@ -1017,7 +1036,11 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
                   requirement={req}
                   index={idx}
                   totalCount={requirements.length}
+                  isExpanded={expandedReqIndex === idx}
                   readOnly={isReadOnly}
+                  onToggleExpand={() =>
+                    setExpandedReqIndex((current) => (current === idx ? null : idx))
+                  }
                   onChange={(updated) => handleUpdateRequirement(idx, updated)}
                   onRemove={() => handleRemoveRequirement(idx)}
                   onMoveUp={() => handleMoveRequirement(idx, "up")}
@@ -1263,18 +1286,6 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated }: JobEditorProp
             </div>
           </div>
         </div>
-      )}
-
-      {/* Optional Job Description Import & Review Modal */}
-      {isImportModalOpen && (
-        <JobDescriptionImportModal
-          isOpen={isImportModalOpen}
-          onClose={() => setIsImportModalOpen(false)}
-          jobId={jobId}
-          currentRevision={currentRevision}
-          currentFormValues={currentFormValues}
-          onApplySuggestions={handleApplySuggestions}
-        />
       )}
     </div>
   );

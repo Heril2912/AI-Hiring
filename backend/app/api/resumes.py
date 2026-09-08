@@ -949,9 +949,11 @@ async def list_candidate_resumes(
             rev_req = False
             prov = None
             latest_v = None
+            latest_pid = None
 
             if latest_prof:
                 latest_v = latest_prof.profile_version
+                latest_pid = latest_prof.profile_id
                 rev_req = latest_prof.review_required
                 prov = latest_prof.provenance
                 if latest_prof.identity:
@@ -976,6 +978,7 @@ async def list_candidate_resumes(
                     created_at=created_at_str,
                     has_extraction=has_ext,
                     latest_profile_version=latest_v,
+                    latest_profile_id=latest_pid,
                     full_name=full_name,
                     headline=headline,
                     review_required=rev_req,

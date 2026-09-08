@@ -9,6 +9,7 @@ export type CandidateSummary = {
   createdAt: string;
   hasExtraction: boolean;
   latestProfileVersion: number | null;
+  latestProfileId?: string | null;
   fullName: string | null;
   headline: string | null;
   reviewRequired: boolean;

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -389,16 +389,32 @@ def orchestrate_match_run(
         )
 
     # 5. Verify every candidate profile version exists in the database
-    for profile_id, profile_version in cand_keys:
+    # Support both direct profile_id and artifact_id lookup for robustness
+    normalized_cand_keys: List[Tuple[uuid.UUID, int]] = []
+    seen_normalized: Set[Tuple[uuid.UUID, int]] = set()
+
+    for cand_id, profile_version in cand_keys:
         stmt_cand = select(CandidateProfileRecord).where(
-            CandidateProfileRecord.profile_id == profile_id,
+            or_(
+                CandidateProfileRecord.profile_id == cand_id,
+                CandidateProfileRecord.artifact_id == cand_id,
+            ),
             CandidateProfileRecord.profile_version == profile_version,
         )
         cand_rec = db.execute(stmt_cand).scalar_one_or_none()
         if cand_rec is None:
             raise CandidateProfileNotFoundError(
-                f"Candidate profile ({profile_id}, v{profile_version}) not found."
+                f"Candidate profile ({cand_id}, v{profile_version}) not found."
             )
+        norm_key = (cand_rec.profile_id, profile_version)
+        if norm_key in seen_normalized:
+            raise DuplicateCandidateError(
+                f"Duplicate candidate profile ({cand_rec.profile_id}, v{profile_version}) in selection."
+            )
+        seen_normalized.add(norm_key)
+        normalized_cand_keys.append(norm_key)
+
+    cand_keys = normalized_cand_keys
 
     # 6. Idempotency pre-lookup
     stmt_existing = (
@@ -443,7 +459,7 @@ def orchestrate_match_run(
             "approved_weight": float(r.custom_weight_override) if r.custom_weight_override is not None else None,
             "min_experience_months": r.min_experience_months,
             "recency_years": r.recency_years,
-            "accepted_evidence_types": sorted([et.value for et in (r.accepted_evidence_types or [])]),
+            "accepted_evidence_types": sorted([et.value if hasattr(et, "value") else str(et) for et in (r.accepted_evidence_types or [])]),
             "accepted_equivalents": sorted(list(r.accepted_equivalents or [])),
             "taxonomy_skill_concept_id": str(r.taxonomy_skill_concept_id) if r.taxonomy_skill_concept_id else None,
         })
@@ -624,6 +640,7 @@ def orchestrate_match_run(
         db.rollback()
         logger.error(
             "Match run execution failed: %s", exc,
+            exc_info=True,
             extra={"job_id": str(job_id), "error_type": type(exc).__name__},
         )
         # Record safe diagnostic failure audit event
