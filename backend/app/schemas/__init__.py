@@ -80,6 +80,7 @@ from app.schemas.match_run import (
 from app.schemas.requirement_gap import (
     GAP_POLICY_VERSION,
     GAP_SCHEMA_VERSION,
+    GapReviewActionCode,
     MATCH_STATE_TO_GAP_STATE_MAP,
     RequirementGapRecord,
     RequirementGapSetContract,
@@ -311,6 +312,7 @@ __all__ = [
     "GAP_SCHEMA_VERSION",
     "GAP_POLICY_VERSION",
     "RequirementGapState",
+    "GapReviewActionCode",
     "MATCH_STATE_TO_GAP_STATE_MAP",
     "RequirementGapRecord",
     "RequirementGapSetContract",
