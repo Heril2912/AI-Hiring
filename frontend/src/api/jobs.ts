@@ -351,7 +351,10 @@ export interface MatchResultRankingItem {
     rule_code: string;
     safe_explanation: string;
   }>;
-  detailUrl: string;
+  requirement_contributions?: any[];
+  requirementContributions?: any[];
+  detailUrl?: string;
+  detail_url?: string;
 }
 
 export interface PaginatedMatchResults {

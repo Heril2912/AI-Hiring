@@ -4,6 +4,7 @@ import {
   MatchResultRankingItem,
   createMatchRun,
   fetchMatchResults,
+  fetchMatchRun,
   fetchGapReportsForResult,
   createGapReport,
 } from "../../api/jobs";
@@ -15,6 +16,7 @@ import {
   RequirementEvidenceDistributionChart,
   getCanonicalSummaryData,
 } from "./VisualAnalyticsCharts";
+import { RequirementEvidenceMatrix } from "./RequirementEvidenceMatrix";
 
 export type RowReportStatus = "idle" | "checking" | "preparing" | "retry" | "unavailable";
 
@@ -32,10 +34,12 @@ export interface CandidateComparisonViewProps {
   requirementsCount: number;
   onNavigateBack: () => void;
   onOpenGapReport?: (reportId: string, returnContext?: any) => void;
+  initialRunId?: string;
   initialResults?: MatchResultRankingItem[];
   initialMatchRun?: MatchRunSummary | null;
   initialCandidates?: CandidateSummary[];
   initialSearchQuery?: string;
+  initialResultsSearch?: string;
   initialSelectedProfileIds?: string[];
   initialPage?: number;
   initialSortField?: "rank" | "score" | "name" | "evidence";
@@ -50,10 +54,12 @@ export function CandidateComparisonView({
   requirementsCount,
   onNavigateBack,
   onOpenGapReport,
+  initialRunId,
   initialResults,
   initialMatchRun,
   initialCandidates,
   initialSearchQuery = "",
+  initialResultsSearch = "",
   initialSelectedProfileIds,
   initialPage = 1,
   initialSortField = "rank",
@@ -61,7 +67,7 @@ export function CandidateComparisonView({
 }: CandidateComparisonViewProps) {
   // Candidate pool state
   const [candidates, setCandidates] = useState<CandidateSummary[]>(initialCandidates || []);
-  const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(!initialCandidates && !initialResults);
+  const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(!initialCandidates && !initialResults && !initialRunId);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>(initialSearchQuery);
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(
@@ -97,11 +103,48 @@ export function CandidateComparisonView({
 
   // Visual Analytics toggle & results filtering/sorting/pagination
   const [showVisualAnalytics, setShowVisualAnalytics] = useState<boolean>(true);
-  const [resultsSearch, setResultsSearch] = useState<string>("");
+  const [resultsSearch, setResultsSearch] = useState<string>(initialResultsSearch);
   const [sortField, setSortField] = useState<"rank" | "score" | "name" | "evidence">(initialSortField);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">(initialSortDirection);
   const [currentPage, setCurrentPage] = useState<number>(initialPage);
   const pageSize = 25;
+
+  // 0. Automatically load existing match run and ranking results if initialRunId is provided
+  useEffect(() => {
+    const targetRunId = initialRunId || initialMatchRun?.runId;
+    if (targetRunId && results.length === 0) {
+      const activeRunId = targetRunId;
+      let isMounted = true;
+      async function loadExistingRunResults() {
+        try {
+          setIsComparing(true);
+          setRunError(null);
+          if (!initialMatchRun) {
+            const runData = await fetchMatchRun(activeRunId);
+            if (isMounted) {
+              setMatchRun(runData);
+            }
+          }
+          const resData = await fetchMatchResults(activeRunId, 50, 0);
+          if (isMounted) {
+            setResults(resData.items || []);
+          }
+        } catch (err: any) {
+          if (isMounted) {
+            setRunError(err?.message || "Failed to load match run results.");
+          }
+        } finally {
+          if (isMounted) {
+            setIsComparing(false);
+          }
+        }
+      }
+      loadExistingRunResults();
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [initialRunId, initialMatchRun]);
 
   // 1. Fetch available candidate pool
   useEffect(() => {
@@ -548,6 +591,13 @@ export function CandidateComparisonView({
                   onSelectCandidate={ensureGapReport}
                 />
                 <RequirementEvidenceDistributionChart
+                  results={results}
+                  candidates={candidates}
+                  onSelectCandidate={ensureGapReport}
+                />
+              </div>
+              <div style={{ marginTop: "16px" }}>
+                <RequirementEvidenceMatrix
                   results={results}
                   candidates={candidates}
                   onSelectCandidate={ensureGapReport}

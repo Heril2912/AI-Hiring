@@ -331,7 +331,7 @@ describe("Phase 2E.1: Visual Analytics, Navigation, and Canonical Integrity", ()
         expect(screen.getByText("Resume Evidence Report")).toBeInTheDocument();
       });
 
-      const backBtn = screen.getByRole("button", { name: /back to comparison|back to candidate comparison/i });
+      const backBtn = screen.getByRole("button", { name: /back to results|back to comparison|back to candidate comparison/i });
       fireEvent.click(backBtn);
 
       expect(fallbackSpy).toHaveBeenCalledWith({
