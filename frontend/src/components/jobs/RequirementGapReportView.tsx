@@ -7,7 +7,7 @@ import {
 } from "../../api/jobs";
 import { Icon } from "../Icon";
 import { CategoryEvidenceCoverageChart, getCanonicalSummaryData } from "./VisualAnalyticsCharts";
-import { validateInternalReturnUrl } from "../../utils/navigation";
+import { validateInternalReturnUrl, validateProcessedResultsReturnUrl } from "../../utils/navigation";
 
 interface RequirementGapReportViewProps {
   reportId: string;
@@ -90,7 +90,12 @@ export function RequirementGapReportView({
 
   // Handle smart Back Navigation with internal URL validation and deterministic fallback
   const handleBackNavigation = () => {
-    const safeReturn = validateInternalReturnUrl(returnUrl);
+    const safeReturn = validateProcessedResultsReturnUrl(
+      returnUrl,
+      report?.jobId,
+      report?.matchRunId
+    );
+
     if (safeReturn) {
       onNavigateBack();
       return;
@@ -206,10 +211,10 @@ export function RequirementGapReportView({
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={handleBackNavigation}
-            aria-label="Back to candidate comparison"
+            aria-label="Back to results"
           >
             <Icon name="arrow-left" size={14} />
-            <span>Back to candidate comparison</span>
+            <span>Back to results</span>
           </button>
         </div>
         <div className="conflict-alert-card" role="alert" style={{ marginTop: "16px" }}>
@@ -226,8 +231,9 @@ export function RequirementGapReportView({
               className="btn btn-secondary btn-xs"
               style={{ marginTop: "8px" }}
               onClick={handleBackNavigation}
+              aria-label="Back to results"
             >
-              Return to comparison
+              Back to results
             </button>
           </div>
         </div>
@@ -259,10 +265,10 @@ export function RequirementGapReportView({
             type="button"
             className="btn btn-secondary btn-sm no-print"
             onClick={handleBackNavigation}
-            aria-label="Back to candidate comparison"
+            aria-label="Back to results"
           >
             <Icon name="arrow-left" size={14} />
-            <span>Back to comparison</span>
+            <span>Back to results</span>
           </button>
           <div>
             <h2 className="gap-report-title">

@@ -108,6 +108,7 @@ class MatchResultRankingItemResponse(StrictSchema):
     confidence_diagnostics: Dict[str, Any]
     must_have_warnings: List[Dict[str, Any]]
     general_warnings: List[Dict[str, Any]]
+    requirement_contributions: Optional[List[Dict[str, Any]]] = None
     detail_url: str
 
     @model_validator(mode="after")

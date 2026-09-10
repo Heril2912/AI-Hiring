@@ -352,7 +352,9 @@ function AuthenticatedApp() {
                   jobVersionId={comparisonParams.jobVersionId}
                   revision={comparisonParams.revision}
                   requirementsCount={comparisonParams.requirementsCount}
+                  initialRunId={comparisonParams.runId}
                   initialSearchQuery={comparisonParams.searchQuery}
+                  initialResultsSearch={comparisonParams.resultsSearch}
                   initialSelectedProfileIds={comparisonParams.selectedProfileIds}
                   initialPage={comparisonParams.page}
                   initialSortField={comparisonParams.sortField}
@@ -375,6 +377,7 @@ function AuthenticatedApp() {
                 <RequirementGapReportView
                   reportId={selectedReportId}
                   jobTitle={comparisonParams?.jobTitle}
+                  returnUrl={`/?view=compare_candidates&jobId=${comparisonParams?.jobId || ""}&runId=${comparisonParams?.runId || ""}`}
                   onNavigateBack={() => setActiveView("compare_candidates")}
                   onNavigateBackWithFallback={(fallback) => {
                     setComparisonParams((prev) => ({

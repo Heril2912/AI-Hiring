@@ -244,7 +244,7 @@ describe('RequirementGapReportView', () => {
     expect(window.print).toHaveBeenCalled();
   });
 
-  it('navigates back when clicking Back to comparison', async () => {
+  it('navigates back when clicking Back to results', async () => {
     vi.mocked(jobsApi.fetchGapReportDetail).mockResolvedValueOnce(mockReportDetail);
 
     render(
@@ -257,10 +257,10 @@ describe('RequirementGapReportView', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Back to candidate comparison/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Back to results/i })).toBeInTheDocument();
     });
 
-    const backBtn = screen.getByRole('button', { name: /Back to candidate comparison/i });
+    const backBtn = screen.getByRole('button', { name: /Back to results/i });
     fireEvent.click(backBtn);
     expect(mockOnBack).toHaveBeenCalledTimes(1);
   });

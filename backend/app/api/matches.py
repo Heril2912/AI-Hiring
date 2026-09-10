@@ -262,6 +262,7 @@ async def list_match_results(
                     confidence_diagnostics=decomp.get("confidence_diagnostics", {}),
                     must_have_warnings=decomp.get("must_have_warnings", []),
                     general_warnings=decomp.get("general_warnings", []),
+                    requirement_contributions=req_contribs,
                     detail_url=f"/api/v1/matches/runs/{r.run_id}/results/{r.result_id}",
                 )
             )
