@@ -1,0 +1,627 @@
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  GapReportDetail,
+  GapReportItem,
+  RequirementGapState,
+  fetchGapReportDetail,
+  fetchCanonicalGapReportJson,
+} from "../../api/jobs";
+import { Icon } from "../Icon";
+
+interface RequirementGapReportViewProps {
+  reportId: string;
+  candidateName?: string;
+  jobTitle?: string;
+  onNavigateBack: () => void;
+  onOpenEvidenceDrawer?: (candidateId: string, requirementLabel?: string) => void;
+}
+
+export function RequirementGapReportView({
+  reportId,
+  candidateName,
+  jobTitle,
+  onNavigateBack,
+  onOpenEvidenceDrawer,
+}: RequirementGapReportViewProps) {
+  const [report, setReport] = useState<GapReportDetail | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Filters state
+  const [selectedStateFilter, setSelectedStateFilter] = useState<string>("ALL");
+  const [selectedNecessityFilter, setSelectedNecessityFilter] = useState<string>("ALL");
+  const [onlyReviewRequired, setOnlyReviewRequired] = useState<boolean>(false);
+
+  // Active evidence modal/drawer state
+  const [activeEvidenceItem, setActiveEvidenceItem] = useState<GapReportItem | null>(null);
+  const [isDownloadingJson, setIsDownloadingJson] = useState<boolean>(false);
+
+  // Collapsible accordion for 'How this works' advisory and 'Analysis details' panel
+  const [showHowItWorks, setShowHowItWorks] = useState<boolean>(false);
+  const [showAnalysisDetails, setShowAnalysisDetails] = useState<boolean>(false);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  const toggleRowExpanded = (rowId: string) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+      } else {
+        next.add(rowId);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadReport() {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const data = await fetchGapReportDetail(reportId);
+        if (isMounted) {
+          setReport(data);
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setError(err?.message || "Failed to load requirement gap report.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+    loadReport();
+    return () => {
+      isMounted = false;
+    };
+  }, [reportId]);
+
+  // Summary counts reconciliation check
+  const stateCounts = useMemo(() => {
+    if (!report) {
+      return {
+        covered: 0,
+        partiallyCovered: 0,
+        notEvidenced: 0,
+        unverified: 0,
+        conflicting: 0,
+        notApplicable: 0,
+        total: 0,
+      };
+    }
+    const r = report as any;
+    return {
+      covered: report.coveredCount ?? r.covered_count ?? r.summary?.reconciled_state_counts?.COVERED ?? 0,
+      partiallyCovered: report.partiallyCoveredCount ?? r.partially_covered_count ?? r.summary?.reconciled_state_counts?.PARTIALLY_COVERED ?? 0,
+      notEvidenced: report.notEvidencedCount ?? r.not_evidenced_count ?? r.summary?.reconciled_state_counts?.NOT_EVIDENCED ?? 0,
+      unverified: report.unverifiedCount ?? r.unverified_count ?? r.summary?.reconciled_state_counts?.UNVERIFIED ?? 0,
+      conflicting: report.conflictingCount ?? r.conflicting_count ?? r.summary?.reconciled_state_counts?.CONFLICTING ?? 0,
+      notApplicable: report.notApplicableCount ?? r.not_applicable_count ?? r.summary?.reconciled_state_counts?.NOT_APPLICABLE ?? 0,
+      total: report.totalRequirements ?? r.total_requirements ?? r.summary?.total_requirements ?? 0,
+    };
+  }, [report]);
+
+  const rawItems: GapReportItem[] = useMemo(() => {
+    if (!report) return [];
+    return report.items || (report as any).gap_items || (report as any).gaps || [];
+  }, [report]);
+
+  // Filtered items (does not mutate total report summary counts)
+  const filteredItems = useMemo(() => {
+    return rawItems.filter((it: any) => {
+      const state = it.gapState || it.reconciled_state || it.gap_state;
+      const necessity = it.necessity || it.requirement_type;
+      const reviewRequired = it.reviewRequired ?? it.review_required ?? (state !== "COVERED");
+
+      if (selectedStateFilter !== "ALL" && state !== selectedStateFilter) {
+        return false;
+      }
+      if (selectedNecessityFilter !== "ALL" && necessity !== selectedNecessityFilter) {
+        return false;
+      }
+      if (onlyReviewRequired && !reviewRequired) {
+        return false;
+      }
+      return true;
+    });
+  }, [rawItems, selectedStateFilter, selectedNecessityFilter, onlyReviewRequired]);
+
+  // Handle JSON Download
+  const handleDownloadJson = async () => {
+    try {
+      setIsDownloadingJson(true);
+      const canonicalData = await fetchCanonicalGapReportJson(reportId);
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
+        JSON.stringify(canonicalData, null, 2)
+      )}`;
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", jsonString);
+      downloadAnchor.setAttribute("download", `gap-report-${reportId}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } catch (err: any) {
+      alert("Failed to download canonical JSON report: " + (err?.message || ""));
+    } finally {
+      setIsDownloadingJson(false);
+    }
+  };
+
+  // Handle Print
+  const handlePrint = () => {
+    window.print();
+  };
+
+  if (isLoading) {
+    return (
+      <div className="gap-report-view-container" aria-busy="true">
+        <div className="empty-state-card" style={{ padding: "48px 24px" }}>
+          <Icon name="refresh" size={24} className="spin-icon" />
+          <p style={{ marginTop: "12px", color: "var(--text-secondary)" }}>
+            Loading requirement gap report…
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !report) {
+    return (
+      <div className="gap-report-view-container">
+        <div className="gap-report-header">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onNavigateBack}
+            aria-label="Back to candidate comparison"
+          >
+            <Icon name="arrow-left" size={14} />
+            <span>Back to candidate comparison</span>
+          </button>
+        </div>
+        <div className="conflict-alert-card" role="alert" style={{ marginTop: "16px" }}>
+          <div className="conflict-icon-wrap">
+            <Icon name="alert-circle" size={18} />
+          </div>
+          <div>
+            <h4 className="conflict-title">Report Unavailable</h4>
+            <p className="conflict-desc">
+              {error || "Requirement gap report could not be found."}
+            </p>
+            <button
+              type="button"
+              className="btn btn-secondary btn-xs"
+              style={{ marginTop: "8px" }}
+              onClick={onNavigateBack}
+            >
+              Return to comparison
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const formattedDate = new Date(report.evaluationDate || report.createdAt).toLocaleDateString(
+    undefined,
+    { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+  );
+
+  // Canonical Evidence Summary counts
+  const evidenceSummary = report.evidence_summary;
+  const reqTotal = evidenceSummary ? evidenceSummary.required_total : (report.mustHaveTotalCount ?? 0);
+  const reqEvidenced = evidenceSummary ? evidenceSummary.required_evidence_found : (report.mustHaveEvidencedCount ?? 0);
+  const prefTotal = evidenceSummary ? evidenceSummary.preferred_total : 0;
+  const prefEvidenced = evidenceSummary ? evidenceSummary.preferred_evidence_found : 0;
+
+  return (
+    <div className="gap-report-view-container" aria-label="Resume Evidence &amp; Criteria Comparison">
+      {/* 1. Header and Actions Row */}
+      <div className="gap-report-header">
+        <div className="gap-report-title-wrap">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm no-print"
+            onClick={onNavigateBack}
+            aria-label="Back to candidate comparison"
+          >
+            <Icon name="arrow-left" size={14} />
+            <span>Back to comparison</span>
+          </button>
+          <div>
+            <h2 className="gap-report-title">
+              Resume Evidence Report
+            </h2>
+            <p style={{ fontSize: "12px", color: "var(--text-secondary)", margin: "2px 0 0 0" }}>
+              {candidateName || `Candidate #${report.profileId.substring(0, 8)}`} &bull; {jobTitle || `Job #${report.jobId.substring(0, 8)}`} (Rev #{report.revision})
+            </p>
+          </div>
+        </div>
+
+        <div className="gap-filter-group no-print">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleDownloadJson}
+            disabled={isDownloadingJson}
+            aria-label="Download Canonical Report JSON"
+          >
+            <Icon name="download" size={13} />
+            <span>{isDownloadingJson ? "Exporting…" : "Download JSON"}</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handlePrint}
+            aria-label="Print Report"
+          >
+            <Icon name="printer" size={13} />
+            <span>Print report</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Legacy Report Notice Banner */}
+      {report.legacyReportNotice && (
+        <div className="conflict-alert-card" role="note" style={{ borderLeft: "4px solid var(--accent-primary)" }}>
+          <div className="conflict-icon-wrap" style={{ color: "var(--accent-primary)" }}>
+            <Icon name="info" size={18} />
+          </div>
+          <div>
+            <h4 className="conflict-title" style={{ color: "var(--text-primary)" }}>Legacy Report Version</h4>
+            <p className="conflict-desc">
+              {report.legacyReportNotice}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Compact Information Banner with 'How this works' Disclosure */}
+      <div className="gap-limitation-banner" role="note" aria-label="Advisory Notice" style={{ flexDirection: "column", gap: "8px" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+          <div className="gap-limitation-icon">
+            <Icon name="info" size={16} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span>
+              Compares documented resume evidence with this job’s criteria. Missing resume evidence does not mean the candidate lacks the qualification.
+            </span>{" "}
+            <button
+              type="button"
+              className="btn-link-action"
+              onClick={() => setShowHowItWorks((prev) => !prev)}
+              aria-expanded={showHowItWorks}
+              style={{ fontSize: "12px", marginLeft: "6px" }}
+            >
+              {showHowItWorks ? "Hide details ▲" : "How this works ▼"}
+            </button>
+          </div>
+        </div>
+
+        {showHowItWorks && (
+          <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px solid var(--gap-partial-border)", fontSize: "12px", lineHeight: "1.5", color: "var(--text-secondary)" }}>
+            This requirement-evidence report compares documented professional evidence against recruiter-approved job criteria based on an immutable Phase 2C match result. It is an advisory diagnostic to guide human review and interview preparation—not an automated hiring or employment decision. Missing evidence in a resume indicates that the criterion was not documented in the provided profile; it does not prove a candidate lacks the skill.
+          </div>
+        )}
+      </div>
+
+      {/* 3. Default Summary Cards: Resume match, Required evidence, Preferred evidence */}
+      <div className="gap-metrics-grid" aria-label="Summary Metrics">
+        <div className="gap-metric-card">
+          <span className="gap-metric-label">Resume match</span>
+          <span className="gap-metric-value">
+            {report.compatibilityScore !== null && report.compatibilityScore !== undefined
+              ? `${Math.round(report.compatibilityScore)}%`
+              : "Recorded"}
+          </span>
+          <span className="gap-metric-subtext">Overall criteria match percentage</span>
+        </div>
+
+        <div className="gap-metric-card">
+          <span className="gap-metric-label">Required evidence</span>
+          <span className="gap-metric-value">
+            {reqEvidenced} of {reqTotal}
+          </span>
+          <span className="gap-metric-subtext">
+            {reqEvidenced === reqTotal ? "All required criteria have supporting evidence" : `${reqTotal - reqEvidenced} required criteria lack full evidence`}
+          </span>
+        </div>
+
+        {prefTotal > 0 && (
+          <div className="gap-metric-card">
+            <span className="gap-metric-label">Preferred evidence</span>
+            <span className="gap-metric-value">
+              {prefEvidenced} of {prefTotal}
+            </span>
+            <span className="gap-metric-subtext">Supporting evidence for optional criteria</span>
+          </div>
+        )}
+      </div>
+
+      {/* 4. Collapsed 'Analysis details' Panel */}
+      <div className="gap-breakdown-card" aria-label="Analysis Details Panel">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h4 className="gap-breakdown-title" style={{ display: "inline-block", marginRight: "10px" }}>
+              Technical Analysis Details
+            </h4>
+            <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+              Extraction confidence: <strong>{report.confidenceTier || evidenceSummary?.extraction_confidence || "MEDIUM"}</strong>
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn-link-action"
+            onClick={() => setShowAnalysisDetails((prev) => !prev)}
+            aria-expanded={showAnalysisDetails}
+            style={{ fontSize: "12px" }}
+          >
+            {showAnalysisDetails ? "Hide analysis details ▲" : "View analysis details ▼"}
+          </button>
+        </div>
+
+        {showAnalysisDetails && (
+          <div style={{ marginTop: "10px", paddingTop: "10px", borderTop: "1px solid var(--border-subtle)", display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "12px", color: "var(--text-secondary)" }}>
+              <span>
+                Extraction confidence:{" "}
+                <strong title="How confidently the system extracted and connected evidence from the uploaded resume. This is not a candidate rating." style={{ cursor: "help" }}>
+                  {report.confidenceTier || evidenceSummary?.extraction_confidence || "MEDIUM"}
+                </strong>
+              </span>
+              <span>Total criteria: <strong>{report.totalRequirements}</strong></span>
+              <span>Report ID: <code>{report.reportId.substring(0, 8)}</code></span>
+              <span>Run ID: <code>{report.matchRunId.substring(0, 8)}</code></span>
+              <span>Evaluated: <strong>{formattedDate}</strong></span>
+              <span>Schema version: <strong>{report.gapSchemaVersion}</strong></span>
+              <span>Policy version: <strong>{report.gapPolicyVersion}</strong></span>
+              <span>Algorithm version: <strong>{report.matcherAlgorithmVersion}</strong></span>
+              <span>Rule version: <strong>{report.matchingRuleVersion}</strong></span>
+            </div>
+
+            {/* Non-zero state chips only */}
+            <div className="gap-breakdown-chips" style={{ marginTop: "6px" }}>
+              {stateCounts.covered > 0 && (
+                <span className="gap-state-chip chip-covered">
+                  <Icon name="check" size={13} />
+                  <span>Evidence found: {stateCounts.covered}</span>
+                </span>
+              )}
+              {stateCounts.partiallyCovered > 0 && (
+                <span className="gap-state-chip chip-partial">
+                  <Icon name="clock" size={13} />
+                  <span>Partial evidence found: {stateCounts.partiallyCovered}</span>
+                </span>
+              )}
+              {stateCounts.notEvidenced > 0 && (
+                <span className="gap-state-chip chip-not-evidenced">
+                  <Icon name="file-text" size={13} />
+                  <span>Not found in resume: {stateCounts.notEvidenced}</span>
+                </span>
+              )}
+              {stateCounts.unverified > 0 && (
+                <span className="gap-state-chip chip-unverified">
+                  <Icon name="shield" size={13} />
+                  <span>Needs verification: {stateCounts.unverified}</span>
+                </span>
+              )}
+              {stateCounts.conflicting > 0 && (
+                <span className="gap-state-chip chip-conflicting">
+                  <Icon name="alert-circle" size={13} />
+                  <span>Conflicting resume evidence: {stateCounts.conflicting}</span>
+                </span>
+              )}
+              {stateCounts.notApplicable > 0 && (
+                <span className="gap-state-chip chip-not-applicable">
+                  <Icon name="info" size={13} />
+                  <span>Excluded from score: {stateCounts.notApplicable}</span>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 5. Filter Controls */}
+      <div className="gap-filters-bar no-print" aria-label="Filter Controls">
+        <div className="gap-filter-group">
+          <label htmlFor="gap-state-select" className="gap-filter-label">Assessment:</label>
+          <select
+            id="gap-state-select"
+            className="form-select-sm"
+            value={selectedStateFilter}
+            onChange={(e) => setSelectedStateFilter(e.target.value)}
+          >
+            <option value="ALL">All Assessments ({report.totalRequirements})</option>
+            {stateCounts.covered > 0 && <option value="COVERED">Evidence found ({stateCounts.covered})</option>}
+            {stateCounts.partiallyCovered > 0 && <option value="PARTIALLY_COVERED">Partial evidence found ({stateCounts.partiallyCovered})</option>}
+            {stateCounts.notEvidenced > 0 && <option value="NOT_EVIDENCED">Not found in resume ({stateCounts.notEvidenced})</option>}
+            {stateCounts.unverified > 0 && <option value="UNVERIFIED">Needs verification ({stateCounts.unverified})</option>}
+            {stateCounts.conflicting > 0 && <option value="CONFLICTING_REVIEW_REQUIRED">Conflicting resume evidence ({stateCounts.conflicting})</option>}
+            {stateCounts.notApplicable > 0 && <option value="NOT_APPLICABLE">Excluded from score ({stateCounts.notApplicable})</option>}
+          </select>
+        </div>
+
+        <div className="gap-filter-group">
+          <label htmlFor="gap-necessity-select" className="gap-filter-label">Requirement type:</label>
+          <select
+            id="gap-necessity-select"
+            className="form-select-sm"
+            value={selectedNecessityFilter}
+            onChange={(e) => setSelectedNecessityFilter(e.target.value)}
+          >
+            <option value="ALL">All Criteria</option>
+            <option value="MUST_HAVE">Required Only</option>
+            <option value="PREFERRED">Preferred Only</option>
+          </select>
+        </div>
+
+        <div className="gap-filter-group">
+          <label className="checkbox-item-label">
+            <input
+              type="checkbox"
+              checked={onlyReviewRequired}
+              onChange={(e) => setOnlyReviewRequired(e.target.checked)}
+            />
+            <span>Needs Verification Only</span>
+          </label>
+        </div>
+      </div>
+
+      {/* 6. Simplified 4-Column Table: Requirement, Resume evidence, Assessment, Details */}
+      <div className="gap-table-card">
+        {filteredItems.length === 0 ? (
+          <div className="empty-state-card" style={{ padding: "36px 16px" }}>
+            <p style={{ color: "var(--text-secondary)", margin: 0 }}>
+              No criteria match the selected filters.
+            </p>
+          </div>
+        ) : (
+          <table className="gap-items-table" aria-label="Resume Evidence &amp; Criteria Table">
+            <thead>
+              <tr>
+                <th style={{ width: "30%" }}>Requirement</th>
+                <th style={{ width: "28%" }}>Resume evidence</th>
+                <th style={{ width: "22%" }}>Assessment</th>
+                <th style={{ width: "20%", textAlign: "right" }}>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredItems.map((item, index) => {
+                const isRequired = item.necessity === "MUST_HAVE";
+                const rowKey = item.itemId || item.requirementId || `row-${index}`;
+                const isExpanded = expandedRows.has(rowKey);
+
+                // Domain assessment mapping
+                let assessmentLabel = "Evidence found";
+                let chipClass = "chip-covered";
+                if (item.gapState === "PARTIALLY_COVERED") {
+                  assessmentLabel = "Partial evidence found";
+                  chipClass = "chip-partial";
+                } else if (item.gapState === "NOT_EVIDENCED") {
+                  assessmentLabel = "Not found in resume";
+                  chipClass = "chip-not-evidenced";
+                } else if (item.gapState === "UNVERIFIED") {
+                  assessmentLabel = "Needs verification";
+                  chipClass = "chip-unverified";
+                } else if (item.gapState === "CONFLICTING_REVIEW_REQUIRED") {
+                  assessmentLabel = "Conflicting resume evidence";
+                  chipClass = "chip-conflicting";
+                } else if (item.gapState === "NOT_APPLICABLE") {
+                  assessmentLabel = "Excluded from score";
+                  chipClass = "chip-not-applicable";
+                }
+
+                const reqName = item.requirementName || (item as any).requirement_name || item.category || "Requirement";
+                const categoryLabel = item.category ? `${item.category.charAt(0).toUpperCase()}${item.category.slice(1).toLowerCase()}` : "Skill";
+                const prioLabel = item.priority ? `${item.priority.charAt(0).toUpperCase()}${item.priority.slice(1).toLowerCase()}` : "Normal";
+
+                // Resume evidence cell display
+                let docDisplay = item.documentedValue || (item as any).documented_value;
+                if (!docDisplay || docDisplay.trim().toLowerCase() in { "none documented": true, "none documented.": true, "no usable duration found": true }) {
+                  if (item.gapState === "COVERED") {
+                    docDisplay = "Documented and evidenced";
+                  } else {
+                    docDisplay = "Not found in uploaded resume";
+                  }
+                }
+
+                const expertsCount = (item.evidenceReferences || []).length;
+                const guidance = isRequired && item.gapState === "NOT_EVIDENCED"
+                  ? "Verify this criterion during review."
+                  : null;
+
+                return (
+                  <React.Fragment key={rowKey}>
+                    <tr>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: "13px" }}>
+                            {reqName}
+                          </span>
+                          <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                            {isRequired ? "Required" : "Preferred"} &bull; {categoryLabel} &bull; Priority: {prioLabel}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "3px", fontSize: "12px" }}>
+                          <span style={{ color: item.gapState === "NOT_EVIDENCED" ? "var(--text-secondary)" : "var(--text-primary)" }}>
+                            {docDisplay}
+                          </span>
+                          {item.measurableShortfallValue !== null && item.measurableShortfallValue !== undefined && (
+                            <span style={{ fontSize: "11px", color: "var(--gap-conflicting)" }}>
+                              {item.measurableShortfallValue} {item.shortfallUnit || "months"} difference to verify
+                            </span>
+                          )}
+                          {guidance && (
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                              {guidance}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <span className={`gap-state-chip ${chipClass}`} style={{ width: "fit-content" }}>
+                            {assessmentLabel}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {expertsCount > 0 ? (
+                          <button
+                            type="button"
+                            className="gap-evidence-btn"
+                            onClick={() => toggleRowExpanded(rowKey)}
+                            aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? "Collapse" : "View"} ${expertsCount} evidence excerpt${expertsCount === 1 ? "" : "s"}`}
+                          >
+                            <Icon name="file-text" size={12} />
+                            <span>
+                              {isExpanded ? "Hide experts ▲" : `View ${expertsCount} evidence excerpt${expertsCount === 1 ? "" : "s"} ▼`}
+                            </span>
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>No evidence excerpt</span>
+                        )}
+                      </td>
+                    </tr>
+
+                    {/* Expandable Evidence Excerpt Details */}
+                    {isExpanded && expertsCount > 0 && (
+                      <tr style={{ backgroundColor: "var(--bg-surface-subtle)" }}>
+                        <td colSpan={4} style={{ padding: "12px 18px", borderBottom: "1px solid var(--border-medium)" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px" }}>
+                            <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                              Document experts &amp; Citations ({expertsCount}):
+                            </div>
+                            <ul style={{ listStyle: "disc", paddingLeft: "20px", display: "flex", flexDirection: "column", gap: "6px", margin: 0 }}>
+                              {item.evidenceReferences.map((ref, rIdx) => (
+                                <li key={rIdx} style={{ color: "var(--text-primary)", wordBreak: "break-all" }}>
+                                  <code style={{ fontSize: "11px", backgroundColor: "var(--bg-surface)", border: "1px solid var(--border-subtle)", padding: "2px 6px", borderRadius: "4px" }}>
+                                    {ref}
+                                  </code>
+                                </li>
+                              ))}
+                            </ul>
+                            <div style={{ marginTop: "4px", fontSize: "11px", color: "var(--text-secondary)" }}>
+                              {item.recruiterWording}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}

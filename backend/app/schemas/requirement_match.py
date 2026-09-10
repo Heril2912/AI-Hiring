@@ -37,6 +37,7 @@ class MatchComparisonMethod(str, enum.Enum):
 
 class RequirementMatch(FrozenSchema):
     requirement_id: UUID
+    requirement_name: str = Field(default="Requirement", min_length=1)
     display_order: int = Field(ge=0)
     category: RequirementCategory
     result_state: MatchResultState

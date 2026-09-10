@@ -12,6 +12,7 @@ import { ExtractionReview, ExtractionResultData } from "./components/ExtractionR
 import { JobsDirectory } from "./components/jobs/JobsDirectory";
 import { JobEditor } from "./components/jobs/JobEditor";
 import { CandidateComparisonView } from "./components/jobs/CandidateComparisonView";
+import { RequirementGapReportView } from "./components/jobs/RequirementGapReportView";
 import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
@@ -27,8 +28,9 @@ function AuthenticatedApp() {
     role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews"
   );
   const [activeView, setActiveView] = useState<
-    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "candidates" | "upload" | "profile" | "extraction"
+    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction"
   >("candidates");
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
 
   // Health check
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
@@ -308,6 +310,18 @@ function AuthenticatedApp() {
                   revision={comparisonParams.revision}
                   requirementsCount={comparisonParams.requirementsCount}
                   onNavigateBack={() => setActiveView("edit_job")}
+                  onOpenGapReport={(reportId) => {
+                    setSelectedReportId(reportId);
+                    setActiveView("gap_report");
+                  }}
+                />
+              )}
+
+              {activeView === "gap_report" && selectedReportId && (
+                <RequirementGapReportView
+                  reportId={selectedReportId}
+                  jobTitle={comparisonParams?.jobTitle}
+                  onNavigateBack={() => setActiveView("compare_candidates")}
                 />
               )}
 

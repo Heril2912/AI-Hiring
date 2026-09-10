@@ -17,6 +17,7 @@ from app.schemas.match_run import (
     MatchRunSummaryResponse,
     PaginatedMatchResultsResponse,
 )
+from app.services.canonical_summary import compute_canonical_evidence_summary
 from app.services.explanation import generate_match_explanation
 from app.services.match_orchestration import (
     DuplicateCandidateError,
@@ -228,6 +229,16 @@ async def list_match_results(
         items = []
         for r in records:
             decomp = r.score_decomposition or {}
+            req_contribs = decomp.get("requirement_contributions", [])
+            evidence_summary = compute_canonical_evidence_summary(
+                requirement_contributions=req_contribs,
+                extraction_confidence=r.confidence_tier,
+            )
+            mh_total = evidence_summary.required_total if evidence_summary else 0
+            mh_evidenced = evidence_summary.required_evidence_found if evidence_summary else 0
+            not_ev_cnt = evidence_summary.overall_not_found if evidence_summary else 0
+            needs_conf_cnt = evidence_summary.required_needs_verification if evidence_summary else 0
+
             items.append(
                 MatchResultRankingItemResponse(
                     result_id=r.result_id,
@@ -242,6 +253,11 @@ async def list_match_results(
                     confidence_tier=r.confidence_tier,
                     warning_count=r.warning_count,
                     must_have_warning_count=r.must_have_warning_count,
+                    must_have_total_count=mh_total,
+                    must_have_evidenced_count=mh_evidenced,
+                    not_evidenced_count=not_ev_cnt,
+                    needs_confirmation_count=needs_conf_cnt,
+                    evidence_summary=evidence_summary,
                     component_scores=decomp.get("component_scores", {}),
                     confidence_diagnostics=decomp.get("confidence_diagnostics", {}),
                     must_have_warnings=decomp.get("must_have_warnings", []),
@@ -288,6 +304,10 @@ async def get_match_result_detail(
             db=db,
         )
         decomp = r.score_decomposition or {}
+        evidence_summary = compute_canonical_evidence_summary(
+            requirement_contributions=decomp.get("requirement_contributions", []),
+            extraction_confidence=r.confidence_tier,
+        )
         return MatchResultDetailResponse(
             result_id=r.result_id,
             run_id=r.run_id,
@@ -301,6 +321,7 @@ async def get_match_result_detail(
             confidence_tier=r.confidence_tier,
             warning_count=r.warning_count,
             must_have_warning_count=r.must_have_warning_count,
+            evidence_summary=evidence_summary,
             component_scores=decomp.get("component_scores", {}),
             confidence_diagnostics=decomp.get("confidence_diagnostics", {}),
             must_have_warnings=decomp.get("must_have_warnings", []),

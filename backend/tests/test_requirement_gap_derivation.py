@@ -240,7 +240,7 @@ def test_experience_shortfall_calculated_correctly():
     assert gap.measurable_shortfall_value == 24.0
     assert gap.shortfall_unit == "months"
     assert gap.shortfall_reason_code == "DURATION_BELOW_THRESHOLD"
-    assert "24-month shortfall against the configured 48-month threshold" in gap.recruiter_wording
+    assert "24-month difference to verify against the configured 48-month target" in gap.recruiter_wording
     assert gap.review_action_code == GapReviewActionCode.VERIFY_THRESHOLD_SHORTFALL
 
 

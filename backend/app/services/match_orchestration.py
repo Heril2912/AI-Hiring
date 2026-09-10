@@ -427,15 +427,11 @@ def orchestrate_match_run(
     )
     existing_run = db.execute(stmt_existing).scalar_one_or_none()
 
-    # 7. Evaluation Date validation
     now = datetime.now(timezone.utc)
     if evaluation_date is None:
         if existing_run is not None:
-            eval_date = (
-                existing_run.evaluation_date.replace(tzinfo=timezone.utc)
-                if existing_run.evaluation_date.tzinfo is None
-                else existing_run.evaluation_date
-            )
+            # Re-use existing_run evaluation_date verbatim to ensure fingerprint consistency on retry
+            eval_date = existing_run.evaluation_date
         else:
             eval_date = now
     else:

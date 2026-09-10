@@ -99,6 +99,11 @@ class MatchResultRankingItemResponse(StrictSchema):
     confidence_tier: str
     warning_count: int
     must_have_warning_count: int
+    must_have_total_count: int = 0
+    must_have_evidenced_count: int = 0
+    not_evidenced_count: int = 0
+    needs_confirmation_count: int = 0
+    evidence_summary: Optional[Any] = None
     component_scores: Dict[str, Any]
     confidence_diagnostics: Dict[str, Any]
     must_have_warnings: List[Dict[str, Any]]
@@ -139,6 +144,7 @@ class MatchResultDetailResponse(StrictSchema):
     confidence_tier: str
     warning_count: int
     must_have_warning_count: int
+    evidence_summary: Optional[Any] = None
     component_scores: Dict[str, Any]
     confidence_diagnostics: Dict[str, Any]
     must_have_warnings: List[Dict[str, Any]]

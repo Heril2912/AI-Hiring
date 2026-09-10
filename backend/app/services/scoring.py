@@ -162,6 +162,7 @@ def calculate_compatibility_score(
             contributions.append(
                 RequirementContribution(
                     requirement_id=m.requirement_id,
+                    requirement_name=getattr(m, "requirement_name", "Requirement"),
                     display_order=m.display_order,
                     category=m.category,
                     necessity=m.necessity,
@@ -173,6 +174,8 @@ def calculate_compatibility_score(
                     match_value=0.0,
                     weighted_contribution=0.0,
                     evidence_references=m.evidence_references,
+                    expected_value=m.expected_value,
+                    observed_value=m.observed_value,
                     comparison_method=m.comparison_method,
                     reason_codes=m.reason_codes,
                     review_recommended=m.review_recommended,
@@ -196,6 +199,7 @@ def calculate_compatibility_score(
         contributions.append(
             RequirementContribution(
                 requirement_id=m.requirement_id,
+                requirement_name=getattr(m, "requirement_name", "Requirement"),
                 display_order=m.display_order,
                 category=m.category,
                 necessity=m.necessity,
@@ -207,6 +211,8 @@ def calculate_compatibility_score(
                 match_value=m.match_value,
                 weighted_contribution=float(req_contribution.quantize(DECIMAL_CALCULATION_PRECISION, rounding=ROUND_HALF_UP)),
                 evidence_references=m.evidence_references,
+                expected_value=m.expected_value,
+                observed_value=m.observed_value,
                 comparison_method=m.comparison_method,
                 reason_codes=m.reason_codes,
                 review_recommended=m.review_recommended,

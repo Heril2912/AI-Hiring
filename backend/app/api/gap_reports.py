@@ -15,6 +15,7 @@ from app.schemas.requirement_gap import (
     GapReportItemResponse,
     GapReportSummaryResponse,
 )
+from app.services.canonical_summary import compute_canonical_evidence_summary
 from app.services.gap_report_service import (
     GapReportNotFoundError,
     GapReportServiceError,
@@ -154,33 +155,64 @@ async def get_gap_report(
     try:
         report_rec = get_gap_report_for_actor(report_id=report_id, actor=actor, db=db)
         items = sorted(report_rec.items, key=lambda it: it.display_order)
+        must_have_total = 0
+        must_have_evidenced = 0
+        is_legacy = (
+            report_rec.gap_policy_version != "phase2d5_gap_v1"
+            or report_rec.gap_schema_version != "1.1.0"
+        )
 
-        item_responses = [
-            GapReportItemResponse(
-                item_id=it.item_id,
-                report_id=it.report_id,
-                requirement_id=it.requirement_id,
-                display_order=it.display_order,
-                category=it.category,
-                necessity=it.necessity,
-                priority=it.priority,
-                source_match_state=it.source_match_state,
-                source_match_value=it.source_match_value,
-                gap_state=it.gap_state,
-                required_value=it.required_value,
-                documented_value=it.documented_value,
-                measurable_shortfall_value=it.measurable_shortfall_value,
-                shortfall_unit=it.shortfall_unit,
-                shortfall_reason_code=it.shortfall_reason_code,
-                evidence_references=it.evidence_references,
-                review_required=it.review_required,
-                review_action_code=it.review_action_code,
-                must_have_warning_reference=it.must_have_warning_reference,
-                recruiter_wording=it.recruiter_wording,
-                created_at=it.created_at,
+        item_responses = []
+        for it in items:
+            if it.necessity == it.necessity.MUST_HAVE:
+                must_have_total += 1
+                if it.gap_state == it.gap_state.COVERED:
+                    must_have_evidenced += 1
+
+            req_name = getattr(it, "requirement_name", None) or f"{it.category.value.capitalize()} Requirement"
+            doc_val = it.documented_value
+            if it.gap_state == it.gap_state.COVERED and (not doc_val or doc_val.strip().lower() in {"none documented", "none documented."}):
+                is_legacy = True
+                doc_val = "Evidence on file (legacy record)"
+
+            item_responses.append(
+                GapReportItemResponse(
+                    item_id=it.item_id,
+                    report_id=it.report_id,
+                    requirement_id=it.requirement_id,
+                    requirement_name=req_name,
+                    display_order=it.display_order,
+                    category=it.category,
+                    necessity=it.necessity,
+                    priority=it.priority,
+                    source_match_state=it.source_match_state,
+                    source_match_value=it.source_match_value,
+                    gap_state=it.gap_state,
+                    required_value=it.required_value,
+                    documented_value=doc_val,
+                    measurable_shortfall_value=it.measurable_shortfall_value,
+                    shortfall_unit=it.shortfall_unit,
+                    shortfall_reason_code=it.shortfall_reason_code,
+                    evidence_references=it.evidence_references,
+                    review_required=it.review_required,
+                    review_action_code=it.review_action_code,
+                    must_have_warning_reference=it.must_have_warning_reference,
+                    recruiter_wording=it.recruiter_wording,
+                    created_at=it.created_at,
+                )
             )
-            for it in items
-        ]
+
+        legacy_notice = (
+            "This is an immutable historical report evaluated under an earlier policy version. "
+            "Some requirement names or details may reflect legacy schema standards. Run a new comparison to view updated results."
+            if is_legacy
+            else None
+        )
+
+        evidence_summary = compute_canonical_evidence_summary(
+            requirement_contributions=items,
+            extraction_confidence=report_rec.match_result.confidence_tier if report_rec.match_result else "MEDIUM",
+        )
 
         return GapReportDetailResponse(
             report_id=report_rec.report_id,
@@ -210,6 +242,12 @@ async def get_gap_report(
             conflicting_count=report_rec.conflicting_count,
             not_applicable_count=report_rec.not_applicable_count,
             must_have_warning_count=report_rec.must_have_warning_count,
+            must_have_total_count=evidence_summary.required_total if evidence_summary else must_have_total,
+            must_have_evidenced_count=evidence_summary.required_evidence_found if evidence_summary else must_have_evidenced,
+            evidence_summary=evidence_summary,
+            compatibility_score=float(report_rec.match_result.display_compatibility_score) if report_rec.match_result else None,
+            confidence_tier=report_rec.match_result.confidence_tier if report_rec.match_result else None,
+            legacy_report_notice=legacy_notice,
             created_at=report_rec.created_at,
             items=item_responses,
         )
@@ -238,32 +276,40 @@ async def get_gap_report_items(
         report_rec = get_gap_report_for_actor(report_id=report_id, actor=actor, db=db)
         items = sorted(report_rec.items, key=lambda it: it.display_order)
 
-        return [
-            GapReportItemResponse(
-                item_id=it.item_id,
-                report_id=it.report_id,
-                requirement_id=it.requirement_id,
-                display_order=it.display_order,
-                category=it.category,
-                necessity=it.necessity,
-                priority=it.priority,
-                source_match_state=it.source_match_state,
-                source_match_value=it.source_match_value,
-                gap_state=it.gap_state,
-                required_value=it.required_value,
-                documented_value=it.documented_value,
-                measurable_shortfall_value=it.measurable_shortfall_value,
-                shortfall_unit=it.shortfall_unit,
-                shortfall_reason_code=it.shortfall_reason_code,
-                evidence_references=it.evidence_references,
-                review_required=it.review_required,
-                review_action_code=it.review_action_code,
-                must_have_warning_reference=it.must_have_warning_reference,
-                recruiter_wording=it.recruiter_wording,
-                created_at=it.created_at,
+        result_items = []
+        for it in items:
+            req_name = getattr(it, "requirement_name", None) or f"{it.category.value.capitalize()} Requirement"
+            doc_val = it.documented_value
+            if it.gap_state == it.gap_state.COVERED and (not doc_val or doc_val.strip().lower() in {"none documented", "none documented."}):
+                doc_val = "Evidence on file (legacy record)"
+
+            result_items.append(
+                GapReportItemResponse(
+                    item_id=it.item_id,
+                    report_id=it.report_id,
+                    requirement_id=it.requirement_id,
+                    requirement_name=req_name,
+                    display_order=it.display_order,
+                    category=it.category,
+                    necessity=it.necessity,
+                    priority=it.priority,
+                    source_match_state=it.source_match_state,
+                    source_match_value=it.source_match_value,
+                    gap_state=it.gap_state,
+                    required_value=it.required_value,
+                    documented_value=doc_val,
+                    measurable_shortfall_value=it.measurable_shortfall_value,
+                    shortfall_unit=it.shortfall_unit,
+                    shortfall_reason_code=it.shortfall_reason_code,
+                    evidence_references=it.evidence_references,
+                    review_required=it.review_required,
+                    review_action_code=it.review_action_code,
+                    must_have_warning_reference=it.must_have_warning_reference,
+                    recruiter_wording=it.recruiter_wording,
+                    created_at=it.created_at,
+                )
             )
-            for it in items
-        ]
+        return result_items
 
     except GapReportNotFoundError as rne:
         raise HTTPException(

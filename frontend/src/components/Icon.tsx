@@ -36,6 +36,9 @@ export type IconName =
   | "award"
   | "layers"
   | "external-link"
+  | "download"
+  | "printer"
+  | "alert-circle"
   | "info";
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
@@ -286,6 +289,30 @@ export function Icon({ name, size = 18, className = "", "aria-label": ariaLabel,
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
             <polyline points="15 3 21 3 21 9" />
             <line x1="10" x2="21" y1="14" y2="3" />
+          </>
+        );
+      case "download":
+        return (
+          <>
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </>
+        );
+      case "printer":
+        return (
+          <>
+            <polyline points="6 9 6 2 18 2 18 9" />
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+            <rect x="6" y="14" width="12" height="8" />
+          </>
+        );
+      case "alert-circle":
+        return (
+          <>
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
           </>
         );
       case "info":
