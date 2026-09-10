@@ -16,8 +16,27 @@ import { RequirementGapReportView } from "./components/jobs/RequirementGapReport
 import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
+import { validateInternalReturnUrl, ComparisonNavigationState } from "./utils/navigation";
+
+// Re-export validation utility for direct callers and test assertions
+export { validateInternalReturnUrl };
 
 type ConnectionState = "checking" | "connected" | "unavailable";
+
+export interface ComparisonParamsState {
+  jobId: string;
+  jobTitle: string;
+  jobVersionId: string;
+  revision: number;
+  requirementsCount: number;
+  runId?: string;
+  searchQuery?: string;
+  resultsSearch?: string;
+  page?: number;
+  sortField?: "rank" | "score" | "name" | "evidence";
+  sortDirection?: "asc" | "desc";
+  selectedProfileIds?: string[];
+}
 
 function AuthenticatedApp() {
   const { user } = useAuth();
@@ -40,13 +59,7 @@ function AuthenticatedApp() {
   const [isLoadingJobs, setIsLoadingJobs] = useState<boolean>(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [comparisonParams, setComparisonParams] = useState<{
-    jobId: string;
-    jobTitle: string;
-    jobVersionId: string;
-    revision: number;
-    requirementsCount: number;
-  } | null>(null);
+  const [comparisonParams, setComparisonParams] = useState<ComparisonParamsState | null>(null);
 
   // Candidates state
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
@@ -56,14 +69,44 @@ function AuthenticatedApp() {
   const [isLoadingProfile, setIsLoadingProfile] = useState<boolean>(false);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
 
+  // Initialize from URL query parameters if present
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const viewParam = searchParams.get("view");
+      const reportIdParam = searchParams.get("reportId");
+      const jobIdParam = searchParams.get("jobId");
+      const runIdParam = searchParams.get("runId");
+
+      if (viewParam === "gap_report" && reportIdParam) {
+        setSelectedReportId(reportIdParam);
+        setActiveView("gap_report");
+        setActiveNavTab("jobs");
+      } else if (viewParam === "compare_candidates" && jobIdParam) {
+        setComparisonParams({
+          jobId: jobIdParam,
+          jobTitle: searchParams.get("jobTitle") || "Job Requisition",
+          jobVersionId: searchParams.get("jobVersionId") || "",
+          revision: Number(searchParams.get("revision")) || 1,
+          requirementsCount: Number(searchParams.get("requirementsCount")) || 0,
+          runId: runIdParam || undefined,
+        });
+        setActiveView("compare_candidates");
+        setActiveNavTab("jobs");
+      }
+    } catch {
+      // Ignore URL parsing errors in test environments
+    }
+  }, []);
+
   useEffect(() => {
     const defaultTab = role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews";
     setActiveNavTab(defaultTab);
-    if (role === "RECRUITER") {
+    if (role === "RECRUITER" && activeView === "candidates") {
       setActiveView("candidates");
     }
   }, [role]);
-
 
   useEffect(() => {
     const controller = new AbortController();
@@ -309,8 +352,19 @@ function AuthenticatedApp() {
                   jobVersionId={comparisonParams.jobVersionId}
                   revision={comparisonParams.revision}
                   requirementsCount={comparisonParams.requirementsCount}
+                  initialSearchQuery={comparisonParams.searchQuery}
+                  initialSelectedProfileIds={comparisonParams.selectedProfileIds}
+                  initialPage={comparisonParams.page}
+                  initialSortField={comparisonParams.sortField}
+                  initialSortDirection={comparisonParams.sortDirection}
                   onNavigateBack={() => setActiveView("edit_job")}
-                  onOpenGapReport={(reportId) => {
+                  onOpenGapReport={(reportId, returnContext) => {
+                    if (returnContext) {
+                      setComparisonParams((prev) => ({
+                        ...prev,
+                        ...returnContext,
+                      }));
+                    }
                     setSelectedReportId(reportId);
                     setActiveView("gap_report");
                   }}
@@ -322,6 +376,17 @@ function AuthenticatedApp() {
                   reportId={selectedReportId}
                   jobTitle={comparisonParams?.jobTitle}
                   onNavigateBack={() => setActiveView("compare_candidates")}
+                  onNavigateBackWithFallback={(fallback) => {
+                    setComparisonParams((prev) => ({
+                      jobId: fallback.jobId,
+                      jobTitle: prev?.jobTitle || `Job #${fallback.jobId.substring(0, 8)}`,
+                      jobVersionId: fallback.jobVersionId,
+                      revision: fallback.revision,
+                      requirementsCount: prev?.requirementsCount || 0,
+                      runId: fallback.runId,
+                    }));
+                    setActiveView("compare_candidates");
+                  }}
                 />
               )}
 
@@ -376,7 +441,7 @@ function AuthenticatedApp() {
 }
 
 function MainContent() {
-  const { status, refreshSession } = useAuth();
+  const { status } = useAuth();
 
   if (status === "RESTORING_SESSION") {
     return (
