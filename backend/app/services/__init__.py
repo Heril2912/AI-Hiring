@@ -191,6 +191,18 @@ from app.services.match_orchestration import (
     orchestrate_match_run,
     record_match_audit_event,
 )
+from app.services.evaluation import (
+    calculate_dataset_ndcg5,
+    calculate_macro_f1,
+    calculate_ndcg_at_k,
+    calculate_requirement_agreement,
+    calculate_reviewer_agreement,
+    calculate_spearman_correlation,
+    calibrate_score_bands_on_development,
+    evaluate_matching_gate,
+    generate_evaluation_markdown_report,
+    map_score_to_relevance_band,
+)
 
 __all__ = [
     "DOCXArchiveLimitExceededError",
@@ -339,6 +351,16 @@ __all__ = [
     "get_match_run_for_actor",
     "list_match_results_for_actor",
     "get_match_result_detail_for_actor",
+    "calculate_macro_f1",
+    "calculate_ndcg_at_k",
+    "calculate_dataset_ndcg5",
+    "calculate_spearman_correlation",
+    "calculate_reviewer_agreement",
+    "calculate_requirement_agreement",
+    "map_score_to_relevance_band",
+    "calibrate_score_bands_on_development",
+    "evaluate_matching_gate",
+    "generate_evaluation_markdown_report",
 ]
 
 
