@@ -89,65 +89,9 @@ export interface ComparisonNavigationState {
   requirementsCount?: number;
   runId?: string;
   searchQuery?: string;
-  resultsSearch?: string;
   page?: number;
   sortField?: "rank" | "score" | "name" | "evidence";
   sortDirection?: "asc" | "desc";
   selectedProfileIds?: string[];
   filterConfidence?: string;
 }
-
-/**
- * Validates that a candidate return URL is an approved internal processed-results route
- * and does not belong to a different job or match run.
- */
-export function validateProcessedResultsReturnUrl(
-  url: string | null | undefined,
-  expectedJobId?: string,
-  expectedRunId?: string
-): string | null {
-  const safeUrl = validateInternalReturnUrl(url);
-  if (!safeUrl) {
-    return null;
-  }
-
-  try {
-    const dummyOrigin = "http://localhost";
-    const parsed = new URL(safeUrl, dummyOrigin);
-
-    // Extract query params
-    const viewParam = parsed.searchParams.get("view");
-    const jobIdParam = parsed.searchParams.get("jobId");
-    const runIdParam = parsed.searchParams.get("runId");
-
-    // Path check: must be root with query or approved job/match route
-    const isApprovedRoute =
-      parsed.pathname === "/" ||
-      parsed.pathname.startsWith("/jobs") ||
-      parsed.pathname.startsWith("/matches");
-
-    if (!isApprovedRoute) {
-      return null;
-    }
-
-    // If query specifies a view, it must be compare_candidates (the processed results view)
-    if (viewParam && viewParam !== "compare_candidates") {
-      return null;
-    }
-
-    // Verify job ID matches if specified in both
-    if (expectedJobId && jobIdParam && jobIdParam !== expectedJobId) {
-      return null;
-    }
-
-    // Verify run ID matches if specified in both
-    if (expectedRunId && runIdParam && runIdParam !== expectedRunId) {
-      return null;
-    }
-
-    return safeUrl;
-  } catch {
-    return null;
-  }
-}
-

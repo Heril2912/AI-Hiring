@@ -106,7 +106,14 @@ from app.schemas.explanation import (
     compute_explanation_checksum,
 )
 from app.schemas.evaluation import (
+    EVALUATION_CALIBRATION_VERSION,
     EVALUATION_MANIFEST_SCHEMA_VERSION,
+    EVALUATION_POLICY_VERSION,
+    AdjudicatedLabel,
+    AdjudicationState,
+    BandCalibrationPolicy,
+    CalibrationRunReport,
+    ClassMetrics,
     EvaluationAccuracyStatus,
     EvaluationErrorCategory,
     EvaluationManifest,
@@ -115,8 +122,13 @@ from app.schemas.evaluation import (
     EvaluationSplit,
     InterRaterAgreementReport,
     MacroF1Report,
+    ManifestExclusion,
     NDCG5Report,
+    RelevanceBand,
     RelevanceLabel,
+    RequirementLevelAgreementReport,
+    ReviewerLabel,
+    ReviewerRequirementLabel,
     SpearmanReport,
     compute_manifest_checksum,
 )
