@@ -328,6 +328,12 @@ class GapReportItemRecord(Base):
         UUID(as_uuid=True),
         nullable=False,
     )
+    requirement_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="Requirement",
+        server_default=text("'Requirement'"),
+    )
     display_order: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

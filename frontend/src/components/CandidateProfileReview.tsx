@@ -1189,7 +1189,7 @@ export function CandidateProfileReview({
                             </button>
                             <button
                               type="button"
-                              className="btn btn-secondary btn-xs btn-danger"
+                              className="btn btn-secondary btn-xs btn-destructive"
                               onClick={() => handleRemoveExperience(i)}
                             >
                               <Icon name="trash" size={12} /> Remove
@@ -1458,7 +1458,7 @@ export function CandidateProfileReview({
                           </button>
                           <button
                             type="button"
-                            className="btn btn-secondary btn-xs btn-danger"
+                            className="btn btn-secondary btn-xs btn-destructive"
                             onClick={() => handleRemoveEducation(i)}
                           >
                             <Icon name="trash" size={12} /> Remove

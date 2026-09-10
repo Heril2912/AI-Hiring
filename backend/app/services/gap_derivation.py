@@ -102,20 +102,20 @@ def _derive_experience_shortfall(
         if m_obs:
             doc_months = int(m_obs.group(1))
 
-    # If state is NOT_EVIDENCED, established zero qualifying evidence
-    if gap_state == RequirementGapState.NOT_EVIDENCED:
-        doc_months = 0
-
+    # Never assume doc_months = 0 when no duration was documented.
+    # If state is NOT_EVIDENCED or doc_months is missing:
     if doc_months is None:
         if gap_state == RequirementGapState.COVERED:
             # Full match established by Phase 2C
             return 0.0, "months", "THRESHOLD_SATISFIED", None
+        # Rule A: Required months, no duration extracted -> return None shortfall, reason DOCUMENTED_DURATION_UNAVAILABLE
         return None, None, "DOCUMENTED_DURATION_UNAVAILABLE", None
 
+    # Both req_months and doc_months are known and comparable
     shortfall = max(req_months - doc_months, 0)
     exact_phrase = None
     if shortfall > 0:
-        exact_phrase = f"Documented experience reflects a {shortfall}-month shortfall against the configured {req_months}-month threshold."
+        exact_phrase = f"{shortfall}-month difference to verify against the configured {req_months}-month target."
         reason_code = "DURATION_BELOW_THRESHOLD"
     else:
         reason_code = "THRESHOLD_SATISFIED"
@@ -231,6 +231,7 @@ def derive_requirement_gap_record(
         scoring_policy_version=source_gap.scoring_policy_version,
         taxonomy_version=source_gap.taxonomy_version,
         requirement_id=source_gap.requirement_id,
+        requirement_name=source_gap.requirement_name,
         display_order=source_gap.display_order,
         category=source_gap.category,
         necessity=source_gap.necessity,

@@ -17,7 +17,7 @@ from app.schemas.requirement_match import (
     MatchResultState,
 )
 
-SCORING_POLICY_VERSION: str = "phase2c3_scoring_v1"
+SCORING_POLICY_VERSION: str = "phase2c4_scoring_v1"
 DECIMAL_CALCULATION_PRECISION: Decimal = Decimal("0.000001")
 DISPLAY_ROUNDING_PRECISION: Decimal = Decimal("0.01")
 
@@ -77,6 +77,7 @@ class ScoringWarning(FrozenSchema):
 
 class RequirementContribution(FrozenSchema):
     requirement_id: UUID
+    requirement_name: str = Field(default="Requirement", min_length=1)
     display_order: int = Field(ge=0)
     category: RequirementCategory
     necessity: RequirementNecessity
@@ -88,6 +89,8 @@ class RequirementContribution(FrozenSchema):
     match_value: float = Field(ge=0.0, le=1.0)
     weighted_contribution: float = Field(ge=0.0, le=100.0)
     evidence_references: List[str] = Field(default_factory=list)
+    expected_value: Optional[str] = None
+    observed_value: Optional[str] = None
     comparison_method: MatchComparisonMethod
     reason_codes: List[str] = Field(default_factory=list)
     review_recommended: bool = False

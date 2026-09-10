@@ -14,9 +14,9 @@ from app.schemas.candidate import StrictSchema
 from app.schemas.matching import FrozenSchema, verify_no_prohibited_keys
 from app.schemas.requirement_match import MatchResultState
 
-GAP_SCHEMA_VERSION: str = "1.0.0"
-GAP_POLICY_VERSION: str = "phase2d2_gap_v1"
-WORDING_TEMPLATE_VERSION: str = "phase2d2_wording_v1"
+GAP_SCHEMA_VERSION: str = "1.1.0"
+GAP_POLICY_VERSION: str = "phase2d5_gap_v1"
+WORDING_TEMPLATE_VERSION: str = "phase2d5_wording_v1"
 
 PROHIBITED_DECISION_PHRASES = [
     "unqualified",
@@ -117,6 +117,7 @@ class RequirementGapRecord(FrozenSchema):
 
     # Requirement Provenance
     requirement_id: UUID
+    requirement_name: str = Field(default="Requirement", min_length=1)
     display_order: int = Field(ge=0)
     category: RequirementCategory
     necessity: RequirementNecessity
@@ -157,14 +158,15 @@ class RequirementGapRecord(FrozenSchema):
             if self.source_match_value > 0.0:
                 raise ValueError("NOT_APPLICABLE gap state must have source_match_value == 0.0.")
 
-        if self.gap_state in {
-            RequirementGapState.COVERED,
-            RequirementGapState.PARTIALLY_COVERED,
-        }:
+        if self.gap_state == RequirementGapState.COVERED:
             if len(self.evidence_references) == 0:
-                raise ValueError(
-                    f"Gap state '{self.gap_state}' must contain qualifying evidence references."
-                )
+                raise ValueError("COVERED gap state must contain at least one valid credited evidence reference.")
+            if not self.documented_value or self.documented_value.strip() == "" or self.documented_value.lower() == "none documented":
+                raise ValueError("COVERED gap state must contain a safe documented-value summary and cannot say 'None documented'.")
+
+        if self.gap_state == RequirementGapState.PARTIALLY_COVERED:
+            if len(self.evidence_references) == 0:
+                raise ValueError("PARTIALLY_COVERED gap state must contain qualifying evidence references.")
 
         # 3. Controlled wording validation
         if self.recruiter_wording is not None:
@@ -217,6 +219,27 @@ class RequirementGapSetContract(FrozenSchema):
         return self
 
 
+class EvidenceSummaryResponse(StrictSchema):
+    """Authoritative, deterministic evidence summary shared identically across comparison and gap reports."""
+    total_criteria: int = Field(ge=0)
+    required_total: int = Field(ge=0)
+    required_evidence_found: int = Field(ge=0)
+    required_partial_evidence: int = Field(ge=0)
+    required_not_found: int = Field(ge=0)
+    required_needs_verification: int = Field(ge=0)
+    preferred_total: int = Field(ge=0)
+    preferred_evidence_found: int = Field(ge=0)
+    overall_evidence_found: int = Field(ge=0)
+    overall_partial_evidence: int = Field(ge=0)
+    overall_not_found: int = Field(ge=0)
+    extraction_confidence: str
+
+    @model_validator(mode="after")
+    def validate_privacy(self) -> "EvidenceSummaryResponse":
+        verify_no_prohibited_keys(self.model_dump(mode="json"))
+        return self
+
+
 # Phase 2D.3 API & Canonical Report Response Schemas
 class GapReportCreateRequest(StrictSchema):
     match_result_id: UUID
@@ -227,6 +250,7 @@ class GapReportItemResponse(StrictSchema):
     item_id: UUID
     report_id: UUID
     requirement_id: UUID
+    requirement_name: str = Field(default="Requirement", min_length=1)
     display_order: int
     category: RequirementCategory
     necessity: RequirementNecessity
@@ -318,6 +342,12 @@ class GapReportDetailResponse(StrictSchema):
     conflicting_count: int
     not_applicable_count: int
     must_have_warning_count: int
+    must_have_total_count: int = 0
+    must_have_evidenced_count: int = 0
+    evidence_summary: Optional[EvidenceSummaryResponse] = None
+    compatibility_score: Optional[float] = None
+    confidence_tier: Optional[str] = None
+    legacy_report_notice: Optional[str] = None
     created_at: datetime
     items: List[GapReportItemResponse]
 
@@ -350,6 +380,12 @@ class CanonicalGapReportResponse(StrictSchema):
     total_requirements: int
     summary_counts: Dict[str, int]
     must_have_warning_count: int
+    must_have_total_count: int = 0
+    must_have_evidenced_count: int = 0
+    evidence_summary: Optional[EvidenceSummaryResponse] = None
+    compatibility_score: Optional[float] = None
+    confidence_tier: Optional[str] = None
+    legacy_report_notice: Optional[str] = None
     gaps: List[GapReportItemResponse]
     all_evidence_references: List[str]
     disclaimer: str = (

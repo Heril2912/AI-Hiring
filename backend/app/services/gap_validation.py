@@ -273,6 +273,20 @@ def validate_and_adapt_match_result_to_gap_set(
         # Safe sorting of evidence references
         sorted_evidence_refs = sorted(evidence_refs)
 
+        # Resolve requirement_name
+        req_name = item.get("requirement_name")
+        if not req_name and job_version:
+            for r in job_version.requirements:
+                if r.requirement_id == req_id:
+                    req_name = getattr(r, "label", None)
+                    break
+        if not req_name:
+            req_name = f"{category.value.capitalize()} Requirement"
+
+        doc_val = item.get("observed_value")
+        if gap_state == RequirementGapState.COVERED and (not doc_val or doc_val.strip().lower() in {"none documented", "none documented."}):
+            doc_val = "Evidence on file"
+
         display_order = int(item.get("display_order", idx))
 
         gap_rec = RequirementGapRecord(
@@ -290,6 +304,7 @@ def validate_and_adapt_match_result_to_gap_set(
             scoring_policy_version=run_record.scoring_policy_version,
             taxonomy_version=getattr(job_version, "taxonomy_version", None) if job_version else None,
             requirement_id=req_id,
+            requirement_name=req_name,
             display_order=display_order,
             category=category,
             necessity=necessity,
@@ -298,7 +313,7 @@ def validate_and_adapt_match_result_to_gap_set(
             source_match_value=match_value,
             gap_state=gap_state,
             required_value=item.get("expected_value"),
-            documented_value=item.get("observed_value"),
+            documented_value=doc_val,
             measurable_shortfall_value=None,  # Nullable in Phase 2D.1
             shortfall_unit=None,  # Nullable in Phase 2D.1
             evidence_references=sorted_evidence_refs,

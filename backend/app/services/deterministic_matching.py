@@ -149,7 +149,7 @@ def _match_skill_requirement(
 
         if is_match:
             matched_method = method
-            observed_value = s.name
+            observed_value = f"{s.name} found in Skills"
             credited_evidence_ids.extend(s.evidence_ids)
             if s.confidence is not None:
                 min_confidence = min(min_confidence or 1.0, s.confidence)
@@ -164,7 +164,7 @@ def _match_skill_requirement(
                 norm_t = normalize_search_query(t)
                 if norm_t == norm_req_label or norm_t in approved_aliases:
                     matched_method = MatchComparisonMethod.DOCUMENTED_RESPONSIBILITY
-                    observed_value = f"Project: {p.name} ({t})"
+                    observed_value = f"{t} found in Project: {p.name}"
                     credited_evidence_ids.extend(p.evidence_ids)
                     if p.confidence is not None:
                         min_confidence = min(min_confidence or 1.0, p.confidence)
@@ -193,6 +193,7 @@ def _match_skill_requirement(
         match_value = 0.0
         matched_method = MatchComparisonMethod.EXACT_NORMALIZED_LABEL
         unique_ev_ids = []
+        observed_value = None
 
     # Preserve must-have unfulfilled warning code
     if req.necessity == RequirementNecessity.MUST_HAVE and result_state != MatchResultState.MATCHED:
@@ -200,6 +201,7 @@ def _match_skill_requirement(
 
     return RequirementMatch(
         requirement_id=req.requirement_id,
+        requirement_name=req.label,
         display_order=req.display_order,
         category=req.category,
         result_state=result_state,
@@ -311,12 +313,13 @@ def _match_experience_requirement(
             reason_codes.append("MUST_HAVE_UNFULFILLED")
         return RequirementMatch(
             requirement_id=req.requirement_id,
+            requirement_name=req.label,
             display_order=req.display_order,
             category=req.category,
             result_state=MatchResultState.CONFLICTING_EVIDENCE,
             match_value=0.0,
             comparison_method=MatchComparisonMethod.EXPERIENCE_INTERVAL_CALCULATION,
-            expected_value=f"{req.min_experience_months or 0} months",
+            expected_value=f"{req.min_experience_months or 0} months of {req.label}" if req.min_experience_months else req.label,
             observed_value=", ".join(observed_titles) if observed_titles else None,
             evidence_references=sorted(list(credited_ev_ids)),
             reason_codes=reason_codes,
@@ -374,15 +377,25 @@ def _match_experience_requirement(
     if req.necessity == RequirementNecessity.MUST_HAVE and result_state != MatchResultState.MATCHED:
         reason_codes.append("MUST_HAVE_UNFULFILLED")
 
+    exp_expected = f"{req_months} months of {req.label}" if req_months > 0 else req.label
+    if total_months > 0:
+        titles_str = f" ({', '.join(observed_titles)})" if observed_titles else ""
+        exp_observed = f"{total_months} qualifying months{titles_str}"
+    elif observed_titles and result_state != MatchResultState.NOT_EVIDENCED:
+        exp_observed = ", ".join(observed_titles)
+    else:
+        exp_observed = None
+
     return RequirementMatch(
         requirement_id=req.requirement_id,
+        requirement_name=req.label,
         display_order=req.display_order,
         category=req.category,
         result_state=result_state,
         match_value=match_value,
         comparison_method=MatchComparisonMethod.EXPERIENCE_INTERVAL_CALCULATION,
-        expected_value=f"{req_months} months",
-        observed_value=f"{total_months} months ({', '.join(observed_titles)})" if total_months > 0 else (", ".join(observed_titles) if observed_titles else None),
+        expected_value=exp_expected,
+        observed_value=exp_observed,
         evidence_references=sorted(list(credited_ev_ids)),
         reason_codes=reason_codes,
         review_recommended=review_recommended,
@@ -432,15 +445,24 @@ def _match_education_requirement(
     if req.necessity == RequirementNecessity.MUST_HAVE and result_state != MatchResultState.MATCHED:
         reason_codes.append("MUST_HAVE_UNFULFILLED")
 
+    edu_observed = f"{matched_edu.degree or ''} in {matched_edu.field_of_study or ''}".strip() if matched_edu else None
+    if edu_observed and not edu_observed.startswith("in "):
+        doc_edu = edu_observed
+    elif matched_edu and (matched_edu.degree or matched_edu.field_of_study):
+        doc_edu = matched_edu.degree or matched_edu.field_of_study
+    else:
+        doc_edu = None
+
     return RequirementMatch(
         requirement_id=req.requirement_id,
+        requirement_name=req.label,
         display_order=req.display_order,
         category=req.category,
         result_state=result_state,
         match_value=match_value,
         comparison_method=MatchComparisonMethod.EDUCATION_DEGREE_AND_FIELD,
         expected_value=req.label,
-        observed_value=observed_val,
+        observed_value=doc_edu if result_state != MatchResultState.NOT_EVIDENCED else None,
         evidence_references=ev_refs,
         reason_codes=reason_codes,
         matching_rule_version=MATCHER_RULES_VERSION,
@@ -511,6 +533,7 @@ def _match_certification_requirement(
 
     return RequirementMatch(
         requirement_id=req.requirement_id,
+        requirement_name=req.label,
         display_order=req.display_order,
         category=req.category,
         result_state=result_state,
@@ -566,6 +589,7 @@ def _match_language_requirement(
 
     return RequirementMatch(
         requirement_id=req.requirement_id,
+        requirement_name=req.label,
         display_order=req.display_order,
         category=req.category,
         result_state=result_state,
@@ -598,12 +622,12 @@ def _match_responsibility_or_other_requirement(
         for desc in role.descriptions:
             if _safe_exact_token_match(desc, norm_req_label):
                 credited_ev_ids.extend(role.evidence_ids)
-                observed_text = desc
+                observed_text = f"Employment ({role.job_title}): {desc[:80]}..." if len(desc) > 80 else f"Employment ({role.job_title}): {desc}"
                 break
             for alias in approved_aliases:
                 if _safe_exact_token_match(desc, alias):
                     credited_ev_ids.extend(role.evidence_ids)
-                    observed_text = desc
+                    observed_text = f"Employment ({role.job_title}): {desc[:80]}..." if len(desc) > 80 else f"Employment ({role.job_title}): {desc}"
                     break
             if credited_ev_ids:
                 break
@@ -615,12 +639,12 @@ def _match_responsibility_or_other_requirement(
         for p in candidate_view.projects:
             if p.description and _safe_exact_token_match(p.description, norm_req_label):
                 credited_ev_ids.extend(p.evidence_ids)
-                observed_text = p.description
+                observed_text = f"Project ({p.name}): {p.description[:80]}..." if len(p.description) > 80 else f"Project ({p.name}): {p.description}"
                 break
             for alias in approved_aliases:
                 if p.description and _safe_exact_token_match(p.description, alias):
                     credited_ev_ids.extend(p.evidence_ids)
-                    observed_text = p.description
+                    observed_text = f"Project ({p.name}): {p.description[:80]}..." if len(p.description) > 80 else f"Project ({p.name}): {p.description}"
                     break
             if credited_ev_ids:
                 break
@@ -634,12 +658,14 @@ def _match_responsibility_or_other_requirement(
         result_state = MatchResultState.NOT_EVIDENCED
         match_value = 0.0
         ev_refs = []
+        observed_text = None
 
     if req.necessity == RequirementNecessity.MUST_HAVE and result_state != MatchResultState.MATCHED:
         reason_codes.append("MUST_HAVE_UNFULFILLED")
 
     return RequirementMatch(
         requirement_id=req.requirement_id,
+        requirement_name=req.label,
         display_order=req.display_order,
         category=req.category,
         result_state=result_state,

@@ -726,7 +726,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
           <div className="form-fields-stack">
             <div className="form-group">
               <label htmlFor="job-title-input" className="form-label">
-                Job Title <span className="text-danger">*</span>
+                Job Title <span className="required-star">*</span>
               </label>
               <input
                 id="job-title-input"
@@ -1135,11 +1135,11 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
               {/* Grouped Blocking Errors */}
               {readinessResult.errors.length > 0 && (
                 <div className="readiness-group errors-group" style={{ marginTop: "12px" }}>
-                  <h4 className="readiness-group-title text-danger">Blocking Errors ({readinessResult.errors.length})</h4>
+                  <h4 className="readiness-group-title text-error">Blocking Errors ({readinessResult.errors.length})</h4>
                   <div className="readiness-findings-list">
                     {readinessResult.errors.map((err, errIdx) => (
                       <div key={errIdx} className="finding-card finding-error">
-                        <Icon name="alert-triangle" size={15} className="finding-icon text-danger" />
+                        <Icon name="alert-circle" size={15} className="finding-icon text-error" />
                         <div className="finding-content">
                           <span className="finding-msg">{err.message}</span>
                           {(err.field || err.requirementId) && (

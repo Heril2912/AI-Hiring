@@ -306,6 +306,21 @@ export interface MatchRunSummary {
   resultsUrl: string;
 }
 
+export interface EvidenceSummary {
+  total_criteria: number;
+  required_total: number;
+  required_evidence_found: number;
+  required_partial_evidence: number;
+  required_not_found: number;
+  required_needs_verification: number;
+  preferred_total: number;
+  preferred_evidence_found: number;
+  overall_evidence_found: number;
+  overall_partial_evidence: number;
+  overall_not_found: number;
+  extraction_confidence: string;
+}
+
 export interface MatchResultRankingItem {
   resultId: string;
   runId: string;
@@ -319,6 +334,11 @@ export interface MatchResultRankingItem {
   confidenceTier: string;
   warningCount: number;
   mustHaveWarningCount: number;
+  mustHaveTotalCount?: number;
+  mustHaveEvidencedCount?: number;
+  notEvidencedCount?: number;
+  needsConfirmationCount?: number;
+  evidence_summary?: EvidenceSummary | null;
   componentScores: Record<string, number>;
   confidenceDiagnostics: Record<string, any>;
   mustHaveWarnings: Array<{
@@ -368,5 +388,152 @@ export async function fetchMatchResults(runId: string, limit = 50, offset = 0): 
 
 export async function fetchMatchRun(runId: string): Promise<MatchRunSummary> {
   return apiFetch<MatchRunSummary>(`/api/v1/matches/runs/${runId}`);
+}
+
+// =========================================================================
+// Phase 2D Gap Report API Helpers
+// =========================================================================
+
+export type RequirementGapState =
+  | "COVERED"
+  | "PARTIALLY_COVERED"
+  | "NOT_EVIDENCED"
+  | "UNVERIFIED"
+  | "CONFLICTING_REVIEW_REQUIRED"
+  | "NOT_APPLICABLE";
+
+export type GapReviewActionCode =
+  | "NONE"
+  | "PORTFOLIO_VERIFICATION"
+  | "INTERVIEW_EXPLORATION"
+  | "DOCUMENTATION_REQUEST"
+  | "REFERENCE_CHECK";
+
+export interface GapReportSummary {
+  reportId: string;
+  matchRunId: string;
+  matchResultId: string;
+  jobId: string;
+  jobVersionId: string;
+  revision: number;
+  profileId: string;
+  profileVersion: number;
+  evaluationDate: string;
+  matcherAlgorithmVersion: string;
+  matchingRuleVersion: string;
+  scoringPolicyVersion: string;
+  matchInputSchemaVersion: string;
+  taxonomyVersion?: string | null;
+  gapSchemaVersion: string;
+  gapPolicyVersion: string;
+  wordingTemplateVersion: string;
+  sourceFingerprint: string;
+  reportFingerprint: string;
+  totalRequirements: number;
+  coveredCount: number;
+  partiallyCoveredCount: number;
+  notEvidencedCount: number;
+  unverifiedCount: number;
+  conflictingCount: number;
+  notApplicableCount: number;
+  mustHaveWarningCount: number;
+  reused?: boolean;
+  createdAt: string;
+  reportUrl: string;
+}
+
+export interface GapReportItem {
+  itemId: string;
+  reportId: string;
+  requirementId: string;
+  requirementName?: string;
+  displayOrder: number;
+  category: RequirementCategory;
+  necessity: RequirementNecessity;
+  priority: RequirementPriority;
+  sourceMatchState: string;
+  sourceMatchValue: number;
+  gapState: RequirementGapState;
+  requiredValue?: string | null;
+  documentedValue?: string | null;
+  measurableShortfallValue?: number | null;
+  shortfallUnit?: string | null;
+  shortfallReasonCode?: string | null;
+  evidenceReferences: string[];
+  reviewRequired: boolean;
+  reviewActionCode: GapReviewActionCode;
+  mustHaveWarningReference?: string | null;
+  recruiterWording: string;
+  createdAt: string;
+}
+
+export interface GapReportDetail extends GapReportSummary {
+  mustHaveTotalCount?: number;
+  mustHaveEvidencedCount?: number;
+  evidence_summary?: EvidenceSummary | null;
+  compatibilityScore?: number | null;
+  confidenceTier?: string | null;
+  legacyReportNotice?: string | null;
+  items: GapReportItem[];
+}
+
+export interface CanonicalGapReport {
+  reportId: string;
+  matchRunId: string;
+  matchResultId: string;
+  jobId: string;
+  jobVersionId: string;
+  revision: number;
+  profileId: string;
+  profileVersion: number;
+  evaluationDate: string;
+  matcherAlgorithmVersion: string;
+  matchingRuleVersion: string;
+  scoringPolicyVersion: string;
+  matchInputSchemaVersion: string;
+  taxonomyVersion?: string | null;
+  gapSchemaVersion: string;
+  gapPolicyVersion: string;
+  wordingTemplateVersion: string;
+  sourceFingerprint: string;
+  reportFingerprint: string;
+  totalRequirements: number;
+  summaryCounts: Record<string, number>;
+  mustHaveWarningCount: number;
+  mustHaveTotalCount?: number;
+  mustHaveEvidencedCount?: number;
+  evidence_summary?: EvidenceSummary | null;
+  compatibilityScore?: number | null;
+  confidenceTier?: string | null;
+  legacyReportNotice?: string | null;
+  gaps: GapReportItem[];
+  allEvidenceReferences: string[];
+  disclaimer: string;
+  createdAt: string;
+}
+
+export async function fetchGapReportsForResult(resultId: string): Promise<GapReportSummary[]> {
+  return apiFetch<GapReportSummary[]>(`/api/v1/matches/results/${resultId}/gap-reports`);
+}
+
+export async function createGapReport(matchResultId: string, idempotencyKey: string): Promise<GapReportSummary> {
+  return apiFetch<GapReportSummary>("/api/v1/gap-reports", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify({
+      match_result_id: matchResultId,
+      idempotency_key: idempotencyKey,
+    }),
+  });
+}
+
+export async function fetchGapReportDetail(reportId: string): Promise<GapReportDetail> {
+  return apiFetch<GapReportDetail>(`/api/v1/gap-reports/${reportId}`);
+}
+
+export async function fetchCanonicalGapReportJson(reportId: string): Promise<CanonicalGapReport> {
+  return apiFetch<CanonicalGapReport>(`/api/v1/gap-reports/${reportId}/json`);
 }
 

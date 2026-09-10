@@ -17,7 +17,7 @@ from app.models.gap_report import (
     GapReportItemRecord,
     GapReportRecord,
 )
-from app.models.job import JobLifecycleStatus, JobRequisition, JobVersion
+from app.models.job import JobLifecycleStatus, JobRequisition, JobVersion, RequirementNecessity
 from app.models.matching import (
     MatchResultRecord,
     MatchRunLifecycleStatus,
@@ -36,6 +36,7 @@ from app.schemas.requirement_gap import (
     RequirementGapSetContract,
     RequirementGapState,
 )
+from app.services.canonical_summary import compute_canonical_evidence_summary
 from app.services.gap_derivation import derive_requirement_gaps
 from app.services.gap_validation import (
     GapSourceValidationError,
@@ -131,6 +132,7 @@ def compute_canonical_gap_report_fingerprint(
     for g in sorted(derived_gaps, key=lambda x: x.display_order):
         sorted_gaps_payload.append({
             "requirement_id": str(g.requirement_id),
+            "requirement_name": g.requirement_name,
             "display_order": g.display_order,
             "category": g.category.value,
             "necessity": g.necessity.value,
@@ -392,6 +394,7 @@ def create_gap_report_for_actor(
             item_id=uuid.uuid4(),
             report_id=new_report_id,
             requirement_id=g.requirement_id,
+            requirement_name=g.requirement_name,
             display_order=g.display_order,
             category=g.category,
             necessity=g.necessity,
@@ -457,7 +460,10 @@ def get_gap_report_for_actor(
     """Retrieves a single gap report header with items, enforcing organization/recruiter ownership."""
     stmt = (
         select(GapReportRecord)
-        .options(selectinload(GapReportRecord.items))
+        .options(
+            selectinload(GapReportRecord.items),
+            selectinload(GapReportRecord.match_result),
+        )
         .where(GapReportRecord.report_id == report_id)
     )
     report_rec = db.execute(stmt).scalar_one_or_none()
@@ -526,17 +532,37 @@ def get_canonical_gap_report_for_actor(
 
     all_evidence_refs = set()
     item_responses: List[GapReportItemResponse] = []
+    must_have_total = 0
+    must_have_evidenced = 0
+    is_legacy = (
+        report_rec.gap_policy_version != GAP_POLICY_VERSION
+        or report_rec.gap_schema_version != GAP_SCHEMA_VERSION
+    )
 
     for it in items:
         summary_counts[it.gap_state.value] = summary_counts.get(it.gap_state.value, 0) + 1
+        if it.necessity == RequirementNecessity.MUST_HAVE:
+            must_have_total += 1
+            if it.gap_state == RequirementGapState.COVERED:
+                must_have_evidenced += 1
+
         for ref in (it.evidence_references or []):
             all_evidence_refs.add(ref)
+
+        req_name = getattr(it, "requirement_name", None) or f"{it.category.value.capitalize()} Requirement"
+
+        # Check for legacy flaw: COVERED with None documented
+        doc_val = it.documented_value
+        if it.gap_state == RequirementGapState.COVERED and (not doc_val or doc_val.strip().lower() in {"none documented", "none documented."}):
+            is_legacy = True
+            doc_val = "Evidence on file (legacy record)"
 
         item_responses.append(
             GapReportItemResponse(
                 item_id=it.item_id,
                 report_id=it.report_id,
                 requirement_id=it.requirement_id,
+                requirement_name=req_name,
                 display_order=it.display_order,
                 category=it.category,
                 necessity=it.necessity,
@@ -545,7 +571,7 @@ def get_canonical_gap_report_for_actor(
                 source_match_value=it.source_match_value,
                 gap_state=it.gap_state,
                 required_value=it.required_value,
-                documented_value=it.documented_value,
+                documented_value=doc_val,
                 measurable_shortfall_value=it.measurable_shortfall_value,
                 shortfall_unit=it.shortfall_unit,
                 shortfall_reason_code=it.shortfall_reason_code,
@@ -558,6 +584,13 @@ def get_canonical_gap_report_for_actor(
             )
         )
 
+    legacy_notice = (
+        "This is an immutable historical report evaluated under an earlier policy version. "
+        "Some requirement names or details may reflect legacy schema standards. Run a new comparison to view updated results."
+        if is_legacy
+        else None
+    )
+
     record_gap_audit_event(
         db=db,
         event_type=GapAuditEventType.GAP_REPORT_JSON_ACCESSED,
@@ -566,6 +599,11 @@ def get_canonical_gap_report_for_actor(
         match_result_id=report_rec.match_result_id,
     )
     db.commit()
+
+    evidence_summary = compute_canonical_evidence_summary(
+        requirement_contributions=items,
+        extraction_confidence=report_rec.match_result.confidence_tier if report_rec.match_result else "MEDIUM",
+    )
 
     return CanonicalGapReportResponse(
         report_id=report_rec.report_id,
@@ -590,6 +628,12 @@ def get_canonical_gap_report_for_actor(
         total_requirements=len(item_responses),
         summary_counts=summary_counts,
         must_have_warning_count=report_rec.must_have_warning_count,
+        must_have_total_count=evidence_summary.required_total if evidence_summary else must_have_total,
+        must_have_evidenced_count=evidence_summary.required_evidence_found if evidence_summary else must_have_evidenced,
+        evidence_summary=evidence_summary,
+        compatibility_score=float(report_rec.match_result.display_compatibility_score) if report_rec.match_result else None,
+        confidence_tier=report_rec.match_result.confidence_tier if report_rec.match_result else None,
+        legacy_report_notice=legacy_notice,
         gaps=item_responses,
         all_evidence_references=sorted(list(all_evidence_refs)),
         created_at=report_rec.created_at,

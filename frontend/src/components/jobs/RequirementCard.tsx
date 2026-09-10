@@ -149,7 +149,7 @@ export function RequirementCard({
               </span>
             )}
             {hasWarnings && (
-              <span className="badge badge-meta" style={{ backgroundColor: "#fee2e2", color: "#991b1b" }}>
+              <span className="badge badge-meta" style={{ backgroundColor: "var(--gap-partial-bg)", color: "var(--gap-conflicting)", border: "1px solid var(--gap-partial-border)" }}>
                 Review warning
               </span>
             )}
@@ -190,7 +190,7 @@ export function RequirementCard({
               </button>
               <button
                 type="button"
-                className="btn-icon-control text-danger"
+                className="btn-icon-control text-destructive"
                 onClick={onRemove}
                 aria-label={`Remove requirement #${index + 1}`}
                 title="Remove requirement"
@@ -312,7 +312,7 @@ export function RequirementCard({
               </button>
               <button
                 type="button"
-                className="btn-icon-control text-danger"
+                className="btn-icon-control text-destructive"
                 onClick={onRemove}
                 aria-label={`Remove requirement ${requirement.label || index + 1}`}
                 title="Remove requirement"
@@ -418,9 +418,9 @@ export function RequirementCard({
       {isMustHave && (
         <div className="rationale-mandatory-box">
           <label htmlFor={`rat-${index}`} className="rationale-label-required">
-            <Icon name="alert-triangle" size={14} />
+            <Icon name="alert-circle" size={14} />
             <span>
-              Must-Have Rationale <span className="text-danger">*</span>
+              Must-Have Rationale <span className="required-star">*</span>
             </span>
           </label>
           <p style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "6px" }}>
