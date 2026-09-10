@@ -2,17 +2,25 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   GapReportDetail,
   GapReportItem,
-  RequirementGapState,
   fetchGapReportDetail,
   fetchCanonicalGapReportJson,
 } from "../../api/jobs";
 import { Icon } from "../Icon";
+import { CategoryEvidenceCoverageChart, getCanonicalSummaryData } from "./VisualAnalyticsCharts";
+import { validateInternalReturnUrl } from "../../utils/navigation";
 
 interface RequirementGapReportViewProps {
   reportId: string;
   candidateName?: string;
   jobTitle?: string;
+  returnUrl?: string | null;
   onNavigateBack: () => void;
+  onNavigateBackWithFallback?: (fallbackState: {
+    jobId: string;
+    jobVersionId: string;
+    revision: number;
+    runId: string;
+  }) => void;
   onOpenEvidenceDrawer?: (candidateId: string, requirementLabel?: string) => void;
 }
 
@@ -20,7 +28,9 @@ export function RequirementGapReportView({
   reportId,
   candidateName,
   jobTitle,
+  returnUrl,
   onNavigateBack,
+  onNavigateBackWithFallback,
   onOpenEvidenceDrawer,
 }: RequirementGapReportViewProps) {
   const [report, setReport] = useState<GapReportDetail | null>(null);
@@ -33,7 +43,6 @@ export function RequirementGapReportView({
   const [onlyReviewRequired, setOnlyReviewRequired] = useState<boolean>(false);
 
   // Active evidence modal/drawer state
-  const [activeEvidenceItem, setActiveEvidenceItem] = useState<GapReportItem | null>(null);
   const [isDownloadingJson, setIsDownloadingJson] = useState<boolean>(false);
 
   // Collapsible accordion for 'How this works' advisory and 'Analysis details' panel
@@ -79,7 +88,28 @@ export function RequirementGapReportView({
     };
   }, [reportId]);
 
-  // Summary counts reconciliation check
+  // Handle smart Back Navigation with internal URL validation and deterministic fallback
+  const handleBackNavigation = () => {
+    const safeReturn = validateInternalReturnUrl(returnUrl);
+    if (safeReturn) {
+      onNavigateBack();
+      return;
+    }
+
+    if (report && onNavigateBackWithFallback) {
+      onNavigateBackWithFallback({
+        jobId: report.jobId,
+        jobVersionId: report.jobVersionId,
+        revision: report.revision,
+        runId: report.matchRunId,
+      });
+      return;
+    }
+
+    onNavigateBack();
+  };
+
+  // Summary counts check
   const stateCounts = useMemo(() => {
     if (!report) {
       return {
@@ -175,7 +205,7 @@ export function RequirementGapReportView({
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            onClick={onNavigateBack}
+            onClick={handleBackNavigation}
             aria-label="Back to candidate comparison"
           >
             <Icon name="arrow-left" size={14} />
@@ -195,7 +225,7 @@ export function RequirementGapReportView({
               type="button"
               className="btn btn-secondary btn-xs"
               style={{ marginTop: "8px" }}
-              onClick={onNavigateBack}
+              onClick={handleBackNavigation}
             >
               Return to comparison
             </button>
@@ -211,11 +241,14 @@ export function RequirementGapReportView({
   );
 
   // Canonical Evidence Summary counts
-  const evidenceSummary = report.evidence_summary;
-  const reqTotal = evidenceSummary ? evidenceSummary.required_total : (report.mustHaveTotalCount ?? 0);
-  const reqEvidenced = evidenceSummary ? evidenceSummary.required_evidence_found : (report.mustHaveEvidencedCount ?? 0);
-  const prefTotal = evidenceSummary ? evidenceSummary.preferred_total : 0;
-  const prefEvidenced = evidenceSummary ? evidenceSummary.preferred_evidence_found : 0;
+  const summaryObj = report.evidence_summary || (report as any).evidenceSummary;
+  const canon = getCanonicalSummaryData(summaryObj);
+
+  const isSummaryUnavailable = !canon && (report.mustHaveTotalCount === undefined || report.mustHaveTotalCount === null);
+  const reqTotal = canon ? canon.requiredTotal : (report.mustHaveTotalCount ?? 0);
+  const reqEvidenced = canon ? canon.requiredEvidenceFound : (report.mustHaveEvidencedCount ?? 0);
+  const prefTotal = canon ? canon.preferredTotal : 0;
+  const prefEvidenced = canon ? canon.preferredEvidenceFound : 0;
 
   return (
     <div className="gap-report-view-container" aria-label="Resume Evidence &amp; Criteria Comparison">
@@ -225,7 +258,7 @@ export function RequirementGapReportView({
           <button
             type="button"
             className="btn btn-secondary btn-sm no-print"
-            onClick={onNavigateBack}
+            onClick={handleBackNavigation}
             aria-label="Back to candidate comparison"
           >
             <Icon name="arrow-left" size={14} />
@@ -302,19 +335,19 @@ export function RequirementGapReportView({
         </div>
 
         {showHowItWorks && (
-          <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px solid var(--gap-partial-border)", fontSize: "12px", lineHeight: "1.5", color: "var(--text-secondary)" }}>
-            This requirement-evidence report compares documented professional evidence against recruiter-approved job criteria based on an immutable Phase 2C match result. It is an advisory diagnostic to guide human review and interview preparation—not an automated hiring or employment decision. Missing evidence in a resume indicates that the criterion was not documented in the provided profile; it does not prove a candidate lacks the skill.
+          <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px solid var(--border-subtle)", fontSize: "12px", lineHeight: "1.5", color: "var(--text-secondary)" }}>
+            This requirement-evidence report compares documented professional evidence against recruiter-approved job criteria based on an immutable match result. It is an advisory diagnostic to guide human review and interview preparation—not an automated hiring or employment decision. Missing evidence in a resume indicates that the criterion was not documented in the provided profile; it does not prove a candidate lacks the skill.
           </div>
         )}
       </div>
 
-      {/* 3. Default Summary Cards: Resume match, Required evidence, Preferred evidence */}
+      {/* 3. Summary Cards: Resume match, Required evidence, Preferred evidence */}
       <div className="gap-metrics-grid" aria-label="Summary Metrics">
         <div className="gap-metric-card">
           <span className="gap-metric-label">Resume match</span>
           <span className="gap-metric-value">
             {report.compatibilityScore !== null && report.compatibilityScore !== undefined
-              ? `${Math.round(report.compatibilityScore)}%`
+              ? `${Math.round(Number(report.compatibilityScore))}%`
               : "Recorded"}
           </span>
           <span className="gap-metric-subtext">Overall criteria match percentage</span>
@@ -323,10 +356,14 @@ export function RequirementGapReportView({
         <div className="gap-metric-card">
           <span className="gap-metric-label">Required evidence</span>
           <span className="gap-metric-value">
-            {reqEvidenced} of {reqTotal}
+            {isSummaryUnavailable ? "Summary unavailable" : `${reqEvidenced} of ${reqTotal}`}
           </span>
           <span className="gap-metric-subtext">
-            {reqEvidenced === reqTotal ? "All required criteria have supporting evidence" : `${reqTotal - reqEvidenced} required criteria lack full evidence`}
+            {isSummaryUnavailable
+              ? "Canonical evidence summary unavailable"
+              : reqEvidenced === reqTotal
+              ? "All required criteria have supporting evidence"
+              : `${reqTotal - reqEvidenced} required criteria lack full evidence`}
           </span>
         </div>
 
@@ -341,7 +378,14 @@ export function RequirementGapReportView({
         )}
       </div>
 
-      {/* 4. Collapsed 'Analysis details' Panel */}
+      {/* 4. Visualization: Category Evidence Coverage Chart */}
+      {rawItems.length > 0 && (
+        <div style={{ marginBottom: "20px" }}>
+          <CategoryEvidenceCoverageChart items={rawItems} />
+        </div>
+      )}
+
+      {/* 5. Collapsed 'Analysis details' Panel */}
       <div className="gap-breakdown-card" aria-label="Analysis Details Panel">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -349,7 +393,7 @@ export function RequirementGapReportView({
               Technical Analysis Details
             </h4>
             <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-              Extraction confidence: <strong>{report.confidenceTier || evidenceSummary?.extraction_confidence || "MEDIUM"}</strong>
+              Extraction confidence: <strong>{report.confidenceTier || canon?.extractionConfidence || "MEDIUM"}</strong>
             </span>
           </div>
           <button
@@ -369,12 +413,12 @@ export function RequirementGapReportView({
               <span>
                 Extraction confidence:{" "}
                 <strong title="How confidently the system extracted and connected evidence from the uploaded resume. This is not a candidate rating." style={{ cursor: "help" }}>
-                  {report.confidenceTier || evidenceSummary?.extraction_confidence || "MEDIUM"}
+                  {report.confidenceTier || canon?.extractionConfidence || "MEDIUM"}
                 </strong>
               </span>
               <span>Total criteria: <strong>{report.totalRequirements}</strong></span>
-              <span>Report ID: <code>{report.reportId.substring(0, 8)}</code></span>
-              <span>Run ID: <code>{report.matchRunId.substring(0, 8)}</code></span>
+              <span>Report ID: <code>{report.reportId ? report.reportId.substring(0, 8) : "N/A"}</code></span>
+              <span>Run ID: <code>{report.matchRunId ? report.matchRunId.substring(0, 8) : "N/A"}</code></span>
               <span>Evaluated: <strong>{formattedDate}</strong></span>
               <span>Schema version: <strong>{report.gapSchemaVersion}</strong></span>
               <span>Policy version: <strong>{report.gapPolicyVersion}</strong></span>
@@ -425,7 +469,7 @@ export function RequirementGapReportView({
         )}
       </div>
 
-      {/* 5. Filter Controls */}
+      {/* 6. Filter Controls */}
       <div className="gap-filters-bar no-print" aria-label="Filter Controls">
         <div className="gap-filter-group">
           <label htmlFor="gap-state-select" className="gap-filter-label">Assessment:</label>
@@ -471,7 +515,7 @@ export function RequirementGapReportView({
         </div>
       </div>
 
-      {/* 6. Simplified 4-Column Table: Requirement, Resume evidence, Assessment, Details */}
+      {/* 7. Simplified 4-Column Table: Requirement, Resume evidence, Assessment, Details */}
       <div className="gap-table-card">
         {filteredItems.length === 0 ? (
           <div className="empty-state-card" style={{ padding: "36px 16px" }}>
@@ -553,7 +597,7 @@ export function RequirementGapReportView({
                             {docDisplay}
                           </span>
                           {item.measurableShortfallValue !== null && item.measurableShortfallValue !== undefined && (
-                            <span style={{ fontSize: "11px", color: "var(--gap-conflicting)" }}>
+                            <span style={{ fontSize: "11px", color: "var(--gap-partial)" }}>
                               {item.measurableShortfallValue} {item.shortfallUnit || "months"} difference to verify
                             </span>
                           )}
@@ -582,7 +626,7 @@ export function RequirementGapReportView({
                           >
                             <Icon name="file-text" size={12} />
                             <span>
-                              {isExpanded ? "Hide experts ▲" : `View ${expertsCount} evidence excerpt${expertsCount === 1 ? "" : "s"} ▼`}
+                              {isExpanded ? "Hide excerpts ▲" : `View ${expertsCount} evidence excerpt${expertsCount === 1 ? "" : "s"} ▼`}
                             </span>
                           </button>
                         ) : (

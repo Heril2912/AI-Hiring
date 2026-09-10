@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   MatchRunSummary,
   MatchResultRankingItem,
@@ -10,6 +10,11 @@ import {
 import { apiFetch } from "../../api/client";
 import { CandidateSummary } from "../CandidatesDirectory";
 import { Icon } from "../Icon";
+import {
+  CandidateRankingChart,
+  RequirementEvidenceDistributionChart,
+  getCanonicalSummaryData,
+} from "./VisualAnalyticsCharts";
 
 export type RowReportStatus = "idle" | "checking" | "preparing" | "retry" | "unavailable";
 
@@ -19,17 +24,22 @@ export interface RowReportState {
   reportId?: string | null;
 }
 
-interface CandidateComparisonViewProps {
+export interface CandidateComparisonViewProps {
   jobId: string;
   jobTitle: string;
   jobVersionId: string;
   revision: number;
   requirementsCount: number;
   onNavigateBack: () => void;
-  onOpenGapReport?: (reportId: string) => void;
+  onOpenGapReport?: (reportId: string, returnContext?: any) => void;
   initialResults?: MatchResultRankingItem[];
   initialMatchRun?: MatchRunSummary | null;
   initialCandidates?: CandidateSummary[];
+  initialSearchQuery?: string;
+  initialSelectedProfileIds?: string[];
+  initialPage?: number;
+  initialSortField?: "rank" | "score" | "name" | "evidence";
+  initialSortDirection?: "asc" | "desc";
 }
 
 export function CandidateComparisonView({
@@ -43,13 +53,20 @@ export function CandidateComparisonView({
   initialResults,
   initialMatchRun,
   initialCandidates,
+  initialSearchQuery = "",
+  initialSelectedProfileIds,
+  initialPage = 1,
+  initialSortField = "rank",
+  initialSortDirection = "asc",
 }: CandidateComparisonViewProps) {
   // Candidate pool state
   const [candidates, setCandidates] = useState<CandidateSummary[]>(initialCandidates || []);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(!initialCandidates && !initialResults);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState<string>(initialSearchQuery);
+  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(
+    new Set(initialSelectedProfileIds || [])
+  );
 
   // Match run & results state
   const [isComparing, setIsComparing] = useState<boolean>(false);
@@ -78,6 +95,14 @@ export function CandidateComparisonView({
   const [gapError, setGapError] = useState<string | null>(null);
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set());
 
+  // Visual Analytics toggle & results filtering/sorting/pagination
+  const [showVisualAnalytics, setShowVisualAnalytics] = useState<boolean>(true);
+  const [resultsSearch, setResultsSearch] = useState<string>("");
+  const [sortField, setSortField] = useState<"rank" | "score" | "name" | "evidence">(initialSortField);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(initialSortDirection);
+  const [currentPage, setCurrentPage] = useState<number>(initialPage);
+  const pageSize = 25;
+
   // 1. Fetch available candidate pool
   useEffect(() => {
     if (initialCandidates && initialCandidates.length > 0) {
@@ -93,14 +118,16 @@ export function CandidateComparisonView({
         const data = await apiFetch<CandidateSummary[]>("/api/v1/resumes");
         if (!isMounted) return;
         setCandidates(data || []);
-        // Auto-select candidate profiles that have extraction/profile ready
-        const validIds = new Set<string>();
-        (data || []).forEach((c) => {
-          if (c.latestProfileVersion && c.latestProfileVersion > 0) {
-            validIds.add(c.artifactId);
-          }
-        });
-        setSelectedProfileIds(validIds);
+        // Auto-select candidate profiles that have extraction/profile ready if no initial selection provided
+        if (!initialSelectedProfileIds || initialSelectedProfileIds.length === 0) {
+          const validIds = new Set<string>();
+          (data || []).forEach((c) => {
+            if (c.latestProfileVersion && c.latestProfileVersion > 0) {
+              validIds.add(c.artifactId);
+            }
+          });
+          setSelectedProfileIds(validIds);
+        }
       } catch (err: any) {
         if (isMounted) {
           setLoadError(err?.message || "Failed to load candidate directory.");
@@ -115,15 +142,17 @@ export function CandidateComparisonView({
     };
   }, []);
 
-  // Filter candidates by search query
-  const filteredCandidates = candidates.filter((c) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    const nameMatch = c.fullName?.toLowerCase().includes(q);
-    const headlineMatch = c.headline?.toLowerCase().includes(q);
-    const filenameMatch = c.originalFilename.toLowerCase().includes(q);
-    return Boolean(nameMatch || headlineMatch || filenameMatch);
-  });
+  // Filter candidate pool by search query
+  const filteredCandidates = useMemo(() => {
+    return candidates.filter((c) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      const nameMatch = c.fullName?.toLowerCase().includes(q);
+      const headlineMatch = c.headline?.toLowerCase().includes(q);
+      const filenameMatch = c.originalFilename?.toLowerCase().includes(q);
+      return Boolean(nameMatch || headlineMatch || filenameMatch);
+    });
+  }, [candidates, searchQuery]);
 
   const toggleCandidateSelection = (profileId: string) => {
     const updated = new Set(selectedProfileIds);
@@ -182,6 +211,7 @@ export function CandidateComparisonView({
       // Fetch ranking results
       const res = await fetchMatchResults(runSummary.runId, 50, 0);
       setResults(res.items || []);
+      setCurrentPage(1);
     } catch (err: any) {
       setRunError(err?.message || "Failed to execute candidate comparison match run.");
     } finally {
@@ -189,8 +219,10 @@ export function CandidateComparisonView({
     }
   };
 
-  // 3. View Gaps Action: Ensure-Then-Open Implementation
+  // 3. Review Evidence Action: Ensure-Then-Open Implementation
   const ensureGapReport = async (matchResultId: string) => {
+    if (!matchResultId) return;
+
     // Prevent duplicate requests if this row is already checking or preparing
     const currentState = rowStates[matchResultId]?.status;
     if (currentState === "checking" || currentState === "preparing") {
@@ -203,6 +235,21 @@ export function CandidateComparisonView({
       [matchResultId]: { status: "checking", errorMessage: null },
     }));
 
+    const returnContext = {
+      jobId,
+      jobTitle,
+      jobVersionId,
+      revision,
+      requirementsCount,
+      runId: matchRun?.runId,
+      searchQuery,
+      resultsSearch,
+      page: currentPage,
+      sortField,
+      sortDirection,
+      selectedProfileIds: Array.from(selectedProfileIds),
+    };
+
     try {
       // Step A: Check for an existing authorized immutable gap report for this result
       const existingReports = await fetchGapReportsForResult(matchResultId);
@@ -213,7 +260,7 @@ export function CandidateComparisonView({
           [matchResultId]: { status: "idle", reportId },
         }));
         if (onOpenGapReport) {
-          onOpenGapReport(reportId);
+          onOpenGapReport(reportId, returnContext);
         }
         return;
       }
@@ -238,7 +285,7 @@ export function CandidateComparisonView({
       }));
 
       if (onOpenGapReport) {
-        onOpenGapReport(reportId);
+        onOpenGapReport(reportId, returnContext);
       }
     } catch (err: any) {
       const errCode = err?.code || "";
@@ -263,8 +310,50 @@ export function CandidateComparisonView({
     }
   };
 
+  // Filtered & Sorted comparison results
+  const processedResults = useMemo(() => {
+    let list = [...results];
+
+    if (resultsSearch.trim()) {
+      const q = resultsSearch.toLowerCase();
+      list = list.filter((item) => {
+        const candidate = candidates.find((c) => c.artifactId === item.profileId);
+        const name = candidate?.fullName?.toLowerCase() || "";
+        const headline = candidate?.headline?.toLowerCase() || "";
+        const profId = item.profileId.toLowerCase();
+        return name.includes(q) || headline.includes(q) || profId.includes(q);
+      });
+    }
+
+    list.sort((a, b) => {
+      let comparison = 0;
+      if (sortField === "rank") {
+        comparison = a.rank - b.rank;
+      } else if (sortField === "score") {
+        comparison = Number(b.displayCompatibilityScore) - Number(a.displayCompatibilityScore);
+      } else if (sortField === "name") {
+        const nameA = candidates.find((c) => c.artifactId === a.profileId)?.fullName || "";
+        const nameB = candidates.find((c) => c.artifactId === b.profileId)?.fullName || "";
+        comparison = nameA.localeCompare(nameB);
+      } else if (sortField === "evidence") {
+        const evA = a.evidence_summary?.required_evidence_found ?? a.mustHaveEvidencedCount ?? 0;
+        const evB = b.evidence_summary?.required_evidence_found ?? b.mustHaveEvidencedCount ?? 0;
+        comparison = evB - evA;
+      }
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+
+    return list;
+  }, [results, resultsSearch, sortField, sortDirection, candidates]);
+
+  const totalPages = Math.max(1, Math.ceil(processedResults.length / pageSize));
+  const paginatedResults = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return processedResults.slice(start, start + pageSize);
+  }, [processedResults, currentPage, pageSize]);
+
   return (
-    <div className="comparison-view-container">
+    <div className="comparison-view-container" aria-label="Candidate Comparison and Visual Analytics Workspace">
       {/* Top Header */}
       <div className="comparison-header">
         <div className="comparison-title-wrap">
@@ -402,7 +491,7 @@ export function CandidateComparisonView({
                     type="checkbox"
                     checked={isSelected}
                     disabled={!hasProfile}
-                    onChange={() => {}} // handled by parent onClick
+                    onChange={() => {}}
                     aria-label={`Select candidate ${c.fullName || c.originalFilename}`}
                   />
                   <div className="candidate-select-info">
@@ -420,10 +509,10 @@ export function CandidateComparisonView({
         )}
       </div>
 
-      {/* Comparison Results Card */}
+      {/* Comparison Results Section */}
       {matchRun && (
         <div className="comparison-results-card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
             <div>
               <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)" }}>
                 Candidate Comparison
@@ -432,229 +521,353 @@ export function CandidateComparisonView({
                 {results.length} candidate{results.length === 1 ? "" : "s"} evaluated against configured criteria
               </p>
             </div>
-            <span className="badge badge-onet-confirmed">
-              {results.length} Candidates Evaluated
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowVisualAnalytics((prev) => !prev)}
+                aria-expanded={showVisualAnalytics}
+                aria-label="Toggle visual analytics charts"
+              >
+                <Icon name="bar-chart" size={14} />
+                <span>{showVisualAnalytics ? "Hide Visual Analytics" : "Show Visual Analytics"}</span>
+              </button>
+              <span className="badge badge-onet-confirmed">
+                {results.length} Candidates Evaluated
+              </span>
+            </div>
           </div>
+
+          {/* Visual Analytics Charts Panel */}
+          {showVisualAnalytics && results.length > 0 && (
+            <div className="visual-analytics-panel-container" style={{ marginBottom: "24px" }}>
+              <div className="visual-analytics-grid">
+                <CandidateRankingChart
+                  results={results}
+                  candidates={candidates}
+                  onSelectCandidate={ensureGapReport}
+                />
+                <RequirementEvidenceDistributionChart
+                  results={results}
+                  candidates={candidates}
+                  onSelectCandidate={ensureGapReport}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Filter, Search, and Sort Toolbar for Results */}
+          {results.length > 0 && (
+            <div className="results-toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "14px", flexWrap: "wrap" }}>
+              <div className="search-input-wrapper" style={{ maxWidth: "280px" }}>
+                <Icon name="search" size={13} className="search-icon" />
+                <input
+                  type="text"
+                  className="search-input"
+                  placeholder="Filter evaluated results..."
+                  value={resultsSearch}
+                  onChange={(e) => {
+                    setResultsSearch(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  aria-label="Filter evaluated candidate results"
+                />
+                {resultsSearch && (
+                  <button
+                    type="button"
+                    className="search-clear-btn"
+                    onClick={() => setResultsSearch("")}
+                    aria-label="Clear results filter"
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <label htmlFor="results-sort-select" style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                    Sort by:
+                  </label>
+                  <select
+                    id="results-sort-select"
+                    className="form-select-sm"
+                    value={sortField}
+                    onChange={(e) => setSortField(e.target.value as any)}
+                  >
+                    <option value="rank">Rank</option>
+                    <option value="score">Match Score</option>
+                    <option value="evidence">Evidence Count</option>
+                    <option value="name">Candidate Name</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => setSortDirection((d) => (d === "asc" ? "desc" : "asc"))}
+                    aria-label={`Sort direction: ${sortDirection}`}
+                    title={`Toggle sort direction (current: ${sortDirection})`}
+                  >
+                    {sortDirection === "asc" ? "▲" : "▼"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {results.length === 0 ? (
             <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
               No candidates were ranked in this run.
             </p>
+          ) : paginatedResults.length === 0 ? (
+            <p style={{ fontSize: "13px", color: "var(--text-secondary)", padding: "16px 0" }}>
+              No candidate results match the search filter "{resultsSearch}".
+            </p>
           ) : (
-            <table className="comparison-table" aria-label="Candidate Comparison Rankings">
-              <thead>
-                <tr>
-                  <th style={{ width: "90px" }}>Rank</th>
-                  <th>Candidate</th>
-                  <th style={{ width: "140px" }}>Resume match</th>
-                  <th>Required evidence</th>
-                  <th style={{ width: "160px", textAlign: "right" }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((item) => {
-                  const candidateDetail = candidates.find((c) => c.artifactId === item.profileId);
-                  const candidateName = candidateDetail?.fullName || `Candidate #${item.profileId.substring(0, 6)}`;
-                  const candidateHeadline = candidateDetail?.headline || candidateDetail?.originalFilename;
-                  const isTop = item.rank === 1 && !item.isTied;
+            <>
+              <table className="comparison-table" aria-label="Candidate Comparison Rankings">
+                <thead>
+                  <tr>
+                    <th style={{ width: "90px" }}>Rank</th>
+                    <th>Candidate</th>
+                    <th style={{ width: "140px" }}>Resume match</th>
+                    <th>Required evidence</th>
+                    <th style={{ width: "160px", textAlign: "right" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedResults.map((item) => {
+                    const candidateDetail = candidates.find((c) => c.artifactId === item.profileId);
+                    const candidateName = candidateDetail?.fullName || `Candidate #${item.profileId.substring(0, 6)}`;
+                    const candidateHeadline = candidateDetail?.headline || candidateDetail?.originalFilename;
+                    const isTop = item.rank === 1 && !item.isTied;
 
-                  const isLegacy = !item.resultId;
-                  const rowState = isLegacy ? "unavailable" : (rowStates[item.resultId]?.status || "idle");
-                  const isRowBusy = rowState === "checking" || rowState === "preparing";
+                    const isLegacy = !item.resultId;
+                    const rowState = isLegacy ? "unavailable" : (rowStates[item.resultId]?.status || "idle");
+                    const isRowBusy = rowState === "checking" || rowState === "preparing";
 
-                  let buttonLabel = "Review evidence";
-                  if (isLegacy || rowState === "unavailable") {
-                    buttonLabel = "Summary unavailable";
-                  } else if (rowState === "checking") {
-                    buttonLabel = "Checking evidence…";
-                  } else if (rowState === "preparing") {
-                    buttonLabel = "Preparing evidence…";
-                  } else if (rowState === "retry") {
-                    buttonLabel = "Try again";
-                  }
+                    let buttonLabel = "Review evidence";
+                    if (isLegacy || rowState === "unavailable") {
+                      buttonLabel = "Summary unavailable";
+                    } else if (rowState === "checking") {
+                      buttonLabel = "Checking evidence…";
+                    } else if (rowState === "preparing") {
+                      buttonLabel = "Preparing evidence…";
+                    } else if (rowState === "retry") {
+                      buttonLabel = "Try again";
+                    }
 
-                  // Canonical summary calculation or fallback to item counts
-                  const summary = item.evidence_summary;
-                  const reqTotal = summary ? summary.required_total : item.mustHaveTotalCount;
-                  const reqFound = summary ? summary.required_evidence_found : item.mustHaveEvidencedCount;
-                  const reqPartial = summary ? summary.required_partial_evidence : 0;
-                  const reqVerification = summary ? summary.required_needs_verification : (item.needsConfirmationCount ?? 0);
-                  const extractionConfidence = summary?.extraction_confidence || item.confidenceTier || "MEDIUM";
+                    // Canonical summary calculation
+                    const summary = item.evidence_summary || (item as any).evidenceSummary;
+                    const canon = getCanonicalSummaryData(summary);
 
-                  const isSummaryUnavailable = reqTotal === undefined || reqTotal === null;
-                  const isExpanded = expandedDetails.has(item.resultId);
+                    const isSummaryUnavailable = !canon && (item.mustHaveTotalCount === undefined || item.mustHaveTotalCount === null);
+                    const reqTotal = canon ? canon.requiredTotal : item.mustHaveTotalCount;
+                    const reqFound = canon ? canon.requiredEvidenceFound : item.mustHaveEvidencedCount;
+                    const reqPartial = canon ? canon.requiredPartialEvidence : 0;
+                    const reqVerification = canon ? canon.requiredNeedsVerification : (item.needsConfirmationCount ?? 0);
+                    const extractionConfidence = canon?.extractionConfidence || item.confidenceTier || "MEDIUM";
 
-                  const rankText = item.isTied ? `Tied #${item.rank}` : `#${item.rank}`;
+                    const isExpanded = expandedDetails.has(item.resultId);
+                    const rankText = item.isTied ? `Tied #${item.rank}` : `#${item.rank}`;
 
-                  return (
-                    <React.Fragment key={item.resultId || item.profileId}>
-                      <tr>
-                        <td>
-                          <span className={`rank-badge ${isTop ? "top-rank" : ""}`} style={{ width: "auto", padding: "0 8px" }}>
-                            {rankText}
-                          </span>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", flexDirection: "column" }}>
-                            <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-                              {candidateName}
+                    return (
+                      <React.Fragment key={item.resultId || item.profileId}>
+                        <tr>
+                          <td>
+                            <span className={`rank-badge ${isTop ? "top-rank" : ""}`} style={{ width: "auto", padding: "0 8px" }}>
+                              {rankText}
                             </span>
-                            {candidateHeadline && (
-                              <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
-                                {candidateHeadline}
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", flexDirection: "column" }}>
+                              <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                                {candidateName}
                               </span>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <span className="score-cell-value">
-                            {Math.round(item.displayCompatibilityScore)}%
-                          </span>
-                        </td>
-                        <td>
-                          {isSummaryUnavailable ? (
-                            <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                              Summary unavailable
-                            </span>
-                          ) : (
-                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                              <span style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: 500 }}>
-                                {reqFound} of {reqTotal} required criteria have supporting resume evidence
-                              </span>
-                              {/* Secondary line: only when relevant (> 0), never show '0 need confirmation' */}
-                              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                                {reqVerification > 0 && (
-                                  <span style={{ fontSize: "11px", color: "var(--gap-conflicting)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
-                                    <Icon name="alert-circle" size={11} />
-                                    <span>{reqVerification} require verification</span>
-                                  </span>
-                                )}
-                                {reqPartial > 0 && (
-                                  <span style={{ fontSize: "11px", color: "var(--gap-partial)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
-                                    <Icon name="clock" size={11} />
-                                    <span>{reqPartial} ha{reqPartial === 1 ? "s" : "ve"} partial evidence</span>
-                                  </span>
-                                )}
-                              </div>
+                              {candidateHeadline && (
+                                <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                                  {candidateHeadline}
+                                </span>
+                              )}
                             </div>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => ensureGapReport(item.resultId)}
-                              disabled={isRowBusy || rowState === "unavailable" || isLegacy}
-                              aria-label={`${buttonLabel} for ${candidateName}`}
-                            >
-                              <Icon name="badge-check" size={13} />
-                              <span>{buttonLabel}</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-link-action"
-                              onClick={() => {
-                                setExpandedDetails((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(item.resultId)) {
-                                    next.delete(item.resultId);
-                                  } else {
-                                    next.add(item.resultId);
-                                  }
-                                  return next;
-                                });
-                              }}
-                              style={{ fontSize: "11px", textDecoration: "none" }}
-                              aria-expanded={isExpanded}
-                            >
-                              {isExpanded ? "Hide details ▲" : "Analysis details ▼"}
-                            </button>
-                            {isLegacy && (
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  color: "var(--text-secondary)",
-                                  maxWidth: "260px",
-                                  textAlign: "right",
-                                  lineHeight: "1.3",
-                                }}
-                              >
-                                Rerun comparison to view updated results.
+                          </td>
+                          <td>
+                            <span className="score-cell-value">
+                              {Math.round(Number(item.displayCompatibilityScore))}%
+                            </span>
+                          </td>
+                          <td>
+                            {isSummaryUnavailable ? (
+                              <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                                Summary unavailable
                               </span>
-                            )}
-                            {rowStates[item.resultId]?.errorMessage && (
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  color: "var(--gap-conflicting)",
-                                  maxWidth: "260px",
-                                  textAlign: "right",
-                                  lineHeight: "1.3",
-                                }}
-                                role="alert"
-                              >
-                                {rowStates[item.resultId]!.errorMessage}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                      {/* Expandable Analysis details row */}
-                      {isExpanded && (
-                        <tr style={{ backgroundColor: "var(--bg-surface-subtle)" }}>
-                          <td colSpan={5} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border-medium)" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
-                              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
-                                <div>
-                                  <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Extraction confidence: </span>
-                                  <span
-                                    className="badge badge-meta"
-                                    title="How confidently the system extracted and connected evidence from the uploaded resume. This is not a candidate rating."
-                                    style={{ cursor: "help" }}
-                                  >
-                                    {extractionConfidence}
-                                  </span>
-                                </div>
-                                <div>
-                                  <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Run ID: </span>
-                                  <code>{item.runId.substring(0, 8)}</code>
-                                </div>
-                                <div>
-                                  <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Algorithm: </span>
-                                  <span>{matchRun.matcherAlgorithmVersion}</span>
-                                </div>
-                                <div>
-                                  <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Rule version: </span>
-                                  <span>{matchRun.matchingRuleVersion}</span>
-                                </div>
-                                <div>
-                                  <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Policy version: </span>
-                                  <span>{matchRun.scoringPolicyVersion}</span>
-                                </div>
-                              </div>
-                              {summary && (
-                                <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginTop: "4px" }}>
-                                  <span>Total criteria: <strong>{summary.total_criteria}</strong></span>
-                                  <span>Required criteria: <strong>{summary.required_total}</strong></span>
-                                  <span>Evidence found: <strong>{summary.overall_evidence_found}</strong></span>
-                                  <span>Partial evidence: <strong>{summary.overall_partial_evidence}</strong></span>
-                                  <span>Not found in resume: <strong>{summary.overall_not_found}</strong></span>
-                                  {summary.preferred_total > 0 && (
-                                    <span>Preferred evidenced: <strong>{summary.preferred_evidence_found} of {summary.preferred_total}</strong></span>
+                            ) : (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                <span style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: 500 }}>
+                                  {reqFound} of {reqTotal} required criteria have supporting resume evidence
+                                </span>
+                                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                                  {reqVerification > 0 && (
+                                    <span style={{ fontSize: "11px", color: "var(--gap-partial)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                                      <Icon name="alert-circle" size={11} />
+                                      <span>{reqVerification} require verification</span>
+                                    </span>
+                                  )}
+                                  {reqPartial > 0 && (
+                                    <span style={{ fontSize: "11px", color: "var(--gap-unverified)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                                      <Icon name="clock" size={11} />
+                                      <span>{reqPartial} ha{reqPartial === 1 ? "s" : "ve"} partial evidence</span>
+                                    </span>
                                   )}
                                 </div>
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => ensureGapReport(item.resultId)}
+                                disabled={isRowBusy || rowState === "unavailable" || isLegacy}
+                                aria-label={`${buttonLabel} for ${candidateName}`}
+                              >
+                                <Icon name="badge-check" size={13} />
+                                <span>{buttonLabel}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-link-action"
+                                onClick={() => {
+                                  setExpandedDetails((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(item.resultId)) {
+                                      next.delete(item.resultId);
+                                    } else {
+                                      next.add(item.resultId);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                style={{ fontSize: "11px", textDecoration: "none" }}
+                                aria-expanded={isExpanded}
+                              >
+                                {isExpanded ? "Hide details ▲" : "Analysis details ▼"}
+                              </button>
+                              {isLegacy && (
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    color: "var(--text-secondary)",
+                                    maxWidth: "260px",
+                                    textAlign: "right",
+                                    lineHeight: "1.3",
+                                  }}
+                                >
+                                  Rerun comparison to view gap report.
+                                </span>
+                              )}
+                              {rowStates[item.resultId]?.errorMessage && (
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    color: "var(--status-danger)",
+                                    maxWidth: "260px",
+                                    textAlign: "right",
+                                    lineHeight: "1.3",
+                                  }}
+                                  role="alert"
+                                >
+                                  {rowStates[item.resultId]!.errorMessage}
+                                </span>
                               )}
                             </div>
                           </td>
                         </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+                        {/* Expandable Analysis details row */}
+                        {isExpanded && (
+                          <tr style={{ backgroundColor: "var(--bg-surface-subtle)" }}>
+                            <td colSpan={5} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border-medium)" }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
+                                <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
+                                  <div>
+                                    <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Extraction confidence: </span>
+                                    <span
+                                      className="badge badge-meta"
+                                      title="How confidently the system extracted and connected evidence from the uploaded resume. This is not a candidate rating."
+                                      style={{ cursor: "help" }}
+                                    >
+                                      {extractionConfidence}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Run ID: </span>
+                                    <code>{item.runId ? item.runId.substring(0, 8) : "N/A"}</code>
+                                  </div>
+                                  <div>
+                                    <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Algorithm: </span>
+                                    <span>{matchRun.matcherAlgorithmVersion}</span>
+                                  </div>
+                                  <div>
+                                    <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Rule version: </span>
+                                    <span>{matchRun.matchingRuleVersion}</span>
+                                  </div>
+                                  <div>
+                                    <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Policy version: </span>
+                                    <span>{matchRun.scoringPolicyVersion}</span>
+                                  </div>
+                                </div>
+                                {canon && (
+                                  <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginTop: "4px" }}>
+                                    <span>Total criteria: <strong>{canon.totalCriteria}</strong></span>
+                                    <span>Required criteria: <strong>{canon.requiredTotal}</strong></span>
+                                    <span>Evidence found: <strong>{canon.overallEvidenceFound}</strong></span>
+                                    <span>Partial evidence: <strong>{canon.overallPartialEvidence}</strong></span>
+                                    <span>Not found in resume: <strong>{canon.overallNotFound}</strong></span>
+                                    {canon.preferredTotal > 0 && (
+                                      <span>Preferred evidenced: <strong>{canon.preferredEvidenceFound} of {canon.preferredTotal}</strong></span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "16px", fontSize: "12px", color: "var(--text-secondary)" }}>
+                  <span>
+                    Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, processedResults.length)} of {processedResults.length} candidates
+                  </span>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-xs"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    >
+                      Previous
+                    </button>
+                    <span style={{ padding: "4px 8px" }}>
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-xs"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

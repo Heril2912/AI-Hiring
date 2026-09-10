@@ -8,6 +8,7 @@ import * as jobsApi from '../api/jobs';
 vi.mock('../api/jobs', () => ({
   fetchGapReportsForResult: vi.fn(),
   createGapReport: vi.fn(),
+  fetchMatchResults: vi.fn().mockResolvedValue({ items: [], total: 0 }),
 }));
 
 describe('CandidateComparisonView Gap Workflow', () => {
@@ -27,6 +28,22 @@ describe('CandidateComparisonView Gap Workflow', () => {
       confidenceTier: 'HIGH',
       warningCount: 3,
       mustHaveWarningCount: 1,
+      mustHaveTotalCount: 5,
+      mustHaveEvidencedCount: 3,
+      evidence_summary: {
+        total_criteria: 5,
+        required_total: 5,
+        required_evidence_found: 3,
+        required_partial_evidence: 1,
+        required_not_found: 1,
+        required_needs_verification: 0,
+        preferred_total: 0,
+        preferred_evidence_found: 0,
+        overall_evidence_found: 3,
+        overall_partial_evidence: 1,
+        overall_not_found: 1,
+        extraction_confidence: 'HIGH',
+      },
       componentScores: {},
       confidenceDiagnostics: {},
       mustHaveWarnings: [
@@ -52,6 +69,22 @@ describe('CandidateComparisonView Gap Workflow', () => {
       confidenceTier: 'LOW',
       warningCount: 5,
       mustHaveWarningCount: 3,
+      mustHaveTotalCount: 5,
+      mustHaveEvidencedCount: 2,
+      evidence_summary: {
+        total_criteria: 5,
+        required_total: 5,
+        required_evidence_found: 2,
+        required_partial_evidence: 0,
+        required_not_found: 3,
+        required_needs_verification: 1,
+        preferred_total: 0,
+        preferred_evidence_found: 0,
+        overall_evidence_found: 2,
+        overall_partial_evidence: 0,
+        overall_not_found: 3,
+        extraction_confidence: 'LOW',
+      },
       componentScores: {},
       confidenceDiagnostics: {},
       mustHaveWarnings: [],
@@ -103,14 +136,14 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    expect(screen.getByText('Requirement Status')).toBeInTheDocument();
-    expect(screen.getAllByText(/must-have requirements evidenced/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/3 not evidenced/i)).toBeInTheDocument();
-    expect(screen.getByText(/5 not evidenced/i)).toBeInTheDocument();
+    expect(screen.getByText('Candidate Comparison')).toBeInTheDocument();
+    expect(screen.getAllByText(/required criteria have supporting resume evidence/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/3 of 5/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/2 of 5/i).length).toBeGreaterThan(0);
 
-    const buttons = screen.getAllByRole('button', { name: /view gap report/i });
-    expect(buttons.length).toBe(2); // Charlie has no resultId -> Report unavailable
-    expect(screen.getByText('Report unavailable')).toBeInTheDocument();
+    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
+    expect(buttons.length).toBe(2); // Charlie has no resultId -> Summary unavailable
+    expect(screen.getAllByText('Summary unavailable').length).toBeGreaterThan(0);
   });
 
   it('reuses existing gap report without calling createGapReport', async () => {
@@ -162,13 +195,13 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    const buttons = screen.getAllByRole('button', { name: /view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
     fireEvent.click(buttons[0]); // Click Alice
 
     await waitFor(() => {
       expect(jobsApi.fetchGapReportsForResult).toHaveBeenCalledWith('res-alice-111');
       expect(jobsApi.createGapReport).not.toHaveBeenCalled();
-      expect(mockOnOpenGapReport).toHaveBeenCalledWith('rep-existing-999');
+      expect(mockOnOpenGapReport).toHaveBeenCalledWith('rep-existing-999', expect.any(Object));
     });
   });
 
@@ -220,13 +253,13 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    const buttons = screen.getAllByRole('button', { name: /view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
     fireEvent.click(buttons[1]); // Click Bob
 
     await waitFor(() => {
       expect(jobsApi.fetchGapReportsForResult).toHaveBeenCalledWith('res-bob-222');
       expect(jobsApi.createGapReport).toHaveBeenCalledWith('res-bob-222', 'gap-res-bob-222');
-      expect(mockOnOpenGapReport).toHaveBeenCalledWith('rep-new-created-888');
+      expect(mockOnOpenGapReport).toHaveBeenCalledWith('rep-new-created-888', expect.any(Object));
     });
   });
 
@@ -248,7 +281,7 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    const buttons = screen.getAllByRole('button', { name: /view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
     fireEvent.click(buttons[0]);
     fireEvent.click(buttons[0]); // Second click while processing
 
@@ -274,7 +307,7 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    const buttons = screen.getAllByRole('button', { name: /view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
     fireEvent.click(buttons[0]);
 
     await waitFor(() => {
@@ -299,7 +332,7 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    expect(screen.getByText('Report unavailable')).toBeInTheDocument();
+    expect(screen.getAllByText('Summary unavailable').length).toBeGreaterThan(0);
     expect(screen.getByText('Rerun comparison to view gap report.')).toBeInTheDocument();
   });
 });
