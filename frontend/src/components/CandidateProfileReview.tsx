@@ -887,40 +887,156 @@ export function CandidateProfileReview({
         </div>
       </div>
 
-      {/* AT-A-GLANCE SUMMARY METRICS BAR */}
-      <div className="at-a-glance-bar">
-        <div className="glance-metric-card">
-          <span className="glance-metric-value">{professionalProfile.skills?.length || 0}</span>
-          <span className="glance-metric-label">Skills Recognized</span>
-        </div>
+      {/* CANDIDATE OVERVIEW SECTION */}
+      <section className="candidate-overview-section" aria-label="Candidate Overview">
+        <div className="overview-cards-grid">
+          {/* A. Candidate Snapshot */}
+          <div className="overview-card snapshot-card" role="region" aria-label="Candidate Snapshot">
+            <h3 className="overview-card-title">
+              <Icon name="user" size={16} className="card-icon" />
+              <span>Candidate Snapshot</span>
+            </h3>
+            <p className="overview-card-subtitle">Documented records identified in candidate profile</p>
 
-        <div className="glance-metric-card">
-          <span className="glance-metric-value">{professionalProfile.employment?.length || 0}</span>
-          <span className="glance-metric-label">Positions Held</span>
-        </div>
+            <div className="snapshot-metrics-grid" role="list" aria-label="Profile record counts">
+              <div className="snapshot-metric-item" role="listitem">
+                <div className="snapshot-icon-wrap"><Icon name="briefcase" size={15} /></div>
+                <div className="snapshot-metric-details">
+                  <span className="snapshot-val">{professionalProfile.employment?.length || 0}</span>
+                  <span className="snapshot-lbl">Documented Positions</span>
+                </div>
+              </div>
 
-        <div className="glance-metric-card">
-          <span className="glance-metric-value">{professionalProfile.education?.length || 0}</span>
-          <span className="glance-metric-label">Education Records</span>
-        </div>
+              <div className="snapshot-metric-item" role="listitem">
+                <div className="snapshot-icon-wrap"><Icon name="academic-cap" size={15} /></div>
+                <div className="snapshot-metric-details">
+                  <span className="snapshot-val">{professionalProfile.education?.length || 0}</span>
+                  <span className="snapshot-lbl">Education Records</span>
+                </div>
+              </div>
 
-        <div className="glance-metric-card">
-          <span className="glance-metric-value">{professionalProfile.projects?.length || 0}</span>
-          <span className="glance-metric-label">Projects</span>
-        </div>
+              <div className="snapshot-metric-item" role="listitem">
+                <div className="snapshot-icon-wrap"><Icon name="layers" size={15} /></div>
+                <div className="snapshot-metric-details">
+                  <span className="snapshot-val">{professionalProfile.projects?.length || 0}</span>
+                  <span className="snapshot-lbl">Documented Projects</span>
+                </div>
+              </div>
 
-        <div className="glance-metric-card">
-          <span className="glance-metric-value">{professionalProfile.certifications?.length || 0}</span>
-          <span className="glance-metric-label">Certifications</span>
-        </div>
+              <div className="snapshot-metric-item" role="listitem">
+                <div className="snapshot-icon-wrap"><Icon name="award" size={15} /></div>
+                <div className="snapshot-metric-details">
+                  <span className="snapshot-val">{professionalProfile.certifications?.length || 0}</span>
+                  <span className="snapshot-lbl">Certifications</span>
+                </div>
+              </div>
 
-        <div className="glance-metric-card">
-          <span className={`glance-metric-status ${currentProfile.reviewRequired ? "status-warn" : "status-ok"}`}>
-            {currentProfile.reviewRequired ? "Needs Review" : "Reviewed"}
-          </span>
-          <span className="glance-metric-label">Profile Status</span>
+              <div className="snapshot-metric-item" role="listitem">
+                <div className="snapshot-icon-wrap"><Icon name="globe" size={15} /></div>
+                <div className="snapshot-metric-details">
+                  <span className="snapshot-val">{professionalProfile.languages?.length || 0}</span>
+                  <span className="snapshot-lbl">Languages Listed</span>
+                </div>
+              </div>
+
+              <div className="snapshot-metric-item" role="listitem">
+                <div className="snapshot-icon-wrap"><Icon name="badge-check" size={15} /></div>
+                <div className="snapshot-metric-details">
+                  <span className={`snapshot-status-pill ${currentProfile.reviewRequired ? "status-warn" : "status-ok"}`}>
+                    {currentProfile.reviewRequired ? "Needs Review" : "Reviewed"}
+                  </span>
+                  <span className="snapshot-lbl">Verification State</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* B. Skills Composition Doughnut */}
+          <div className="overview-card skills-composition-card" role="region" aria-label="Skills Composition">
+            <h3 className="overview-card-title">
+              <Icon name="sparkles" size={16} className="card-icon" />
+              <span>Skills Composition</span>
+            </h3>
+            <p className="overview-card-subtitle">Grouped by recognized taxonomy domain</p>
+
+            {(() => {
+              const skillsList = professionalProfile.skills || [];
+              const totalSkills = skillsList.length;
+
+              if (totalSkills === 0) {
+                return (
+                  <p className="empty-field-text" style={{ padding: "16px 0" }}>
+                    No technical skills recognized in current profile.
+                  </p>
+                );
+              }
+
+              // Group skills into domains based on available metadata or standard skill classification
+              const categoryMap = new Map<string, number>();
+              skillsList.forEach((sk) => {
+                const rawVal = (sk.value || "").toLowerCase();
+                let cat = "Technical & Domain";
+                if (/python|javascript|typescript|java|c\+\+|c#|golang|rust|ruby|php|kotlin|swift|scala|sql|bash|r\b/.test(rawVal)) {
+                  cat = "Programming Languages";
+                } else if (/react|vue|angular|django|fastapi|flask|spring|express|next\.js|node|laravel|rails/.test(rawVal)) {
+                  cat = "Frameworks & Libraries";
+                } else if (/postgres|mysql|mongodb|redis|cassandra|elasticsearch|dynamodb|sqlite|oracle/.test(rawVal)) {
+                  cat = "Databases & Storage";
+                } else if (/docker|kubernetes|aws|azure|gcp|git|ci\/cd|terraform|linux|ansible|kafka|graphql/.test(rawVal)) {
+                  cat = "Cloud, DevOps & Tools";
+                }
+                categoryMap.set(cat, (categoryMap.get(cat) || 0) + 1);
+              });
+
+              const catEntries = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);
+              const colors = [
+                "var(--gap-covered)",
+                "var(--gap-unverified)",
+                "var(--accent-primary)",
+                "var(--gap-partial)",
+                "var(--gap-not-evidenced)",
+              ];
+
+              let currentDeg = 0;
+              const gradStops = catEntries.map(([_, count], idx) => {
+                const deg = (count / totalSkills) * 360;
+                const stop = `${colors[idx % colors.length]} ${currentDeg}deg ${currentDeg + deg}deg`;
+                currentDeg += deg;
+                return stop;
+              }).join(", ");
+
+              const conicStyle = {
+                background: `conic-gradient(${gradStops})`,
+              };
+
+              const srDesc = `Skills composition: ${totalSkills} total documented skills across ${catEntries.length} categories. ${catEntries.map(([name, count]) => `${name}: ${count} (${Math.round((count/totalSkills)*100)}%)`).join(", ")}.`;
+
+              return (
+                <div className="doughnut-content-row">
+                  <div className="doughnut-wheel-wrapper" role="img" aria-label={srDesc}>
+                    <div className="doughnut-wheel" style={conicStyle}>
+                      <div className="doughnut-hole">
+                        <span className="doughnut-center-count">{totalSkills}</span>
+                        <span className="doughnut-center-label">skills recognized</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="doughnut-legend-list" role="list" aria-label="Skill categories">
+                    {catEntries.map(([catName, count], idx) => (
+                      <div key={catName} className="doughnut-legend-row" role="listitem">
+                        <span className="legend-swatch" style={{ backgroundColor: colors[idx % colors.length] }} />
+                        <span className="legend-label-text">{catName}:</span>
+                        <span className="legend-count-val">{count} ({Math.round((count / totalSkills) * 100)}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         </div>
-      </div>
+      </section>
 
       {/* CORRECTION WORKFLOW PANEL */}
       {isCorrectionMode && (
@@ -1087,7 +1203,7 @@ export function CandidateProfileReview({
               <div className="card-title-group">
                 <Icon name="briefcase" size={17} className="card-icon" />
                 <h3 id="section-experience-title" className="card-title" tabIndex={-1}>
-                  Experience ({professionalProfile.employment?.length || 0})
+                  Career Timeline ({professionalProfile.employment?.length || 0})
                 </h3>
               </div>
 
@@ -1110,97 +1226,171 @@ export function CandidateProfileReview({
             </div>
 
             {professionalProfile.employment && professionalProfile.employment.length > 0 ? (
-              <div className="employment-timeline">
-                {professionalProfile.employment.map((emp, i) => {
-                  const allEvIds = [
-                    ...(emp.jobTitle?.evidenceIds || []),
-                    ...(emp.organization?.evidenceIds || []),
-                    ...(emp.startDate?.evidenceIds || []),
-                    ...(emp.endDate?.evidenceIds || []),
-                    ...(emp.descriptions?.flatMap((d) => d.evidenceIds) || []),
-                  ];
+              (() => {
+                const datedPositions: { emp: ExperienceRecord; index: number }[] = [];
+                const undatedPositions: { emp: ExperienceRecord; index: number }[] = [];
 
-                  return (
-                    <div key={i} className="timeline-item-entry">
-                      <div className="timeline-spine">
-                        <div className="timeline-dot" />
-                        {i !== professionalProfile.employment.length - 1 && (
-                          <div className="timeline-connector" />
-                        )}
+                professionalProfile.employment.forEach((emp, index) => {
+                  if (emp.startDate?.value || emp.endDate?.value) {
+                    datedPositions.push({ emp, index });
+                  } else {
+                    undatedPositions.push({ emp, index });
+                  }
+                });
+
+                return (
+                  <>
+                    {datedPositions.length > 0 && (
+                      <div className="employment-timeline">
+                        {datedPositions.map(({ emp, index }, i) => {
+                          const allEvIds = [
+                            ...(emp.jobTitle?.evidenceIds || []),
+                            ...(emp.organization?.evidenceIds || []),
+                            ...(emp.startDate?.evidenceIds || []),
+                            ...(emp.endDate?.evidenceIds || []),
+                            ...(emp.descriptions?.flatMap((d) => d.evidenceIds) || []),
+                          ];
+
+                          const isCurrent = !emp.endDate?.value && !!emp.startDate?.value;
+
+                          return (
+                            <div key={index} className="timeline-item-entry">
+                              <div className="timeline-spine">
+                                <div className={`timeline-dot ${isCurrent ? "current-dot" : ""}`} />
+                                {i !== datedPositions.length - 1 && (
+                                  <div className="timeline-connector" />
+                                )}
+                              </div>
+
+                              <div className="timeline-details">
+                                <div className="timeline-heading-row">
+                                  <div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                      <h4 className="timeline-job-title">
+                                        {emp.jobTitle?.value || "Position Title"}
+                                      </h4>
+                                      {isCurrent && (
+                                        <span className="badge badge-indigo">Current Position</span>
+                                      )}
+                                    </div>
+                                    <span className="timeline-org-name">
+                                      {emp.organization?.value || "Organization"}
+                                    </span>
+                                  </div>
+
+                                  <div className="timeline-meta-right">
+                                    <span className="timeline-date-badge">
+                                      {renderDateInterval(emp.startDate, emp.endDate)}
+                                    </span>
+
+                                    {!isCorrectionMode && (
+                                      <button
+                                        type="button"
+                                        className="btn-evidence-subtle"
+                                        onClick={() =>
+                                          openEvidenceInspector(
+                                            `${emp.jobTitle?.value || "Position"} at ${emp.organization?.value || "Company"}`,
+                                            `${emp.jobTitle?.value} (${emp.organization?.value})`,
+                                            allEvIds
+                                          )
+                                        }
+                                      >
+                                        <Icon name="search" size={13} /> Evidence
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {emp.descriptions && emp.descriptions.length > 0 && (
+                                  <ul className="timeline-achievement-list">
+                                    {emp.descriptions.map((desc, di) => (
+                                      <li key={di}>{desc.value}</li>
+                                    ))}
+                                  </ul>
+                                )}
+
+                                {isCorrectionMode && (
+                                  <div className="timeline-edit-actions">
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-xs"
+                                      onClick={() => {
+                                        setExpJobTitle(emp.jobTitle?.value || "");
+                                        setExpOrg(emp.organization?.value || "");
+                                        setExpStart(emp.startDate?.value || "");
+                                        setExpEnd(emp.endDate?.value || "");
+                                        setExpBullets(emp.descriptions?.map((d) => d.value).join("\n") || "");
+                                        setEditingExperienceIndex(index);
+                                      }}
+                                    >
+                                      <Icon name="edit" size={12} /> Edit Position
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-xs btn-destructive"
+                                      onClick={() => handleRemoveExperience(index)}
+                                    >
+                                      <Icon name="trash" size={12} /> Remove
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
+                    )}
 
-                      <div className="timeline-details">
-                        <div className="timeline-heading-row">
-                          <div>
-                            <h4 className="timeline-job-title">
-                              {emp.jobTitle?.value || "Position Title"}
-                            </h4>
-                            <span className="timeline-org-name">
-                              {emp.organization?.value || "Organization"}
-                            </span>
-                          </div>
+                    {undatedPositions.length > 0 && (
+                      <div className="undated-experience-section" style={{ marginTop: datedPositions.length > 0 ? "20px" : "0" }}>
+                        <h4 className="undated-section-heading">Additional documented experience</h4>
+                        <div className="undated-positions-list">
+                          {undatedPositions.map(({ emp, index }) => {
+                            const allEvIds = [
+                              ...(emp.jobTitle?.evidenceIds || []),
+                              ...(emp.organization?.evidenceIds || []),
+                              ...(emp.descriptions?.flatMap((d) => d.evidenceIds) || []),
+                            ];
 
-                          <div className="timeline-meta-right">
-                            <span className="timeline-date-badge">
-                              {renderDateInterval(emp.startDate, emp.endDate)}
-                            </span>
-
-                            {!isCorrectionMode && (
-                              <button
-                                type="button"
-                                className="btn-evidence-subtle"
-                                onClick={() =>
-                                  openEvidenceInspector(
-                                    `${emp.jobTitle?.value || "Position"} at ${emp.organization?.value || "Company"}`,
-                                    `${emp.jobTitle?.value} (${emp.organization?.value})`,
-                                    allEvIds
-                                  )
-                                }
-                              >
-                                <Icon name="search" size={13} /> Evidence
-                              </button>
-                            )}
-                          </div>
+                            return (
+                              <div key={index} className="undated-position-card">
+                                <div className="undated-position-header">
+                                  <div>
+                                    <span className="undated-position-title">{emp.jobTitle?.value || "Position Title"}</span>
+                                    <span className="undated-position-org">{emp.organization?.value || "Organization"}</span>
+                                  </div>
+                                  {!isCorrectionMode && (
+                                    <button
+                                      type="button"
+                                      className="btn-evidence-subtle"
+                                      onClick={() =>
+                                        openEvidenceInspector(
+                                          `${emp.jobTitle?.value || "Position"} at ${emp.organization?.value || "Company"}`,
+                                          `${emp.jobTitle?.value} (${emp.organization?.value})`,
+                                          allEvIds
+                                        )
+                                      }
+                                    >
+                                      <Icon name="search" size={13} /> Evidence
+                                    </button>
+                                  )}
+                                </div>
+                                {emp.descriptions && emp.descriptions.length > 0 && (
+                                  <ul className="timeline-achievement-list" style={{ marginTop: "6px" }}>
+                                    {emp.descriptions.map((desc, di) => (
+                                      <li key={di}>{desc.value}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
-
-                        {emp.descriptions && emp.descriptions.length > 0 && (
-                          <ul className="timeline-achievement-list">
-                            {emp.descriptions.map((desc, di) => (
-                              <li key={di}>{desc.value}</li>
-                            ))}
-                          </ul>
-                        )}
-
-                        {isCorrectionMode && (
-                          <div className="timeline-edit-actions">
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-xs"
-                              onClick={() => {
-                                setExpJobTitle(emp.jobTitle?.value || "");
-                                setExpOrg(emp.organization?.value || "");
-                                setExpStart(emp.startDate?.value || "");
-                                setExpEnd(emp.endDate?.value || "");
-                                setExpBullets(emp.descriptions?.map((d) => d.value).join("\n") || "");
-                                setEditingExperienceIndex(i);
-                              }}
-                            >
-                              <Icon name="edit" size={12} /> Edit Position
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-xs btn-destructive"
-                              onClick={() => handleRemoveExperience(i)}
-                            >
-                              <Icon name="trash" size={12} /> Remove
-                            </button>
-                          </div>
-                        )}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    )}
+                  </>
+                );
+              })()
             ) : (
               <p className="empty-field-text">No employment history detected.</p>
             )}

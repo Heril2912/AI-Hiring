@@ -5,6 +5,8 @@ import { validateInternalReturnUrl } from "../utils/navigation";
 import {
   CandidateRankingChart,
   RequirementEvidenceDistributionChart,
+  OverallEvidenceCompositionChart,
+  RequirementCoverageByCriterionChart,
   CategoryEvidenceCoverageChart,
   getCanonicalSummaryData,
 } from "../components/jobs/VisualAnalyticsCharts";
@@ -397,6 +399,23 @@ describe("Phase 2E.1: Visual Analytics, Navigation, and Canonical Integrity", ()
 
       // Missing summary row shows 'Summary unavailable'
       expect(screen.getByText("Summary unavailable")).toBeInTheDocument();
+    });
+
+    it("renders OverallEvidenceCompositionChart and RequirementCoverageByCriterionChart", () => {
+      render(
+        <div>
+          <OverallEvidenceCompositionChart results={mockResults} />
+          <RequirementCoverageByCriterionChart results={mockResults} />
+        </div>
+      );
+
+      expect(screen.getByText("Overall Evidence Composition")).toBeInTheDocument();
+      expect(screen.getByText("criteria assessed")).toBeInTheDocument();
+
+      // Check legend labels in Overall Evidence Composition
+      expect(screen.getByText("Evidence found:")).toBeInTheDocument();
+      expect(screen.getByText("Partial evidence:")).toBeInTheDocument();
+      expect(screen.getByText("Not found in resume:")).toBeInTheDocument();
     });
 
     it("renders CategoryEvidenceCoverageChart only for active job categories with exact ratio text", () => {

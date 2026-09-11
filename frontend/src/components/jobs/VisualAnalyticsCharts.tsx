@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { MatchResultRankingItem, GapReportItem, EvidenceSummary } from "../../api/jobs";
 import { CandidateSummary } from "../CandidatesDirectory";
 import { Icon } from "../Icon";
@@ -85,7 +85,6 @@ export function CandidateRankingChart({
           const clampedPercent = Math.max(0, Math.min(100, isNaN(score) ? 0 : score));
           const rankText = item.isTied ? `Tied #${item.rank}` : `#${item.rank}`;
           const isSelected = selectedResultId === item.resultId;
-          const isTop = item.rank === 1 && !item.isTied;
 
           return (
             <div
@@ -107,7 +106,7 @@ export function CandidateRankingChart({
               aria-label={`${rankText}: ${candidateName} — ${Math.round(clampedPercent)}% resume match`}
             >
               <div className="ranking-row-meta">
-                <span className={`rank-badge ${isTop ? "top-rank" : ""}`}>
+                <span className="rank-badge">
                   {rankText}
                 </span>
                 <span className="candidate-name-label" title={candidateName}>
@@ -130,7 +129,7 @@ export function CandidateRankingChart({
                   className="ranking-bar-fill"
                   style={{
                     width: `${clampedPercent}%`,
-                    backgroundColor: isTop ? "var(--gap-covered)" : "var(--accent-primary)",
+                    backgroundColor: "var(--accent-primary)",
                   }}
                 />
               </div>
@@ -143,7 +142,7 @@ export function CandidateRankingChart({
 }
 
 /* =========================================================================
-   2. Requirement Evidence Distribution Chart (100% Stacked Bar)
+   2. Requirement Evidence Distribution Chart (100% Stacked Bar with Patterns)
    ========================================================================= */
 
 interface RequirementEvidenceDistributionChartProps {
@@ -233,31 +232,31 @@ export function RequirementEvidenceDistributionChart({
         <div className="chart-legend" aria-label="Evidence distribution categories">
           {hasCovered && (
             <span className="legend-item">
-              <span className="legend-swatch" style={{ backgroundColor: "var(--gap-covered)" }} />
+              <span className="legend-swatch swatch-solid-teal" />
               <span>Evidence found</span>
             </span>
           )}
           {hasPartial && (
             <span className="legend-item">
-              <span className="legend-swatch" style={{ backgroundColor: "var(--gap-unverified)" }} />
+              <span className="legend-swatch swatch-diagonal-indigo" />
               <span>Partial evidence</span>
             </span>
           )}
           {hasVerification && (
             <span className="legend-item">
-              <span className="legend-swatch" style={{ backgroundColor: "var(--gap-partial)" }} />
+              <span className="legend-swatch swatch-dotted-amber" />
               <span>Needs verification</span>
             </span>
           )}
           {hasNotFound && (
             <span className="legend-item">
-              <span className="legend-swatch" style={{ backgroundColor: "var(--gap-not-evidenced)" }} />
+              <span className="legend-swatch swatch-solid-slate" />
               <span>Not found in resume</span>
             </span>
           )}
           {hasExcluded && (
             <span className="legend-item">
-              <span className="legend-swatch" style={{ backgroundColor: "var(--gap-not-applicable)" }} />
+              <span className="legend-swatch swatch-outline-slate" />
               <span>Excluded from score</span>
             </span>
           )}
@@ -326,43 +325,48 @@ export function RequirementEvidenceDistributionChart({
               </div>
 
               <div
-                className="distribution-bar-track"
+                className="distribution-bar-track structured-track"
                 role="img"
                 aria-label={desc}
               >
                 {pctCovered > 0 && (
                   <div
-                    className="segment segment-covered"
-                    style={{ width: `${pctCovered}%`, backgroundColor: "var(--gap-covered)" }}
+                    className="segment segment-covered-pattern"
+                    style={{ width: `${pctCovered}%` }}
                     title={`Evidence found: ${covered} (${Math.round(pctCovered)}%)`}
+                    aria-label={`Evidence found: ${covered}`}
                   />
                 )}
                 {pctPartial > 0 && (
                   <div
-                    className="segment segment-partial"
-                    style={{ width: `${pctPartial}%`, backgroundColor: "var(--gap-unverified)" }}
+                    className="segment segment-partial-pattern"
+                    style={{ width: `${pctPartial}%` }}
                     title={`Partial evidence found: ${partial} (${Math.round(pctPartial)}%)`}
+                    aria-label={`Partial evidence: ${partial}`}
                   />
                 )}
                 {pctVerification > 0 && (
                   <div
-                    className="segment segment-verification"
-                    style={{ width: `${pctVerification}%`, backgroundColor: "var(--gap-partial)" }}
+                    className="segment segment-verification-pattern"
+                    style={{ width: `${pctVerification}%` }}
                     title={`Needs verification: ${verification} (${Math.round(pctVerification)}%)`}
+                    aria-label={`Needs verification: ${verification}`}
                   />
                 )}
                 {pctNotFound > 0 && (
                   <div
-                    className="segment segment-not-found"
-                    style={{ width: `${pctNotFound}%`, backgroundColor: "var(--gap-not-evidenced)" }}
+                    className="segment segment-not-found-pattern"
+                    style={{ width: `${pctNotFound}%` }}
                     title={`Not found in resume: ${notFound} (${Math.round(pctNotFound)}%)`}
+                    aria-label={`Not found in resume: ${notFound}`}
                   />
                 )}
                 {pctExcluded > 0 && (
                   <div
-                    className="segment segment-excluded"
-                    style={{ width: `${pctExcluded}%`, backgroundColor: "var(--gap-not-applicable)" }}
+                    className="segment segment-excluded-pattern"
+                    style={{ width: `${pctExcluded}%` }}
                     title={`Excluded from score: ${excluded} (${Math.round(pctExcluded)}%)`}
+                    aria-label={`Excluded: ${excluded}`}
                   />
                 )}
               </div>
@@ -375,7 +379,325 @@ export function RequirementEvidenceDistributionChart({
 }
 
 /* =========================================================================
-   3. Category Evidence Coverage Chart (Detailed Report)
+   3. Overall Evidence Composition Doughnut Chart
+   ========================================================================= */
+
+interface OverallEvidenceCompositionProps {
+  results: MatchResultRankingItem[];
+}
+
+export function OverallEvidenceCompositionChart({ results }: OverallEvidenceCompositionProps) {
+  if (!results || results.length === 0) {
+    return null;
+  }
+
+  let totalEvaluated = 0;
+  let totalFound = 0;
+  let totalPartial = 0;
+  let totalVerification = 0;
+  let totalNotFound = 0;
+  let totalExcluded = 0;
+  let hasValidData = false;
+
+  results.forEach((item) => {
+    const summary = item.evidence_summary || (item as any).evidenceSummary;
+    const canon = getCanonicalSummaryData(summary);
+    if (canon) {
+      hasValidData = true;
+      const found = canon.requiredEvidenceFound;
+      const partial = canon.requiredPartialEvidence;
+      const verify = canon.requiredNeedsVerification;
+      const notFound = canon.requiredNotFound;
+      const excl = (canon as any).not_applicable_count ?? 0;
+      const subtotal = canon.requiredTotal || (found + partial + verify + notFound + excl);
+
+      totalEvaluated += subtotal;
+      totalFound += found;
+      totalPartial += partial;
+      totalVerification += verify;
+      totalNotFound += notFound;
+      totalExcluded += excl;
+    }
+  });
+
+  if (!hasValidData || totalEvaluated === 0) {
+    return (
+      <div className="visual-analytics-card doughnut-card" role="region" aria-label="Overall Evidence Composition">
+        <div className="chart-header">
+          <h4 className="chart-title">Overall Evidence Composition</h4>
+        </div>
+        <p className="summary-unavailable-badge" style={{ padding: "16px" }}>
+          Visual summary unavailable for this completed run.
+        </p>
+      </div>
+    );
+  }
+
+  // Calculate percentages
+  const pFound = Math.round((totalFound / totalEvaluated) * 100);
+  const pPartial = Math.round((totalPartial / totalEvaluated) * 100);
+  const pVerify = Math.round((totalVerification / totalEvaluated) * 100);
+  const pNotFound = Math.round((totalNotFound / totalEvaluated) * 100);
+  const pExcluded = Math.round((totalExcluded / totalEvaluated) * 100);
+
+  // SVG conic/arc breakdown
+  const degFound = (totalFound / totalEvaluated) * 360;
+  const degPartial = (totalPartial / totalEvaluated) * 360;
+  const degVerify = (totalVerification / totalEvaluated) * 360;
+  const degNotFound = (totalNotFound / totalEvaluated) * 360;
+  const degExcl = (totalExcluded / totalEvaluated) * 360;
+
+  const gradStops = [
+    `var(--gap-covered) 0deg ${degFound}deg`,
+    `var(--gap-unverified) ${degFound}deg ${degFound + degPartial}deg`,
+    `var(--gap-partial) ${degFound + degPartial}deg ${degFound + degPartial + degVerify}deg`,
+    `var(--gap-not-evidenced) ${degFound + degPartial + degVerify}deg ${degFound + degPartial + degVerify + degNotFound}deg`,
+    `var(--gap-not-applicable) ${degFound + degPartial + degVerify + degNotFound}deg 360deg`,
+  ].join(", ");
+
+  const conicStyle = {
+    background: `conic-gradient(${gradStops})`,
+  };
+
+  const srSummary = `Overall Evidence Composition: ${totalEvaluated} total criteria assessed across ${results.length} candidates. ${totalFound} (${pFound}%) evidence found, ${totalPartial} (${pPartial}%) partial evidence, ${totalVerification} (${pVerify}%) needs verification, ${totalNotFound} (${pNotFound}%) not found in resume, ${totalExcluded} (${pExcluded}%) excluded.`;
+
+  return (
+    <div
+      className="visual-analytics-card doughnut-card"
+      role="region"
+      aria-label="Overall Evidence Composition Chart"
+    >
+      <div className="chart-header">
+        <div>
+          <h4 className="chart-title">Overall Evidence Composition</h4>
+          <p className="chart-subtitle">
+            Aggregate assessment breakdown across evaluated criteria ({results.length} candidate{results.length === 1 ? "" : "s"})
+          </p>
+        </div>
+      </div>
+
+      <div className="doughnut-content-row">
+        {/* Visual CSS Conic Doughnut */}
+        <div
+          className="doughnut-wheel-wrapper"
+          role="img"
+          aria-label={srSummary}
+        >
+          <div className="doughnut-wheel" style={conicStyle}>
+            <div className="doughnut-hole">
+              <span className="doughnut-center-count">{totalEvaluated}</span>
+              <span className="doughnut-center-label">criteria assessed</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Detailed Non-Color Accessible Legend */}
+        <div className="doughnut-legend-list" role="list" aria-label="Evidence status counts">
+          <div className="doughnut-legend-row" role="listitem">
+            <span className="legend-swatch swatch-solid-teal" />
+            <span className="legend-label-text">Evidence found:</span>
+            <span className="legend-count-val">{totalFound} ({pFound}%)</span>
+          </div>
+          {totalPartial > 0 && (
+            <div className="doughnut-legend-row" role="listitem">
+              <span className="legend-swatch swatch-diagonal-indigo" />
+              <span className="legend-label-text">Partial evidence:</span>
+              <span className="legend-count-val">{totalPartial} ({pPartial}%)</span>
+            </div>
+          )}
+          {totalVerification > 0 && (
+            <div className="doughnut-legend-row" role="listitem">
+              <span className="legend-swatch swatch-dotted-amber" />
+              <span className="legend-label-text">Needs verification:</span>
+              <span className="legend-count-val">{totalVerification} ({pVerify}%)</span>
+            </div>
+          )}
+          <div className="doughnut-legend-row" role="listitem">
+            <span className="legend-swatch swatch-solid-slate" />
+            <span className="legend-label-text">Not found in resume:</span>
+            <span className="legend-count-val">{totalNotFound} ({pNotFound}%)</span>
+          </div>
+          {totalExcluded > 0 && (
+            <div className="doughnut-legend-row" role="listitem">
+              <span className="legend-swatch swatch-outline-slate" />
+              <span className="legend-label-text">Excluded from score:</span>
+              <span className="legend-count-val">{totalExcluded} ({pExcluded}%)</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================================
+   4. Requirement Coverage by Criterion Horizontal Chart
+   ========================================================================= */
+
+interface RequirementCoverageByCriterionProps {
+  results: MatchResultRankingItem[];
+}
+
+interface RequirementAggregateItem {
+  id: string;
+  name: string;
+  necessity: "REQUIRED" | "PREFERRED";
+  displayOrder: number;
+  totalCandidates: number;
+  evidenceFoundCount: number;
+  partialCount: number;
+  needsVerificationCount: number;
+  notFoundCount: number;
+}
+
+export function RequirementCoverageByCriterionChart({ results }: RequirementCoverageByCriterionProps) {
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+
+  if (!results || results.length === 0) {
+    return null;
+  }
+
+  // Derive requirement-level aggregations from stored candidate requirement contributions
+  const reqMap = new Map<string, RequirementAggregateItem>();
+  const totalCands = results.length;
+
+  results.forEach((r) => {
+    const contribs = r.requirement_contributions || r.requirementContributions || [];
+    contribs.forEach((c: any, index: number) => {
+      const id = String(c.requirement_id || c.requirementId || `req-${index}`);
+      const name = String(c.label || c.requirement_name || c.requirementName || `Criterion #${index + 1}`);
+      const necessity: "REQUIRED" | "PREFERRED" =
+        (c.necessity || "").toUpperCase() === "PREFERRED" ? "PREFERRED" : "REQUIRED";
+      const displayOrder = Number(c.display_order ?? c.displayOrder ?? index);
+
+      const existing = reqMap.get(id) || {
+        id,
+        name,
+        necessity,
+        displayOrder,
+        totalCandidates: 0,
+        evidenceFoundCount: 0,
+        partialCount: 0,
+        needsVerificationCount: 0,
+        notFoundCount: 0,
+      };
+
+      existing.totalCandidates += 1;
+
+      const state = (c.match_state || c.matchState || c.gap_state || c.gapState || c.result_state || c.resultState || "").toUpperCase();
+      if (
+        state === "MATCHED" ||
+        state === "EVIDENCED" ||
+        state === "COVERED" ||
+        state === "FULLY_SATISFIED"
+      ) {
+        existing.evidenceFoundCount += 1;
+      } else if (
+        state === "PARTIALLY_MATCHED" ||
+        state === "PARTIALLY_EVIDENCED" ||
+        state === "PARTIALLY_COVERED" ||
+        state === "PARTIALLY_SATISFIED"
+      ) {
+        existing.partialCount += 1;
+      } else if (
+        state === "INSUFFICIENT_EVIDENCE" ||
+        state === "CONFLICTING_EVIDENCE" ||
+        state === "UNVERIFIED" ||
+        state === "NEEDS_VERIFICATION" ||
+        state === "CONFLICTING_REVIEW_REQUIRED"
+      ) {
+        existing.needsVerificationCount += 1;
+      } else {
+        existing.notFoundCount += 1;
+      }
+
+      reqMap.set(id, existing);
+    });
+  });
+
+  const criteriaList = Array.from(reqMap.values()).sort((a, b) => a.displayOrder - b.displayOrder);
+
+  if (criteriaList.length === 0) {
+    return null;
+  }
+
+  const initialDisplayLimit = 5;
+  const displayedCriteria = isExpanded ? criteriaList : criteriaList.slice(0, initialDisplayLimit);
+
+  return (
+    <div
+      className="visual-analytics-card requirement-coverage-card"
+      role="region"
+      aria-label="Requirement Coverage by Criterion Chart"
+    >
+      <div className="chart-header">
+        <div>
+          <h4 className="chart-title">Requirement Coverage by Criterion</h4>
+          <p className="chart-subtitle">
+            Proportion of candidate resumes containing supporting evidence for active job criteria ({criteriaList.length} criteria)
+          </p>
+        </div>
+        {criteriaList.length > initialDisplayLimit && (
+          <button
+            type="button"
+            onClick={() => setIsExpanded((prev) => !prev)}
+            className="btn btn-secondary btn-xs"
+            aria-expanded={isExpanded}
+          >
+            {isExpanded ? "Show Less" : `View All (${criteriaList.length})`}
+          </button>
+        )}
+      </div>
+
+      <div className="coverage-criteria-list" role="list" aria-label="Criterion coverage items">
+        {displayedCriteria.map((crit) => {
+          const pct = Math.round((crit.evidenceFoundCount / crit.totalCandidates) * 100);
+          const ratioDesc = `${crit.evidenceFoundCount} of ${crit.totalCandidates} candidates have supporting resume evidence`;
+          const srLabel = `${crit.name} (${crit.necessity.toLowerCase()}): ${ratioDesc} (${pct}%).`;
+
+          return (
+            <div
+              key={crit.id}
+              className="coverage-criterion-row"
+              role="listitem"
+              aria-label={srLabel}
+            >
+              <div className="coverage-criterion-meta">
+                <div className="criterion-title-group">
+                  <span className="criterion-name" title={crit.name}>{crit.name}</span>
+                  <span className={`badge ${crit.necessity === "REQUIRED" ? "badge-necessity-must" : "badge-necessity-pref"}`}>
+                    {crit.necessity === "REQUIRED" ? "Required" : "Preferred"}
+                  </span>
+                </div>
+                <span className="criterion-ratio-text">{ratioDesc}</span>
+              </div>
+
+              <div
+                className="coverage-bar-track"
+                role="progressbar"
+                aria-valuenow={crit.evidenceFoundCount}
+                aria-valuemin={0}
+                aria-valuemax={crit.totalCandidates}
+                aria-label={srLabel}
+              >
+                <div
+                  className="coverage-bar-fill"
+                  style={{
+                    width: `${pct}%`,
+                    backgroundColor: "var(--gap-covered)",
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================================
+   5. Category Evidence Coverage Chart (Detailed Report)
    ========================================================================= */
 
 interface CategoryEvidenceCoverageChartProps {
