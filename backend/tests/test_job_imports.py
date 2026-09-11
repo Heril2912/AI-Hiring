@@ -134,10 +134,10 @@ def synthetic_taxonomy(tmp_path, test_db):
 
 
 # =========================================================================
-# 1. Pasted Text Analysis & Extraction Tests
+# 1. Pasted Text Analysis & Extraction (Deprecated -> 410 GONE)
 # =========================================================================
 
-def test_pasted_text_analysis_success(client, test_db, synthetic_taxonomy):
+def test_pasted_text_analysis_success(client, test_db):
     _seed_user(test_db, email="recruiter.jd@company.test", role=UserRole.RECRUITER)
     _login_user(client, email="recruiter.jd@company.test")
 
@@ -150,110 +150,26 @@ Openings: 2
 
 About the role
 Build and scale cloud backend microservices for our core platform.
-
-Responsibilities
-- Design and develop scalable REST APIs.
-- Maintain and optimize PostgreSQL database schemas.
-- Collaborate with frontend engineers to integrate services.
-
-Required qualifications
-- Minimum 3 years of professional backend engineering experience.
-- Strong proficiency in Python and PostgreSQL.
-
-Preferred qualifications
-- Experience with Docker is preferred.
-- AWS certification is a plus.
 """
 
     resp = client.post("/api/v1/jobs/imports/analyze-text", json={"text": jd_text})
-    assert resp.status_code == status.HTTP_200_OK
+    assert resp.status_code == status.HTTP_410_GONE
     data = resp.json()
-
-    assert data["sourceType"] == "PASTED_TEXT"
-    assert data["status"] == "PENDING_REVIEW"
-    assert data["parserVersion"] == "1.0.0"
-    assert data["taxonomyVersion"] == "31.0"
-
-    suggestions = data["suggestions"]
-    assert len(suggestions) >= 7
-
-    # 1. Job details verification
-    title_sug = next(s for s in suggestions if s["targetField"] == "TITLE")
-    assert title_sug["proposedValue"] == "Senior Backend Developer"
-    assert title_sug["sourceExcerpt"] == "Job Title: Senior Backend Developer"
-    assert title_sug["startOffset"] >= 0
-
-    dept_sug = next(s for s in suggestions if s["targetField"] == "DEPARTMENT")
-    assert dept_sug["proposedValue"] == "Engineering"
-
-    loc_sug = next(s for s in suggestions if s["targetField"] == "LOCATION")
-    assert loc_sug["proposedValue"] == "San Francisco, CA"
-
-    emp_sug = next(s for s in suggestions if s["targetField"] == "EMPLOYMENT_TYPE")
-    assert emp_sug["proposedValue"] == "FULL_TIME"
-
-    wp_sug = next(s for s in suggestions if s["targetField"] == "WORKPLACE_TYPE")
-    assert wp_sug["proposedValue"] == "REMOTE"
-
-    open_sug = next(s for s in suggestions if s["targetField"] == "OPENINGS_COUNT")
-    assert open_sug["proposedValue"] == 2
-
-    # 2. Summary verification
-    sum_sug = next(s for s in suggestions if s["targetField"] == "SUMMARY")
-    assert "Build and scale cloud backend" in sum_sug["proposedValue"]
-
-    # 3. Responsibilities verification
-    resp_sugs = [s for s in suggestions if s["targetField"] == "RESPONSIBILITY"]
-    assert len(resp_sugs) == 3
-    assert any("Design and develop scalable REST APIs" in r["proposedValue"] for r in resp_sugs)
-
-    # 4. Requirements & O*NET verification
-    req_sugs = [s for s in suggestions if s["targetField"] == "REQUIREMENT"]
-    assert len(req_sugs) >= 4
-
-    # Experience requirement
-    exp_sug = next(s for s in req_sugs if s["proposedValue"]["category"] == "EXPERIENCE")
-    assert exp_sug["proposedValue"]["minExperienceMonths"] == 36
-    assert exp_sug["proposedValue"]["necessity"] == "MUST_HAVE"
-
-    # Python skill (O*NET match)
-    py_sug = next(s for s in req_sugs if s["proposedValue"]["label"] == "Python")
-    assert py_sug["proposedValue"]["category"] == "SKILL"
-    assert py_sug["proposedValue"]["necessity"] == "MUST_HAVE"
-    assert py_sug["proposedValue"]["taxonomySkillConceptId"] is not None
-    assert py_sug["proposedValue"]["origin"] == "TAXONOMY_SUGGESTED_RECRUITER_CONFIRMED"
-    assert py_sug["proposedValue"]["rationale"] is None  # Never invented!
-
-    # Docker skill (Preferred)
-    dock_sug = next(s for s in req_sugs if s["proposedValue"]["label"] == "Docker")
-    assert dock_sug["proposedValue"]["necessity"] == "PREFERRED"
-
-    # Certification
-    cert_sug = next(s for s in req_sugs if "AWS" in s["proposedValue"]["label"])
-    assert cert_sug["proposedValue"]["category"] == "CERTIFICATION"
-    assert cert_sug["proposedValue"]["necessity"] == "PREFERRED"
+    assert data["detail"]["code"] == "FEATURE_DEPRECATED"
 
 
 def test_empty_and_oversized_input_validation(client, test_db):
     _seed_user(test_db, email="recruiter.bounds@company.test", role=UserRole.RECRUITER)
     _login_user(client, email="recruiter.bounds@company.test")
 
-    # Empty text -> 422
+    # Deprecated endpoint returns 410 GONE
     resp_empty = client.post("/api/v1/jobs/imports/analyze-text", json={"text": "   "})
-    assert resp_empty.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-
-    # Too short -> 422
-    resp_short = client.post("/api/v1/jobs/imports/analyze-text", json={"text": "Short"})
-    assert resp_short.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-
-    # Oversized (>100k chars) -> 422
-    oversized = "a" * 100005
-    resp_over = client.post("/api/v1/jobs/imports/analyze-text", json={"text": oversized})
-    assert resp_over.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert resp_empty.status_code == status.HTTP_410_GONE
+    assert resp_empty.json()["detail"]["code"] == "FEATURE_DEPRECATED"
 
 
 # =========================================================================
-# 2. Protected Information Safeguard & Warnings
+# 2. Protected Information Safeguard (Deprecated -> 410 GONE)
 # =========================================================================
 
 def test_protected_information_produces_warning_and_not_requirement(client, test_db):
@@ -261,97 +177,37 @@ def test_protected_information_produces_warning_and_not_requirement(client, test
     _login_user(client, email="recruiter.protect@company.test")
 
     jd_text = """Job Title: Operations Associate
-
 Required qualifications
 - Must be a young and energetic candidate.
-- Bachelor degree in Business Administration.
 """
 
     resp = client.post("/api/v1/jobs/imports/analyze-text", json={"text": jd_text})
-    assert resp.status_code == status.HTTP_200_OK
-    data = resp.json()
-
-    # Warning produced for sensitive term
-    warnings = data["warnings"]
-    assert len(warnings) >= 1
-    assert any(w["code"] == "POTENTIALLY_SENSITIVE_CRITERIA" for w in warnings)
-
-    # Sensitive item must NOT become a structured requirement
-    req_labels = [s["proposedValue"]["label"] for s in data["suggestions"] if s["targetField"] == "REQUIREMENT"]
-    assert not any("young" in l.lower() for l in req_labels)
-    assert any("Bachelor" in l for l in req_labels)
+    assert resp.status_code == status.HTTP_410_GONE
+    assert resp.json()["detail"]["code"] == "FEATURE_DEPRECATED"
 
 
 # =========================================================================
-# 3. Suggestion Review, Edit, and Atomic Apply Flow
+# 3. Suggestion Review, Edit, and Atomic Apply Flow (Deprecated -> 410 GONE)
 # =========================================================================
 
-def test_suggestion_review_edit_and_apply_flow(client, test_db, synthetic_taxonomy):
-    recruiter = _seed_user(test_db, email="recruiter.flow@company.test", role=UserRole.RECRUITER)
+def test_suggestion_review_edit_and_apply_flow(client, test_db):
+    _seed_user(test_db, email="recruiter.flow@company.test", role=UserRole.RECRUITER)
     _login_user(client, email="recruiter.flow@company.test")
 
-    # 1. Create a Draft Job Requisition (Rev 1)
-    create_job_resp = client.post("/api/v1/jobs", json={"title": "Draft Backend Job"})
-    assert create_job_resp.status_code == status.HTTP_201_CREATED
-    job_id = create_job_resp.json()["jobId"]
+    session_id = uuid.uuid4()
+    sug_id = str(uuid.uuid4())
 
-    # 2. Analyze JD text linked to this job draft
-    jd_text = """Job Title: Senior Platform Engineer
-Department: Infrastructure
-
-About the role
-Maintain core cloud services.
-
-Required qualifications
-- Experience with Python.
-"""
-    analyze_resp = client.post(
-        f"/api/v1/jobs/imports/analyze-text?job_id={job_id}&expected_revision=1",
-        json={"text": jd_text},
-    )
-    assert analyze_resp.status_code == status.HTTP_200_OK
-    session_data = analyze_resp.json()
-    session_id = session_data["sessionId"]
-    suggestions = session_data["suggestions"]
-
-    title_sug = next(s for s in suggestions if s["targetField"] == "TITLE")
-    py_sug = next(s for s in suggestions if s["targetField"] == "REQUIREMENT")
-
-    # 3. Edit and Update a suggestion status
     patch_resp = client.patch(
-        f"/api/v1/jobs/imports/{session_id}/suggestions/{title_sug['suggestionId']}",
+        f"/api/v1/jobs/imports/{session_id}/suggestions/{sug_id}",
         json={"review_status": "ACCEPTED", "edited_value": "Lead Platform Engineer"},
     )
-    assert patch_resp.status_code == status.HTTP_200_OK
-    updated_title = next(s for s in patch_resp.json()["suggestions"] if s["suggestionId"] == title_sug["suggestionId"])
-    assert updated_title["reviewStatus"] == "ACCEPTED"
-    assert updated_title["proposedValue"] == "Lead Platform Engineer"
+    assert patch_resp.status_code == status.HTTP_410_GONE
 
-    # 4. Apply selected suggestions atomically
-    apply_payload = {
-        "expectedRevision": 1,
-        "acceptedSuggestionIds": [title_sug["suggestionId"], py_sug["suggestionId"]],
-        "editedSuggestions": {
-            title_sug["suggestionId"]: "Lead Platform Engineer",
-        },
-    }
-    apply_resp = client.post(f"/api/v1/jobs/imports/{session_id}/apply", json=apply_payload)
-    assert apply_resp.status_code == status.HTTP_200_OK
-    assert apply_resp.json()["status"] == "APPLIED"
-    assert apply_resp.json()["appliedCount"] == 2
-
-    # 5. Verify Stale Revision Conflict Protection
-    # If the draft revision moves forward (e.g. to 2), applying with expectedRevision=1 must fail with 409
-    save_req_resp = client.put(
-        f"/api/v1/jobs/{job_id}/draft/requirements",
-        json={"expectedRevision": 1, "requirements": [{"label": "Go", "category": "SKILL"}]},
+    apply_resp = client.post(
+        f"/api/v1/jobs/imports/{session_id}/apply",
+        json={"expectedRevision": 1, "acceptedSuggestionIds": [sug_id]},
     )
-    assert save_req_resp.status_code == status.HTTP_200_OK
-    assert save_req_resp.json()["currentVersion"]["revision"] == 2
-
-    conflict_resp = client.post(f"/api/v1/jobs/imports/{session_id}/apply", json=apply_payload)
-    assert conflict_resp.status_code == status.HTTP_409_CONFLICT
-    assert conflict_resp.json()["detail"]["code"] == "REVISION_CONFLICT"
+    assert apply_resp.status_code == status.HTTP_410_GONE
 
 
 # =========================================================================
@@ -359,62 +215,38 @@ Required qualifications
 # =========================================================================
 
 def test_cross_recruiter_import_session_access_denied(client, test_db):
-    user_a = _seed_user(test_db, email="recruiter.a@company.test", role=UserRole.RECRUITER)
-    user_b = _seed_user(test_db, email="recruiter.b@company.test", role=UserRole.RECRUITER)
-
-    # User A creates import session
+    _seed_user(test_db, email="recruiter.a@company.test", role=UserRole.RECRUITER)
     _login_user(client, email="recruiter.a@company.test")
-    resp_a = client.post(
-        "/api/v1/jobs/imports/analyze-text",
-        json={"text": "Job Title: Data Scientist\n\nRequired qualifications\n- Python experience."},
-    )
-    session_id = resp_a.json()["sessionId"]
 
-    # User B tries to view or modify User A's session -> 404
-    _login_user(client, email="recruiter.b@company.test")
-    resp_b = client.get(f"/api/v1/jobs/imports/{session_id}")
-    assert resp_b.status_code == status.HTTP_404_NOT_FOUND
-
-    resp_b_patch = client.patch(
-        f"/api/v1/jobs/imports/{session_id}/suggestions/some-id",
-        json={"review_status": "ACCEPTED"},
-    )
-    assert resp_b_patch.status_code == status.HTTP_404_NOT_FOUND
+    session_id = uuid.uuid4()
+    resp_get = client.get(f"/api/v1/jobs/imports/{session_id}")
+    assert resp_get.status_code == status.HTTP_410_GONE
 
 
 # =========================================================================
-# 5. Document Upload and Image-Only Rejection Tests
+# 5. Document Upload and Deprecation Tests
 # =========================================================================
 
 def test_image_only_pdf_rejected_without_ocr(client, test_db):
-    import pypdf
-
     _seed_user(test_db, email="recruiter.doc@company.test", role=UserRole.RECRUITER)
     _login_user(client, email="recruiter.doc@company.test")
 
-    # Create empty/blank PDF with no text
-    writer = pypdf.PdfWriter()
-    writer.add_blank_page(width=200, height=200)
-    pdf_bytes = io.BytesIO()
-    writer.write(pdf_bytes)
-    pdf_bytes.seek(0)
-
-    files = {"file": ("scanned_jd.pdf", pdf_bytes.getvalue(), "application/pdf")}
+    pdf_bytes = b"%PDF-1.4 empty blank dummy"
+    files = {"file": ("scanned_jd.pdf", pdf_bytes, "application/pdf")}
     resp = client.post("/api/v1/jobs/imports/analyze-file", files=files)
-    assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-    assert resp.json()["detail"]["code"] == "IMAGE_ONLY_DOCUMENT_NO_OCR"
-    assert "OCR is not supported" in resp.json()["detail"]["message"]
+    assert resp.status_code == status.HTTP_410_GONE
+    assert resp.json()["detail"]["code"] == "FEATURE_DEPRECATED"
 
 
 def test_corrupted_document_rejected(client, test_db):
     _seed_user(test_db, email="recruiter.corrupt@company.test", role=UserRole.RECRUITER)
     _login_user(client, email="recruiter.corrupt@company.test")
 
-    # Fake corrupted PDF
     corrupt_bytes = b"%PDF-1.4 garbage corrupted binary content here"
     files = {"file": ("corrupt.pdf", corrupt_bytes, "application/pdf")}
     resp = client.post("/api/v1/jobs/imports/analyze-file", files=files)
-    assert resp.status_code in (status.HTTP_422_UNPROCESSABLE_ENTITY, status.HTTP_400_BAD_REQUEST)
+    assert resp.status_code == status.HTTP_410_GONE
+    assert resp.json()["detail"]["code"] == "FEATURE_DEPRECATED"
 
 
 def test_reviewer_forbidden_from_imports(client, test_db):
@@ -423,6 +255,7 @@ def test_reviewer_forbidden_from_imports(client, test_db):
 
     resp = client.post("/api/v1/jobs/imports/analyze-text", json={"text": "Job Title: Test"})
     assert resp.status_code == status.HTTP_403_FORBIDDEN
+
 
 
 # =========================================================================

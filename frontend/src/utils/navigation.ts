@@ -81,6 +81,18 @@ export function validateInternalReturnUrl(url: string | null | undefined): strin
   return trimmed;
 }
 
+/**
+ * Validates a return URL specifically for processed matching results or gap report context.
+ * Confirms internal URL safety and returns the valid route or null.
+ */
+export function validateProcessedResultsReturnUrl(
+  url: string | null | undefined,
+  _jobId?: string,
+  _runId?: string
+): string | null {
+  return validateInternalReturnUrl(url);
+}
+
 export interface ComparisonNavigationState {
   jobId: string;
   jobTitle?: string;

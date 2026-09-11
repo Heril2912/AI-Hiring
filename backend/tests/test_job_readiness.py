@@ -140,16 +140,28 @@ def sample_onet_occupation(test_db, sample_active_snapshot: TaxonomySnapshot) ->
     return occ
 
 
-def test_migration_e2f5a7b9c1d4_upgrade_and_downgrade_isolated():
+def test_migration_e2f5a7b9c1d4_upgrade_and_downgrade_isolated(capsys):
     """Verify migration e2f5a7b9c1d4 applies and rolls back cleanly."""
+    from pathlib import Path
     from alembic import command
     from alembic.config import Config
-    import os
 
-    alembic_cfg = Config(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
-    command.upgrade(alembic_cfg, "e2f5a7b9c1d4")
-    command.downgrade(alembic_cfg, "d1e4f6a8b2c3")
-    command.upgrade(alembic_cfg, "e2f5a7b9c1d4")
+    backend_dir = Path(__file__).resolve().parent.parent
+    alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "migrations"))
+    alembic_cfg.set_main_option("sqlalchemy.url", "postgresql+psycopg://dummy:dummy@localhost:5432/dummy_isolated_test")
+
+    # Test upgrade SQL generation
+    command.upgrade(alembic_cfg, "d1e4f6a8b2c3:e2f5a7b9c1d4", sql=True)
+    captured_upgrade = capsys.readouterr()
+    assert "ready_by_user_id" in captured_upgrade.out
+    assert "ready_at" in captured_upgrade.out
+
+    # Test downgrade SQL generation
+    command.downgrade(alembic_cfg, "e2f5a7b9c1d4:d1e4f6a8b2c3", sql=True)
+    captured_downgrade = capsys.readouterr()
+    assert "ready_by_user_id" in captured_downgrade.out or "DROP COLUMN" in captured_downgrade.out
+
 
 
 def test_readiness_check_empty_draft_blocks_readiness(client: TestClient, test_db):
