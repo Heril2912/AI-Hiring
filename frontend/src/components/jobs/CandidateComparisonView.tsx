@@ -14,9 +14,11 @@ import { Icon } from "../Icon";
 import {
   CandidateRankingChart,
   RequirementEvidenceDistributionChart,
+  OverallEvidenceCompositionChart,
+  RequirementCoverageByCriterionChart,
   getCanonicalSummaryData,
 } from "./VisualAnalyticsCharts";
-import { RequirementEvidenceMatrix } from "./RequirementEvidenceMatrix";
+
 
 export type RowReportStatus = "idle" | "checking" | "preparing" | "retry" | "unavailable";
 
@@ -596,11 +598,12 @@ export function CandidateComparisonView({
                   onSelectCandidate={ensureGapReport}
                 />
               </div>
-              <div style={{ marginTop: "16px" }}>
-                <RequirementEvidenceMatrix
+              <div className="visual-analytics-grid" style={{ marginTop: "16px" }}>
+                <OverallEvidenceCompositionChart
                   results={results}
-                  candidates={candidates}
-                  onSelectCandidate={ensureGapReport}
+                />
+                <RequirementCoverageByCriterionChart
+                  results={results}
                 />
               </div>
             </div>

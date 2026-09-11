@@ -440,7 +440,7 @@ describe("CandidateProfileReview Component", () => {
     expect(screen.queryByText(/^Not Provided$/i)).toBeNull();
   });
 
-  it("displays at-a-glance summary metrics bar", () => {
+  it("displays Candidate Overview snapshot metrics", () => {
     render(
       <CandidateProfileReview
         profile={mockProfile}
@@ -448,9 +448,10 @@ describe("CandidateProfileReview Component", () => {
       />
     );
 
-    expect(screen.getByText("Skills Recognized")).toBeInTheDocument();
-    expect(screen.getByText("Positions Held")).toBeInTheDocument();
+    expect(screen.getByText("Candidate Snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Documented Positions")).toBeInTheDocument();
     expect(screen.getByText("Education Records")).toBeInTheDocument();
+    expect(screen.getByText("Skills Composition")).toBeInTheDocument();
   });
 
   it("renders employment timeline with organization and normalized dates", () => {
