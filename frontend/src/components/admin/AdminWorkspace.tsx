@@ -32,6 +32,34 @@ interface PaginatedEvents {
   offset: number;
 }
 
+export interface AdminProviderProfileItem {
+  profileId: string;
+  organizationId?: string | null;
+  displayName: string;
+  providerType: string;
+  apiMode: string;
+  baseUrlMasked?: string | null;
+  modelIdentifier?: string | null;
+  secretStatus: "CONFIGURED" | "MISSING" | "NOT_REQUIRED";
+  secretRefName?: string | null;
+  supportedOperations: string[];
+  connectTimeoutSeconds: number;
+  requestTimeoutSeconds: number;
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  maxResponseBytes: number;
+  maxConcurrency: number;
+  retryLimit: number;
+  egressClass: "LOCAL_ONLY" | "APPROVED_REMOTE";
+  privacyReviewStatus: "APPROVED" | "PENDING_REVIEW" | "REJECTED";
+  enabled: boolean;
+  compatibilityStatus: "COMPATIBLE" | "INCOMPATIBLE" | "NOT_TESTED";
+  testedAt?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) {
   // Users state
   const [users, setUsers] = useState<UserItem[]>([]);
@@ -62,6 +90,140 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
   const [eventsTotal, setEventsTotal] = useState(0);
   const [eventsOffset, setEventsOffset] = useState(0);
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+
+  // AI Providers state
+  const [providers, setProviders] = useState<AdminProviderProfileItem[]>([]);
+  const [isLoadingProviders, setIsLoadingProviders] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [isTogglingProvider, setIsTogglingProvider] = useState<string | null>(null);
+
+  // Create Provider Modal
+  const [isCreateProviderModalOpen, setIsCreateProviderModalOpen] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [newProviderType, setNewProviderType] = useState<"LOCAL_OPENAI_COMPATIBLE" | "REMOTE_OPENAI_COMPATIBLE">("LOCAL_OPENAI_COMPATIBLE");
+  const [newEgressClass, setNewEgressClass] = useState<"LOCAL_ONLY" | "APPROVED_REMOTE">("LOCAL_ONLY");
+  const [newBaseUrl, setNewBaseUrl] = useState("");
+  const [newModelId, setNewModelId] = useState("");
+  const [newSecretRef, setNewSecretRef] = useState("");
+  const [createProviderModalError, setCreateProviderModalError] = useState<string | null>(null);
+  const [isCreatingProvider, setIsCreatingProvider] = useState(false);
+
+  // Activate Provider Modal
+  const [targetActivateProfile, setTargetActivateProfile] = useState<AdminProviderProfileItem | null>(null);
+  const [isActivateModalOpen, setIsActivateModalOpen] = useState(false);
+  const [confirmRemoteEgress, setConfirmRemoteEgress] = useState(false);
+  const [activateReason, setActivateReason] = useState("");
+  const [activateModalError, setActivateModalError] = useState<string | null>(null);
+
+  const fetchProviders = async () => {
+    try {
+      setIsLoadingProviders(true);
+      setProviderError(null);
+      const data = await apiFetch<AdminProviderProfileItem[]>("/api/v1/admin/provider-profiles");
+      setProviders(data || []);
+    } catch (err: any) {
+      setProviderError(err?.message || "Failed to load AI provider profiles.");
+    } finally {
+      setIsLoadingProviders(false);
+    }
+  };
+
+  const handleCreateProvider = async (e: FormEvent) => {
+    e.preventDefault();
+    setCreateProviderModalError(null);
+
+    if (!newDisplayName.trim()) {
+      setCreateProviderModalError("Display Name is required.");
+      return;
+    }
+
+    try {
+      setIsCreatingProvider(true);
+      const payload = {
+        displayName: newDisplayName.trim(),
+        providerType: newProviderType,
+        egressClass: newEgressClass,
+        baseUrl: newBaseUrl.trim() || undefined,
+        modelIdentifier: newModelId.trim() || undefined,
+        secretRef: newSecretRef.trim() || undefined,
+      };
+
+      await apiFetch("/api/v1/admin/provider-profiles", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      setIsCreateProviderModalOpen(false);
+      setNewDisplayName("");
+      setNewBaseUrl("");
+      setNewModelId("");
+      setNewSecretRef("");
+      setActionSuccess(`Provider profile '${newDisplayName.trim()}' created successfully.`);
+      fetchProviders();
+    } catch (err: any) {
+      setCreateProviderModalError(err?.message || "Failed to create provider profile.");
+    } finally {
+      setIsCreatingProvider(false);
+    }
+  };
+
+  const handleOpenActivateModal = (profile: AdminProviderProfileItem) => {
+    setTargetActivateProfile(profile);
+    setConfirmRemoteEgress(false);
+    setActivateReason("");
+    setActivateModalError(null);
+    setIsActivateModalOpen(true);
+  };
+
+  const handleConfirmActivate = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!targetActivateProfile) return;
+    setActivateModalError(null);
+
+    if (targetActivateProfile.egressClass === "APPROVED_REMOTE" && !confirmRemoteEgress) {
+      setActivateModalError("Explicit confirmation of remote data egress is required.");
+      return;
+    }
+
+    try {
+      setIsTogglingProvider(targetActivateProfile.profileId);
+      await apiFetch(`/api/v1/admin/provider-profiles/${targetActivateProfile.profileId}/activate`, {
+        method: "POST",
+        body: JSON.stringify({
+          version: targetActivateProfile.version,
+          confirmRemoteEgress: confirmRemoteEgress,
+          reason: activateReason.trim() || undefined,
+        }),
+      });
+
+      setIsActivateModalOpen(false);
+      setActionSuccess(`Provider profile '${targetActivateProfile.displayName}' activated successfully.`);
+      fetchProviders();
+    } catch (err: any) {
+      setActivateModalError(err?.message || "Failed to activate provider profile.");
+    } finally {
+      setIsTogglingProvider(null);
+    }
+  };
+
+  const handleDisableProvider = async (profile: AdminProviderProfileItem) => {
+    try {
+      setIsTogglingProvider(profile.profileId);
+      await apiFetch(`/api/v1/admin/provider-profiles/${profile.profileId}/disable`, {
+        method: "POST",
+        body: JSON.stringify({
+          version: profile.version,
+          reason: "Disabled via Admin Workspace",
+        }),
+      });
+      setActionSuccess(`Provider profile '${profile.displayName}' disabled successfully.`);
+      fetchProviders();
+    } catch (err: any) {
+      setProviderError(err?.message || "Failed to disable provider profile.");
+    } finally {
+      setIsTogglingProvider(null);
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -97,6 +259,8 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
       fetchUsers();
     } else if (activeTab === "events") {
       fetchSecurityEvents(0);
+    } else if (activeTab === "ai_providers") {
+      fetchProviders();
     }
   }, [activeTab]);
 
@@ -639,6 +803,399 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                   disabled={isResetting}
                 >
                   {isResetting ? "Resetting..." : "Reset & Invalidate Sessions"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* AI Providers Section */}
+      {activeTab === "ai_providers" && (
+        <div className="admin-section-card">
+          <div className="admin-section-header">
+            <div>
+              <h2 className="admin-section-title">AI Provider Profiles</h2>
+              <p className="admin-section-subtitle">
+                Configure provider backends, egress boundaries, and optimistic activation controls.
+              </p>
+            </div>
+            <div className="admin-header-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={fetchProviders}
+                disabled={isLoadingProviders}
+              >
+                <Icon name="refresh" size={16} />
+                <span>Refresh</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setIsCreateProviderModalOpen(true)}
+              >
+                <Icon name="plus" size={16} />
+                <span>Add Provider Profile</span>
+              </button>
+            </div>
+          </div>
+
+          {providerError && (
+            <div className="feedback-box error admin-error-banner" role="alert">
+              <Icon name="alert-triangle" size={16} />
+              <p className="feedback-text">{providerError}</p>
+            </div>
+          )}
+
+          {isLoadingProviders ? (
+            <div className="admin-table-loading">
+              <div className="loading-spinner-sm" />
+              <span>Loading provider profiles...</span>
+            </div>
+          ) : (
+            <div className="admin-table-wrapper">
+              <table className="admin-data-table" aria-label="AI Providers Table">
+                <thead>
+                  <tr>
+                    <th>Display Name</th>
+                    <th>Type & Model</th>
+                    <th>Egress Class</th>
+                    <th>Base URL</th>
+                    <th>Secret Status</th>
+                    <th>Compatibility</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {providers.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="table-empty-cell">
+                        No provider profiles configured. Click "Add Provider Profile" to create one.
+                      </td>
+                    </tr>
+                  ) : (
+                    providers.map((p) => (
+                      <tr key={p.profileId} className={p.enabled ? "row-active-provider" : ""}>
+                        <td>
+                          <div className="provider-name-cell">
+                            <strong>{p.displayName}</strong>
+                            <span className="profile-version-tag">v{p.version}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="provider-type-cell">
+                            <code>{p.providerType}</code>
+                            {p.modelIdentifier && (
+                              <span className="model-id-tag">{p.modelIdentifier}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            className={`status-pill ${
+                              p.egressClass === "LOCAL_ONLY"
+                                ? "status-active"
+                                : "status-badge-remote"
+                            }`}
+                          >
+                            {p.egressClass === "LOCAL_ONLY" ? "Local Only" : "Approved Remote"}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="base-url-text">
+                            {p.baseUrlMasked || <em className="text-muted">Standard / Local Default</em>}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className={`secret-status-tag ${
+                              p.secretStatus === "CONFIGURED"
+                                ? "secret-ok"
+                                : p.secretStatus === "MISSING"
+                                ? "secret-missing"
+                                : "secret-none"
+                            }`}
+                          >
+                            {p.secretStatus === "CONFIGURED" && "✓ Configured"}
+                            {p.secretStatus === "MISSING" && "⚠ Missing Secret"}
+                            {p.secretStatus === "NOT_REQUIRED" && "Not Required"}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="compat-status-tag">
+                            {p.compatibilityStatus === "COMPATIBLE" ? "Compatible" : "Not Tested"}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className={`status-pill ${
+                              p.enabled ? "status-active" : "status-inactive"
+                            }`}
+                          >
+                            {p.enabled ? "Active" : "Disabled"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="table-actions-cell">
+                            {p.enabled ? (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleDisableProvider(p)}
+                                disabled={isTogglingProvider === p.profileId}
+                              >
+                                {isTogglingProvider === p.profileId ? "Disabling..." : "Disable"}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                onClick={() => handleOpenActivateModal(p)}
+                                disabled={isTogglingProvider === p.profileId}
+                              >
+                                Activate
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Create Provider Modal */}
+      {isCreateProviderModalOpen && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="create-provider-title">
+          <div className="modal-dialog">
+            <div className="modal-header">
+              <h3 id="create-provider-title" className="modal-title">
+                Add AI Provider Profile
+              </h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setIsCreateProviderModalOpen(false)}
+                aria-label="Close modal"
+              >
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+
+            {createProviderModalError && (
+              <div className="feedback-box error" role="alert">
+                <Icon name="alert-triangle" size={16} />
+                <p className="feedback-text error">{createProviderModalError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateProvider} className="modal-form" noValidate>
+              <div className="form-group">
+                <label htmlFor="provider-display-name" className="form-label">
+                  Display Name *
+                </label>
+                <input
+                  id="provider-display-name"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Local llama.cpp Qwen3 / OpenAI Production"
+                  value={newDisplayName}
+                  onChange={(e) => setNewDisplayName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="provider-type-select" className="form-label">
+                  Provider Backend Type *
+                </label>
+                <select
+                  id="provider-type-select"
+                  className="form-select"
+                  value={newProviderType}
+                  onChange={(e) => setNewProviderType(e.target.value as any)}
+                >
+                  <option value="LOCAL_OPENAI_COMPATIBLE">Local OpenAI-Compatible (e.g. llama.cpp / Ollama)</option>
+                  <option value="REMOTE_OPENAI_COMPATIBLE">Remote OpenAI-Compatible (e.g. OpenAI / Azure)</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="provider-egress-class" className="form-label">
+                  Egress Boundary Class *
+                </label>
+                <select
+                  id="provider-egress-class"
+                  className="form-select"
+                  value={newEgressClass}
+                  onChange={(e) => setNewEgressClass(e.target.value as any)}
+                >
+                  <option value="LOCAL_ONLY">LOCAL_ONLY (Enforces loopback / local boundary)</option>
+                  <option value="APPROVED_REMOTE">APPROVED_REMOTE (Requires HTTPS & Host Allowlist)</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="provider-base-url" className="form-label">
+                  Base URL (optional for standard loopback)
+                </label>
+                <input
+                  id="provider-base-url"
+                  type="url"
+                  className="form-input"
+                  placeholder={
+                    newEgressClass === "LOCAL_ONLY"
+                      ? "http://127.0.0.1:8080/v1"
+                      : "https://api.openai.com/v1"
+                  }
+                  value={newBaseUrl}
+                  onChange={(e) => setNewBaseUrl(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="provider-model-id" className="form-label">
+                  Model Identifier (optional)
+                </label>
+                <input
+                  id="provider-model-id"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. qwen2.5:7b or gpt-4o-mini"
+                  value={newModelId}
+                  onChange={(e) => setNewModelId(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="provider-secret-ref" className="form-label">
+                  Secret Reference (Controlled Format: env:VAR_NAME)
+                </label>
+                <input
+                  id="provider-secret-ref"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. env:LLM_OPENAI_API_KEY"
+                  value={newSecretRef}
+                  onChange={(e) => setNewSecretRef(e.target.value)}
+                />
+                <span className="form-help-text">
+                  Plaintext credentials are never accepted. Specify an environment variable reference.
+                </span>
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsCreateProviderModalOpen(false)}
+                  disabled={isCreatingProvider}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={isCreatingProvider}
+                >
+                  {isCreatingProvider ? "Saving Profile..." : "Create Provider Profile"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Activate Provider Confirmation Modal */}
+      {isActivateModalOpen && targetActivateProfile && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="activate-provider-title">
+          <div className="modal-dialog">
+            <div className="modal-header">
+              <h3 id="activate-provider-title" className="modal-title">
+                Activate Provider: {targetActivateProfile.displayName}
+              </h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setIsActivateModalOpen(false)}
+                aria-label="Close modal"
+              >
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+
+            {activateModalError && (
+              <div className="feedback-box error" role="alert">
+                <Icon name="alert-triangle" size={16} />
+                <p className="feedback-text error">{activateModalError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmActivate} className="modal-form" noValidate>
+              <p className="modal-description">
+                Activating this provider will immediately route all future AI interview and assistance requests to <strong>{targetActivateProfile.displayName}</strong>. Any currently active provider in this organization will be disabled.
+              </p>
+
+              {targetActivateProfile.egressClass === "APPROVED_REMOTE" && (
+                <div className="remote-egress-warning-box">
+                  <div className="warning-box-header">
+                    <Icon name="shield" size={18} />
+                    <strong>Remote Data Egress Confirmation Required</strong>
+                  </div>
+                  <p className="warning-box-body">
+                    This profile is configured as an <strong>APPROVED_REMOTE</strong> provider ({targetActivateProfile.baseUrlMasked}). Activating it means prompt payloads and bounded interview requests may egress across the approved network boundary.
+                  </p>
+                  <label className="checkbox-label" htmlFor="confirm-remote-egress-cb">
+                    <input
+                      id="confirm-remote-egress-cb"
+                      type="checkbox"
+                      checked={confirmRemoteEgress}
+                      onChange={(e) => setConfirmRemoteEgress(e.target.checked)}
+                      required
+                    />
+                    <span>I confirm and authorize remote data egress for this provider profile.</span>
+                  </label>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label htmlFor="activate-reason-input" className="form-label">
+                  Activation Audit Reason (optional)
+                </label>
+                <input
+                  id="activate-reason-input"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Switched to local Qwen3 instance for testing"
+                  value={activateReason}
+                  onChange={(e) => setActivateReason(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsActivateModalOpen(false)}
+                  disabled={isTogglingProvider !== null}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={
+                    isTogglingProvider !== null ||
+                    (targetActivateProfile.egressClass === "APPROVED_REMOTE" && !confirmRemoteEgress)
+                  }
+                >
+                  {isTogglingProvider ? "Activating..." : "Confirm Activation"}
                 </button>
               </div>
             </form>

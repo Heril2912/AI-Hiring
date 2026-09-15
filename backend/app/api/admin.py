@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -33,6 +33,21 @@ from app.schemas.auth import (
     PaginatedSecurityAuditEventsResponse,
     SecurityAuditEventResponse,
     UserResponse,
+)
+from app.schemas.provider_admin import (
+    ActivateProviderProfileRequest,
+    AdminProviderProfileResponse,
+    CreateProviderProfileRequest,
+    DisableProviderProfileRequest,
+    UpdateProviderProfileRequest,
+)
+from app.services.provider_registry import (
+    InactiveProfileUpdateError,
+    IneligibleProviderError,
+    ProviderRegistry,
+    RemoteEgressConfirmationRequiredError,
+    StaleVersionError,
+    get_provider_registry,
 )
 from app.services.security import hash_password
 
@@ -413,3 +428,297 @@ async def list_security_events(
         limit=limit,
         offset=offset,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3A.4 AI Provider Administration Endpoints (Admin Only)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/provider-profiles",
+    response_model=list[AdminProviderProfileResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List Safe AI Provider Profiles",
+    description="Lists configured provider profiles for Administrator inspection with masked secrets and sanitized URLs.",
+)
+async def list_provider_profiles(
+    auth_ctx: AuthenticatedContext = Depends(require_admin),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> list[AdminProviderProfileResponse]:
+    profiles = registry.list_profiles()
+    return [registry.to_safe_admin_response(p) for p in profiles]
+
+
+@router.post(
+    "/provider-profiles",
+    response_model=AdminProviderProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create AI Provider Profile",
+    description="Creates a new inactive AI provider profile with validated destinations. Requires Admin role and CSRF.",
+)
+async def create_provider_profile(
+    create_req: CreateProviderProfileRequest = Body(...),
+    auth_ctx: AuthenticatedContext = Depends(verify_csrf_and_origin),
+    admin_auth: AuthenticatedContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> AdminProviderProfileResponse:
+    try:
+        profile = registry.create_profile(create_req, actor_id=admin_auth.user.user_id)
+    except ValueError as e:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.PROVIDER_CONFIG_REJECTED,
+            result=AuditResult.FAILURE,
+            reason_code=AuditReasonCode.PROVIDER_INVALID_CONFIG,
+            actor_user_id=admin_auth.user.user_id,
+            resource_type="provider_profile",
+            safe_metadata={
+                "provider_type": create_req.provider_type.value,
+                "display_name": create_req.display_name,
+                "egress_class": create_req.egress_class.value,
+                "error": str(e),
+            },
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.PROVIDER_PROFILE_CREATED,
+        result=AuditResult.SUCCESS,
+        reason_code=AuditReasonCode.PROVIDER_CONFIGURED,
+        actor_user_id=admin_auth.user.user_id,
+        resource_type="provider_profile",
+        resource_id=str(profile.profile_id),
+        safe_metadata={
+            "provider_type": profile.provider_type.value,
+            "display_name": profile.display_name,
+            "egress_class": profile.egress_class.value,
+            "version": profile.version,
+        },
+    )
+    db.commit()
+
+    return registry.to_safe_admin_response(profile)
+
+
+@router.put(
+    "/provider-profiles/{profile_id}",
+    response_model=AdminProviderProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update Inactive AI Provider Profile",
+    description="Updates settings on an inactive provider profile with optimistic version check. Requires Admin role and CSRF.",
+)
+async def update_provider_profile(
+    profile_id: uuid.UUID,
+    update_req: UpdateProviderProfileRequest = Body(...),
+    auth_ctx: AuthenticatedContext = Depends(verify_csrf_and_origin),
+    admin_auth: AuthenticatedContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> AdminProviderProfileResponse:
+    try:
+        updated = registry.update_profile(profile_id, update_req, actor_id=admin_auth.user.user_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider profile '{profile_id}' not found.",
+        )
+    except StaleVersionError as e:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.PROVIDER_CONFIG_REJECTED,
+            result=AuditResult.FAILURE,
+            reason_code=AuditReasonCode.STALE_VERSION,
+            actor_user_id=admin_auth.user.user_id,
+            resource_type="provider_profile",
+            resource_id=str(profile_id),
+            safe_metadata={"error": str(e), "requested_version": update_req.version},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+    except InactiveProfileUpdateError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except ValueError as e:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.PROVIDER_CONFIG_REJECTED,
+            result=AuditResult.FAILURE,
+            reason_code=AuditReasonCode.PROVIDER_INVALID_CONFIG,
+            actor_user_id=admin_auth.user.user_id,
+            resource_type="provider_profile",
+            resource_id=str(profile_id),
+            safe_metadata={"error": str(e)},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.PROVIDER_PROFILE_UPDATED,
+        result=AuditResult.SUCCESS,
+        reason_code=AuditReasonCode.PROVIDER_UPDATED,
+        actor_user_id=admin_auth.user.user_id,
+        resource_type="provider_profile",
+        resource_id=str(updated.profile_id),
+        safe_metadata={
+            "provider_type": updated.provider_type.value,
+            "display_name": updated.display_name,
+            "egress_class": updated.egress_class.value,
+            "version": updated.version,
+        },
+    )
+    db.commit()
+
+    return registry.to_safe_admin_response(updated)
+
+
+@router.post(
+    "/provider-profiles/{profile_id}/activate",
+    response_model=AdminProviderProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Activate Eligible AI Provider Profile",
+    description="Activates an eligible provider profile, transactionally disabling previous profiles. Requires Admin role and CSRF.",
+)
+async def activate_provider_profile(
+    profile_id: uuid.UUID,
+    activate_req: ActivateProviderProfileRequest = Body(...),
+    auth_ctx: AuthenticatedContext = Depends(verify_csrf_and_origin),
+    admin_auth: AuthenticatedContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> AdminProviderProfileResponse:
+    try:
+        activated = registry.activate_profile(profile_id, activate_req, actor_id=admin_auth.user.user_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider profile '{profile_id}' not found.",
+        )
+    except StaleVersionError as e:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.PROVIDER_CONFIG_REJECTED,
+            result=AuditResult.FAILURE,
+            reason_code=AuditReasonCode.STALE_VERSION,
+            actor_user_id=admin_auth.user.user_id,
+            resource_type="provider_profile",
+            resource_id=str(profile_id),
+            safe_metadata={"error": str(e), "requested_version": activate_req.version},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+    except (IneligibleProviderError, RemoteEgressConfirmationRequiredError) as e:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.PROVIDER_CONFIG_REJECTED,
+            result=AuditResult.FAILURE,
+            reason_code=AuditReasonCode.PROVIDER_INCOMPATIBLE,
+            actor_user_id=admin_auth.user.user_id,
+            resource_type="provider_profile",
+            resource_id=str(profile_id),
+            safe_metadata={"error": str(e)},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.PROVIDER_PROFILE_ACTIVATED,
+        result=AuditResult.SUCCESS,
+        reason_code=AuditReasonCode.PROVIDER_ACTIVATED,
+        actor_user_id=admin_auth.user.user_id,
+        resource_type="provider_profile",
+        resource_id=str(activated.profile_id),
+        safe_metadata={
+            "provider_type": activated.provider_type.value,
+            "display_name": activated.display_name,
+            "egress_class": activated.egress_class.value,
+            "version": activated.version,
+            "reason": activate_req.reason,
+        },
+    )
+    db.commit()
+
+    return registry.to_safe_admin_response(activated)
+
+
+@router.post(
+    "/provider-profiles/{profile_id}/disable",
+    response_model=AdminProviderProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Disable AI Provider Profile",
+    description="Disables an active or inactive provider profile. Requires Admin role and CSRF.",
+)
+async def disable_provider_profile(
+    profile_id: uuid.UUID,
+    disable_req: DisableProviderProfileRequest = Body(...),
+    auth_ctx: AuthenticatedContext = Depends(verify_csrf_and_origin),
+    admin_auth: AuthenticatedContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> AdminProviderProfileResponse:
+    try:
+        disabled = registry.disable_profile(profile_id, disable_req, actor_id=admin_auth.user.user_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider profile '{profile_id}' not found.",
+        )
+    except StaleVersionError as e:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.PROVIDER_CONFIG_REJECTED,
+            result=AuditResult.FAILURE,
+            reason_code=AuditReasonCode.STALE_VERSION,
+            actor_user_id=admin_auth.user.user_id,
+            resource_type="provider_profile",
+            resource_id=str(profile_id),
+            safe_metadata={"error": str(e), "requested_version": disable_req.version},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.PROVIDER_PROFILE_DISABLED,
+        result=AuditResult.SUCCESS,
+        reason_code=AuditReasonCode.PROVIDER_DISABLED,
+        actor_user_id=admin_auth.user.user_id,
+        resource_type="provider_profile",
+        resource_id=str(disabled.profile_id),
+        safe_metadata={
+            "provider_type": disabled.provider_type.value,
+            "display_name": disabled.display_name,
+            "egress_class": disabled.egress_class.value,
+            "version": disabled.version,
+            "reason": disable_req.reason,
+        },
+    )
+    db.commit()
+
+    return registry.to_safe_admin_response(disabled)
+

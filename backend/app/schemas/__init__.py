@@ -218,6 +218,15 @@ from app.schemas.provider_profile import (
     ProviderEligibilityResult,
     ProviderProfile,
 )
+from app.schemas.provider_admin import (
+    ActivateProviderProfileRequest,
+    AdminProviderProfileResponse,
+    CreateProviderProfileRequest,
+    DisableProviderProfileRequest,
+    InterviewContextResponse,
+    RecruiterAIAvailabilityResponse,
+    UpdateProviderProfileRequest,
+)
 
 from app.schemas.safety_policy import (
     ALLOWED_MODEL_PURPOSES,
@@ -457,6 +466,13 @@ __all__ = [
     "SafetyPolicyDefinition",
     "get_current_safety_policy",
     "check_prohibited_topics",
+    "CreateProviderProfileRequest",
+    "UpdateProviderProfileRequest",
+    "ActivateProviderProfileRequest",
+    "DisableProviderProfileRequest",
+    "AdminProviderProfileResponse",
+    "RecruiterAIAvailabilityResponse",
+    "InterviewContextResponse",
     "InvalidLifecycleTransitionError",
     "transition_plan_lifecycle",
     "transition_simulation_lifecycle",

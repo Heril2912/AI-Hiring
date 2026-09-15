@@ -293,6 +293,12 @@ def test_audit_event_enum_constraints():
         "USER_BOOTSTRAPPED",
         "ACCOUNT_LOCKED",
         "ACCOUNT_UNLOCKED",
+        "PROVIDER_PROFILE_CREATED",
+        "PROVIDER_PROFILE_UPDATED",
+        "PROVIDER_PROFILE_ACTIVATED",
+        "PROVIDER_PROFILE_DISABLED",
+        "PROVIDER_CONFIG_REJECTED",
+        "ACCESS_DENIED",
     }
     assert set([e.value for e in AuditResult]) == {"SUCCESS", "FAILURE", "DENIED"}
     assert set([e.value for e in AuditReasonCode]) == {
@@ -303,6 +309,15 @@ def test_audit_event_enum_constraints():
         "SYSTEM_BOOTSTRAP",
         "SUCCESSFUL_AUTHENTICATION",
         "PASSWORD_CHANGE_REQUIRED",
+        "PROVIDER_CONFIGURED",
+        "PROVIDER_UPDATED",
+        "PROVIDER_ACTIVATED",
+        "PROVIDER_DISABLED",
+        "PROVIDER_INVALID_CONFIG",
+        "PROVIDER_INCOMPATIBLE",
+        "ACCESS_DENIED",
+        "STALE_VERSION",
+        "MASS_ASSIGNMENT_ATTEMPT",
     }
 
 

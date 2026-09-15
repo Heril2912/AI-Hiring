@@ -155,6 +155,14 @@ export function AuthenticatedShell({
                 <Icon name="shield" size={15} />
                 <span>Security Events</span>
               </button>
+              <button
+                type="button"
+                className={`nav-tab-btn ${activeNavTab === "ai_providers" ? "tab-active" : ""}`}
+                onClick={() => onNavigateTab?.("ai_providers")}
+              >
+                <Icon name="sparkles" size={15} />
+                <span>AI Providers</span>
+              </button>
             </>
           )}
 
