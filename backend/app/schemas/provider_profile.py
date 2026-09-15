@@ -50,6 +50,7 @@ class ProviderProfile(FrozenSchema):
     tested_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    version: int = Field(default=1, ge=1)
     schema_version: str = Field(default=PROVIDER_PROFILE_SCHEMA_VERSION)
 
     @field_validator("secret_ref")

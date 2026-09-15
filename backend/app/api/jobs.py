@@ -10,15 +10,31 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.auth import AuthenticatedContext, require_role
+from app.api.auth import (
+    AuthenticatedContext,
+    _record_audit_event,
+    get_authenticated_context,
+    require_recruiter,
+    require_role,
+)
 from app.database import get_db
-from app.models.auth import UserRole
+from app.models.auth import AuditEventType, AuditReasonCode, AuditResult, UserRole
+from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
 from app.models.job import (
     JobLifecycleStatus,
     JobRequirement,
     JobRequisition,
     JobVersion,
     JobVersionStatus,
+)
+from app.models.matching import MatchResultRecord, MatchRunRecord
+from app.schemas.provider_admin import (
+    InterviewContextResponse,
+    RecruiterAIAvailabilityResponse,
+)
+from app.services.provider_registry import (
+    ProviderRegistry,
+    get_provider_registry,
 )
 from app.models.taxonomy import (
     OccupationConcept,
@@ -193,6 +209,21 @@ def _validate_occupation_concept(occupation_concept_id: Optional[uuid.UUID], db:
             },
         )
     return occ
+
+
+@router.get(
+    "/ai-capability",
+    response_model=RecruiterAIAvailabilityResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Safe AI Capability Status",
+    description="Returns minimal, safe provider capability descriptor for authenticated platform users.",
+)
+async def get_ai_capability(
+    auth_ctx: AuthenticatedContext = Depends(get_authenticated_context),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> RecruiterAIAvailabilityResponse:
+    active_profile = registry.get_active_profile()
+    return registry.to_recruiter_capability(active_profile)
 
 
 @router.post(
@@ -986,3 +1017,118 @@ async def list_job_versions(
 
     sorted_versions = sorted(req.versions, key=lambda v: v.version_number, reverse=True)
     return [_build_job_version_summary_response(v) for v in sorted_versions]
+
+
+# ---------------------------------------------------------------------------
+# Phase 3A.4 Recruiter Interview Workspace Shell Endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{job_id}/candidates/{resume_id}/interview-context",
+    response_model=InterviewContextResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Recruiter Interview Workspace Context",
+    description=(
+        "Returns authorized job, candidate identity, and match metadata for the Recruiter interview workspace shell. "
+        "Strictly requires RECRUITER role and ownership of the job requisition."
+    ),
+)
+async def get_interview_workspace_context(
+    job_id: uuid.UUID,
+    resume_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> InterviewContextResponse:
+    actor = auth_ctx.user
+
+    # Verify job existence and recruiter ownership
+    stmt_job = (
+        select(JobRequisition)
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
+        )
+        .where(JobRequisition.job_id == job_id)
+    )
+    job = db.execute(stmt_job).scalar_one_or_none()
+
+    if job is None or job.created_by_user_id != actor.user_id:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="interview_context",
+            resource_id=f"{job_id}:{resume_id}",
+            safe_metadata={"reason": "UNAUTHORIZED_JOB_ACCESS"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job requisition not found or unauthorized."},
+        )
+
+    # Resolve latest or active job version
+    latest_version = sorted(job.versions, key=lambda v: v.version_number, reverse=True)[0]
+
+    # Verify candidate / resume profile
+    stmt_prof = (
+        select(CandidateProfileRecord)
+        .options(selectinload(CandidateProfileRecord.identity))
+        .where(CandidateProfileRecord.artifact_id == resume_id)
+        .order_by(CandidateProfileRecord.profile_version.desc())
+    )
+    candidate_profile = db.execute(stmt_prof).scalars().first()
+
+    if candidate_profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "CANDIDATE_NOT_FOUND", "message": "Candidate profile not found."},
+        )
+
+    candidate_name = "Candidate"
+    candidate_email = None
+    if candidate_profile.identity:
+        candidate_name = candidate_profile.identity.full_name or "Candidate"
+        candidate_email = candidate_profile.identity.primary_email
+
+    # Query match score and gap report summary if available
+    stmt_match = (
+        select(MatchResultRecord)
+        .join(MatchRunRecord, MatchResultRecord.run_id == MatchRunRecord.run_id)
+        .where(
+            MatchRunRecord.job_id == job_id,
+            MatchResultRecord.profile_id == candidate_profile.profile_id,
+        )
+    )
+    match_rec = db.execute(stmt_match).scalars().first()
+
+    match_run_id = match_rec.run_id if match_rec else None
+    match_score = float(match_rec.display_compatibility_score) if match_rec and match_rec.display_compatibility_score is not None else None
+    skill_gap_summary = None
+    if match_rec:
+        tier_str = match_rec.confidence_tier or "PENDING"
+        skill_gap_summary = f"Confidence Tier: {tier_str} (Score: {match_score:.1f}%)"
+
+    active_profile = registry.get_active_profile()
+    ai_capability = registry.to_recruiter_capability(active_profile)
+
+    return InterviewContextResponse(
+        job_id=job.job_id,
+        job_title=latest_version.title,
+        job_version_id=latest_version.job_version_id,
+        job_revision=latest_version.version_number,
+        candidate_id=candidate_profile.profile_id,
+        candidate_name=candidate_name,
+        candidate_email=candidate_email,
+        resume_artifact_id=resume_id,
+        match_run_id=match_run_id,
+        match_score=match_score,
+        skill_gap_summary=skill_gap_summary,
+        ai_capability=ai_capability,
+        interview_plan_state="EMPTY_PLAN",
+        message="Interview workspace ready. Standardized core competencies and supplemental probes will be generated in Phase 3B.",
+    )
+

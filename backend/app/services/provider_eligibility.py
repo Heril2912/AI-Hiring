@@ -17,6 +17,7 @@ def evaluate_provider_eligibility(
     profile: ProviderProfile,
     destination_policy: StrictDestinationPolicy,
     secret_resolver: Optional[EnvironmentSecretResolver] = None,
+    ignore_enabled_state: bool = False,
 ) -> ProviderEligibilityResult:
     """Pure evaluation of provider profile configuration eligibility.
     
@@ -30,7 +31,7 @@ def evaluate_provider_eligibility(
     resolver = secret_resolver or EnvironmentSecretResolver()
 
     # 1. Enabled check
-    if not profile.enabled:
+    if not ignore_enabled_state and not profile.enabled:
         reasons.append("Provider profile is disabled.")
 
     # 2. Disabled provider type

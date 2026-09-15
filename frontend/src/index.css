@@ -6554,3 +6554,331 @@ input, select, textarea {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* ==========================================================================
+   Phase 3A.4: AI Provider Profiles & Recruiter Interview Workspace Shell
+   ========================================================================== */
+
+/* AI Provider Table & Status Styling */
+.row-active-provider {
+  background-color: var(--accent-subtle) !important;
+}
+
+.provider-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-version-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background-color: var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.provider-type-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-id-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.status-badge-remote {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.secret-status-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+}
+
+.secret-status-tag.secret-ok {
+  background-color: var(--status-success-bg);
+  color: var(--status-success);
+}
+
+.secret-status-tag.secret-missing {
+  background-color: var(--status-warn-bg);
+  color: var(--status-warn);
+}
+
+.secret-status-tag.secret-none {
+  background-color: var(--bg-surface-subtle);
+  color: var(--text-muted);
+}
+
+.compat-status-tag {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.remote-egress-warning-box {
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  color: #78350f;
+}
+
+.remote-egress-warning-box .warning-box-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: #92400e;
+}
+
+.remote-egress-warning-box .warning-box-body {
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+
+.remote-egress-warning-box .checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #92400e;
+}
+
+/* Interview Workspace Shell */
+.interview-workspace-container {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.interview-header-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.interview-header-titles .title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.interview-main-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.interview-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.ai-availability-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ai-availability-pill.ai-active {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.ai-availability-pill.ai-disabled {
+  background-color: var(--bg-surface-subtle);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.model-chip {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.interview-context-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.interview-context-grid .context-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+}
+
+.context-card .card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.context-card .card-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.context-card .card-body .meta-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.context-card .card-body .meta-row:last-child {
+  border-bottom: none;
+}
+
+.meta-label {
+  color: var(--text-secondary);
+}
+
+.meta-val {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.score-val {
+  color: var(--status-success);
+}
+
+.interview-plan-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+.plan-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.plan-section-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.plan-state-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.interview-guidance-card {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 24px;
+}
+
+.guidance-icon-col {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.guidance-content h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+}
+
+.guidance-content p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 10px 0;
+}
+
+.guidance-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.empty-plan-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 48px 24px;
+  background: var(--bg-app);
+  border: 1px dashed var(--border-medium);
+  border-radius: var(--radius-lg);
+}
+
+.empty-icon-wrap {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-primary);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.empty-plan-placeholder h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.empty-plan-placeholder p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 560px;
+  line-height: 1.5;
+  margin: 0;
+}
+

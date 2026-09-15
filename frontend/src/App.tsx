@@ -13,6 +13,7 @@ import { JobsDirectory } from "./components/jobs/JobsDirectory";
 import { JobEditor } from "./components/jobs/JobEditor";
 import { CandidateComparisonView } from "./components/jobs/CandidateComparisonView";
 import { RequirementGapReportView } from "./components/jobs/RequirementGapReportView";
+import { InterviewWorkspace } from "./components/interviews/InterviewWorkspace";
 import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
@@ -38,6 +39,11 @@ export interface ComparisonParamsState {
   selectedProfileIds?: string[];
 }
 
+export interface InterviewRouteState {
+  jobId: string;
+  resumeId: string;
+}
+
 function AuthenticatedApp() {
   const { user } = useAuth();
   const role = user?.role || "REVIEWER";
@@ -47,9 +53,10 @@ function AuthenticatedApp() {
     role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews"
   );
   const [activeView, setActiveView] = useState<
-    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction"
+    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace"
   >("candidates");
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [interviewRoute, setInterviewRoute] = useState<InterviewRouteState | null>(null);
 
   // Health check
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
@@ -370,6 +377,10 @@ function AuthenticatedApp() {
                     setSelectedReportId(reportId);
                     setActiveView("gap_report");
                   }}
+                  onOpenInterviewWorkspace={(jobId, resumeId) => {
+                    setInterviewRoute({ jobId, resumeId });
+                    setActiveView("interview_workspace");
+                  }}
                 />
               )}
 
@@ -433,6 +444,22 @@ function AuthenticatedApp() {
                 <ExtractionReview
                   extraction={selectedExtraction}
                   onNavigateBack={() => setActiveView("profile")}
+                />
+              )}
+
+              {activeView === "interview_workspace" && interviewRoute && (
+                <InterviewWorkspace
+                  jobId={interviewRoute.jobId}
+                  resumeId={interviewRoute.resumeId}
+                  onNavigateBack={() => {
+                    if (comparisonParams) {
+                      setActiveView("compare_candidates");
+                      setActiveNavTab("jobs");
+                    } else {
+                      setActiveView("candidates");
+                      setActiveNavTab("candidates");
+                    }
+                  }}
                 />
               )}
             </>
