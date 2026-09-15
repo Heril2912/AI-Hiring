@@ -68,6 +68,34 @@ class ProviderType(str, enum.Enum):
     CUSTOM_ADAPTER = "CUSTOM_ADAPTER"
 
 
+class ProviderApiMode(str, enum.Enum):
+    """API mode supported by the provider endpoint."""
+    CHAT_COMPLETIONS = "CHAT_COMPLETIONS"
+    RESPONSES = "RESPONSES"
+    CUSTOM = "CUSTOM"
+
+
+class ProviderEgressClass(str, enum.Enum):
+    """Network egress scope and isolation classification."""
+    LOCAL_ONLY = "LOCAL_ONLY"
+    APPROVED_REMOTE = "APPROVED_REMOTE"
+
+
+class ProviderCompatibilityStatus(str, enum.Enum):
+    """Health and compatibility test status of a provider profile."""
+    NOT_TESTED = "NOT_TESTED"
+    HEALTHY = "HEALTHY"
+    INCOMPATIBLE = "INCOMPATIBLE"
+    DISABLED = "DISABLED"
+
+
+class PrivacyReviewStatus(str, enum.Enum):
+    """Data protection and privacy review clearance state."""
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class ProviderOperation(str, enum.Enum):
     """Strictly allowlisted model capability operations.
     
