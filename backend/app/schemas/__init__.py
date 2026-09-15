@@ -201,6 +201,10 @@ from app.schemas.phase3_enums import (
     AuthoringOrigin,
     InterviewLayer,
     PlanLifecycle,
+    PrivacyReviewStatus,
+    ProviderApiMode,
+    ProviderCompatibilityStatus,
+    ProviderEgressClass,
     ProviderErrorCode,
     ProviderOperation,
     ProviderType,
@@ -209,6 +213,12 @@ from app.schemas.phase3_enums import (
     ValidationErrorCode,
     ValidationState,
 )
+from app.schemas.provider_profile import (
+    PROVIDER_PROFILE_SCHEMA_VERSION,
+    ProviderEligibilityResult,
+    ProviderProfile,
+)
+
 from app.schemas.safety_policy import (
     ALLOWED_MODEL_PURPOSES,
     FAILURE_POSTURE_MATRIX,
@@ -424,10 +434,17 @@ __all__ = [
     "SimulationLifecycle",
     "ATSExportLifecycle",
     "ProviderType",
+    "ProviderApiMode",
+    "ProviderEgressClass",
+    "ProviderCompatibilityStatus",
+    "PrivacyReviewStatus",
     "ProviderOperation",
     "AuditRetentionClass",
     "ValidationErrorCode",
     "ProviderErrorCode",
+    "PROVIDER_PROFILE_SCHEMA_VERSION",
+    "ProviderProfile",
+    "ProviderEligibilityResult",
     "SAFETY_POLICY_ID",
     "SAFETY_POLICY_VERSION",
     "SAFETY_POLICY_SCHEMA_VERSION",

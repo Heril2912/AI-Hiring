@@ -33,6 +33,24 @@ class Settings(BaseSettings):
     scrypt_p: int = 1
     scrypt_dklen: int = 32
 
+    # Model Provider & LLM Configuration (Disabled by default)
+    llm_enabled: bool = False
+    llm_provider: str = "disabled"
+    llm_profile_name: str = ""
+    llm_base_url: str = ""
+    llm_model: str = ""
+    llm_api_mode: str = "chat_completions"
+    llm_api_key_secret_ref: str = "env:LLM_API_KEY"
+    llm_allow_remote: bool = False
+    llm_remote_allowed_hosts: str = ""
+    llm_connect_timeout_seconds: float = 5.0
+    llm_request_timeout_seconds: float = 30.0
+    llm_max_input_tokens: int = 4096
+    llm_max_output_tokens: int = 600
+    llm_max_response_bytes: int = 262144
+    llm_max_concurrency: int = 1
+    llm_retry_limit: int = 0
+
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
         extra="ignore",
@@ -65,6 +83,10 @@ class Settings(BaseSettings):
         "scrypt_r",
         "scrypt_p",
         "scrypt_dklen",
+        "llm_max_input_tokens",
+        "llm_max_output_tokens",
+        "llm_max_response_bytes",
+        "llm_max_concurrency",
     )
     @classmethod
     def validate_positive_ints(cls, v: int) -> int:
@@ -72,11 +94,30 @@ class Settings(BaseSettings):
             raise ValueError("Configuration values must be positive integers.")
         return v
 
+    @field_validator("llm_retry_limit")
+    @classmethod
+    def validate_retry_limit(cls, v: int) -> int:
+        if v < 0 or v > 3:
+            raise ValueError("llm_retry_limit must be between 0 and 3.")
+        return v
+
+    @field_validator("llm_connect_timeout_seconds", "llm_request_timeout_seconds")
+    @classmethod
+    def validate_timeouts(cls, v: float) -> float:
+        if v <= 0.0 or v > 300.0:
+            raise ValueError("Timeouts must be positive floats between 0.1 and 300.0 seconds.")
+        return v
+
     @model_validator(mode="after")
     def validate_session_expiry_lifetimes(self) -> "Settings":
         if self.session_idle_lifetime_seconds > self.session_absolute_lifetime_seconds:
             raise ValueError("session_idle_lifetime_seconds cannot exceed session_absolute_lifetime_seconds.")
         return self
+
+    def get_remote_allowed_hosts_list(self) -> list[str]:
+        if not self.llm_remote_allowed_hosts:
+            return []
+        return [h.strip().lower() for h in self.llm_remote_allowed_hosts.split(",") if h.strip()]
 
     def get_intake_path(self) -> Path:
         raw_path = Path(self.resume_intake_directory)
@@ -94,3 +135,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
