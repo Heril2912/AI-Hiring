@@ -29,7 +29,7 @@ from app.services.secret_resolver import (
 
 def test_default_disabled_configuration():
     """Verifies that AI and provider profiles are disabled by default."""
-    settings = Settings(database_url="postgresql+psycopg://user:pass@localhost:5432/db")
+    settings = Settings(_env_file=None, database_url="postgresql+psycopg://user:pass@localhost:5432/db")
     assert settings.llm_enabled is False
     assert settings.llm_provider == "disabled"
     assert settings.llm_allow_remote is False

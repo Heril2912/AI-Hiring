@@ -704,7 +704,7 @@ def test_step2_dns_rebind_and_private_ip_blocking(monkeypatch):
 
 def test_step2_default_configuration_and_not_tested_separation():
     """Confirm AI disabled by default, remote disabled, concurrency=1, no failover, and NOT_TESTED distinct from HEALTHY."""
-    settings = Settings(database_url="postgresql+psycopg://user:pass@localhost:5432/db")
+    settings = Settings(_env_file=None, database_url="postgresql+psycopg://user:pass@localhost:5432/db")
     assert settings.llm_enabled is False
     assert settings.llm_provider == "disabled"
     assert settings.llm_allow_remote is False

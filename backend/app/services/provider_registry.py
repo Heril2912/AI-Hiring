@@ -554,6 +554,26 @@ class ProviderRegistry:
             egress_class=ProviderEgressClass.LOCAL_ONLY,
         )
 
+    def get_provider_instance(self, profile: Optional[ProviderProfile]) -> "BaseWordingProvider":
+        """Instantiates the appropriate BaseWordingProvider implementation for a profile."""
+        from app.services.wording_provider import (
+            BaseWordingProvider,
+            DisabledWordingProvider,
+            LocalOpenAICompatibleProvider,
+        )
+
+        if not profile or not profile.enabled or profile.provider_type == ProviderType.DISABLED:
+            return DisabledWordingProvider(profile)
+
+        if profile.provider_type == ProviderType.LOCAL_OPENAI_COMPATIBLE:
+            return LocalOpenAICompatibleProvider(
+                profile=profile,
+                destination_policy=self._destination_policy,
+                secret_resolver=self._secret_resolver,
+            )
+
+        return DisabledWordingProvider(profile)
+
 
 _global_provider_registry: Optional[ProviderRegistry] = None
 _global_registry_lock = threading.Lock()
@@ -567,6 +587,10 @@ def get_provider_registry(settings: Settings = Depends(get_settings)) -> Provide
     global _global_provider_registry
     with _global_registry_lock:
         if _global_provider_registry is None:
-            _global_provider_registry = ProviderRegistry(settings)
+            if not isinstance(settings, Settings):
+                resolved_settings = get_settings()
+            else:
+                resolved_settings = settings
+            _global_provider_registry = ProviderRegistry(resolved_settings)
         return _global_provider_registry
 

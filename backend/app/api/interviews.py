@@ -1332,3 +1332,66 @@ async def get_candidate_plan_diff_endpoint(
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
 
 
+# =========================================================================
+# Phase 3C.2: Recruiter Question Wording Assistance
+# =========================================================================
+
+from app.schemas.wording_contract import (
+    CandidateWordingResult,
+    RecruiterWordingAssistRequest,
+)
+from app.services.wording_assistance_service import (
+    QuestionNotDraftError,
+    QuestionNotFoundError,
+    request_question_wording_assistance,
+)
+
+
+@router.post(
+    "/{template_id}/questions/{question_id}/assist-wording",
+    response_model=CandidateWordingResult,
+    status_code=status.HTTP_200_OK,
+    summary="Request Bounded Question Wording Assistance",
+    description=(
+        "Requests bounded wording assistance for one authorized DRAFT interview question. "
+        "The model proposes alternative wording; all authoritative metadata, intent, competency, "
+        "and layer constraints are loaded strictly by the server. Does not alter lifecycle or persist results."
+    ),
+)
+async def request_question_wording_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: RecruiterWordingAssistRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> CandidateWordingResult:
+    actor = auth_ctx.user
+    try:
+        return await request_question_wording_assistance(
+            actor=actor,
+            question_id=question_id,
+            request_dto=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="question_wording_assistance",
+            resource_id=str(question_id),
+            safe_metadata={"error_code": exc.code},
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except QuestionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": exc.code, "message": exc.message})
+    except QuestionNotDraftError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
