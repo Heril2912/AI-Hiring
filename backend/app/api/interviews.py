@@ -363,3 +363,313 @@ async def create_job_interview_template_draft(
         created_by_user_id=template_record.created_by_user_id,
         created_at=template_record.created_at,
     )
+
+
+# =========================================================================
+# Candidate Interview Plan Endpoints (Phase 3B.3)
+# =========================================================================
+
+from app.schemas.interview_api import (
+    CandidateInterviewPlanDraftCreateResponse,
+    CandidateInterviewPlanPreviewResponse,
+    CandidateInterviewPlanSummaryResponse,
+    CandidatePlanCoverageSummaryResponse,
+    CandidateSupplementalQuestionResponse,
+    SupplementalQuestionGuidanceResponse,
+    SupplementalQuestionProvenanceResponse,
+)
+from app.services.candidate_plan_generator_service import (
+    GeneratedDeterministicCandidatePlan,
+    create_deterministic_candidate_interview_plan_draft,
+    preview_deterministic_candidate_interview_plan,
+)
+
+
+def _map_candidate_plan_to_preview_dto(
+    plan: GeneratedDeterministicCandidatePlan,
+) -> CandidateInterviewPlanPreviewResponse:
+    supp_dtos = []
+    for q in plan.supplemental_questions:
+        guidance = SupplementalQuestionGuidanceResponse(
+            clarification_purpose=q.clarification_purpose,
+            facts_to_confirm=q.facts_to_confirm,
+            prohibited_inferences=q.prohibited_inferences,
+        )
+        prov = SupplementalQuestionProvenanceResponse(
+            source_requirement_id=q.source_requirement_id,
+            source_match_result_id=q.source_match_result_id,
+            source_match_state=q.source_match_state,
+            allowlisted_evidence_ids=q.allowlisted_evidence_ids,
+            excluded_from_common_score=True,
+        )
+        supp_dtos.append(
+            CandidateSupplementalQuestionResponse(
+                question_id=q.question_id,
+                layer=q.layer,
+                question_type=q.question_type,
+                authoring_origin=q.authoring_origin,
+                display_order=q.display_order,
+                requirement_references=q.requirement_references,
+                deterministic_template_id=q.deterministic_template_id,
+                deterministic_template_version=q.deterministic_template_version,
+                question_text=q.question_text,
+                question_intent=q.question_intent,
+                estimated_time_minutes=q.estimated_time_minutes,
+                included_in_common_score=q.included_in_common_score,
+                validation_state=q.validation_state,
+                guidance=guidance,
+                provenance=prov,
+            )
+        )
+
+    common_summary = CandidateInterviewPlanSummaryResponse(
+        template_id=plan.template_id,
+        template_version=plan.template_version,
+        template_content_hash=plan.template_content_hash,
+        job_id=plan.job_id,
+        job_revision=plan.job_revision,
+        common_core_questions_count=plan.common_core_questions_count,
+        common_core_duration_minutes=plan.common_core_duration_minutes,
+    )
+
+    cov_summary = CandidatePlanCoverageSummaryResponse(
+        selected_target_count=plan.coverage_summary.selected_target_count,
+        target_selection_reasons=plan.coverage_summary.target_selection_reasons,
+        match_states_clarified=plan.coverage_summary.match_states_clarified,
+        total_supplemental_duration_minutes=plan.coverage_summary.total_supplemental_duration_minutes,
+    )
+
+    return CandidateInterviewPlanPreviewResponse(
+        plan_id=plan.plan_id,
+        job_id=plan.job_id,
+        job_revision=plan.job_revision,
+        template_id=plan.template_id,
+        template_version=plan.template_version,
+        candidate_id=plan.candidate_id,
+        profile_id=plan.profile_id,
+        profile_version=plan.profile_version,
+        match_result_id=plan.match_result_id,
+        match_result_fingerprint=plan.match_result_fingerprint,
+        lifecycle_status=plan.lifecycle_status,
+        scoring_separation_policy=plan.scoring_separation_policy,
+        input_snapshot_hash=plan.input_snapshot_hash,
+        content_hash=plan.content_hash,
+        common_template_summary=common_summary,
+        supplemental_questions=supp_dtos,
+        coverage_summary=cov_summary,
+        validation_report=plan.validation_report,
+        supplemental_catalogue_version=plan.supplemental_catalogue_version,
+        policy_version=plan.policy_version,
+    )
+
+
+@router.get(
+    "/{template_id}/candidate-plans/{candidate_id}/preview",
+    response_model=CandidateInterviewPlanPreviewResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Preview Candidate Interview Plan",
+    description=(
+        "Generates an ephemeral preview of the candidate-tailored supplemental clarification questions "
+        "using server-side authoritative candidate match results and versioned templates without persisting."
+    ),
+)
+async def preview_candidate_interview_plan_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    revision: int = Query(..., ge=1),
+    profile_version: int = Query(..., ge=1),
+    match_result_id: uuid.UUID = Query(...),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> CandidateInterviewPlanPreviewResponse:
+    actor = auth_ctx.user
+    try:
+        plan = preview_deterministic_candidate_interview_plan(
+            actor=actor,
+            template_id=template_id,
+            candidate_id=candidate_id,
+            expected_revision=revision,
+            profile_version=profile_version,
+            match_result_id=match_result_id,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="candidate_interview_plan_preview",
+            resource_id=str(candidate_id),
+            safe_metadata={"error_code": exc.code},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "message": exc.message},
+        )
+    except (InterviewRequisitionNotFoundError, InterviewCandidateNotFoundError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": exc.code, "message": exc.message},
+        )
+    except (
+        InterviewJobNotReadyError,
+        InterviewJobRevisionStaleError,
+        InterviewProfileVersionMismatchError,
+        InterviewMatchResultMismatchError,
+        InterviewSourceRelationshipInvalidError,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": exc.message},
+        )
+    except InterviewSnapshotError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        )
+
+    # Safe audit log (Phase 3 schema verified)
+    phase3_event = Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)),
+        event_type="CANDIDATE_INTERVIEW_PLAN_PREVIEWED",
+        resource_type="candidate_interview_plan_preview",
+        resource_id=str(plan.plan_id),
+        policy_version=plan.policy_version,
+        safe_metadata={
+            "template_id": str(template_id),
+            "candidate_id": str(candidate_id),
+            "match_result_id": str(match_result_id),
+            "input_snapshot_hash": plan.input_snapshot_hash,
+            "content_hash": plan.content_hash,
+            "supplemental_questions_count": len(plan.supplemental_questions),
+            "is_valid": plan.validation_report.is_valid,
+        },
+    )
+
+    return _map_candidate_plan_to_preview_dto(plan)
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{candidate_id}/draft",
+    response_model=CandidateInterviewPlanDraftCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Candidate Interview Plan Draft",
+    description=(
+        "Authoritatively regenerates and persists a DRAFT CandidateInterviewPlanRecord with exact supplemental "
+        "question provenance binding to requirement results and evidence gaps."
+    ),
+)
+async def create_candidate_interview_plan_draft_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    revision: int = Query(..., ge=1),
+    profile_version: int = Query(..., ge=1),
+    match_result_id: uuid.UUID = Query(...),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> CandidateInterviewPlanDraftCreateResponse:
+    actor = auth_ctx.user
+    try:
+        plan_record, plan = create_deterministic_candidate_interview_plan_draft(
+            actor=actor,
+            template_id=template_id,
+            candidate_id=candidate_id,
+            expected_revision=revision,
+            profile_version=profile_version,
+            match_result_id=match_result_id,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="candidate_interview_plan_draft",
+            resource_id=str(candidate_id),
+            safe_metadata={"error_code": exc.code},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "message": exc.message},
+        )
+    except (InterviewRequisitionNotFoundError, InterviewCandidateNotFoundError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": exc.code, "message": exc.message},
+        )
+    except (
+        InterviewJobNotReadyError,
+        InterviewJobRevisionStaleError,
+        InterviewProfileVersionMismatchError,
+        InterviewMatchResultMismatchError,
+        InterviewSourceRelationshipInvalidError,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": exc.message},
+        )
+    except InterviewSnapshotError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        )
+
+    # Safe audit log (Phase 3 schema verified)
+    phase3_event = Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)),
+        event_type="CANDIDATE_INTERVIEW_PLAN_DRAFT_CREATED",
+        resource_type="candidate_interview_plan",
+        resource_id=str(plan_record.plan_id),
+        policy_version=plan.policy_version,
+        safe_metadata={
+            "template_id": str(template_id),
+            "candidate_id": str(candidate_id),
+            "match_result_id": str(match_result_id),
+            "input_snapshot_hash": plan_record.input_snapshot_hash,
+            "content_hash": plan_record.content_hash,
+            "supplemental_questions_count": len(plan.supplemental_questions),
+            "is_valid": plan.validation_report.is_valid,
+        },
+    )
+
+    preview_dto = _map_candidate_plan_to_preview_dto(plan)
+
+    return CandidateInterviewPlanDraftCreateResponse(
+        plan_id=plan_record.plan_id,
+        organization_id=plan_record.organization_id,
+        job_id=job_id,
+        job_revision=plan_record.template.revision if plan_record.template else revision,
+        template_id=plan_record.template_id,
+        template_version=plan_record.template_version,
+        candidate_id=plan_record.candidate_id,
+        profile_id=plan_record.profile_id,
+        profile_version=plan_record.profile_version,
+        match_result_id=plan_record.match_result_id,
+        match_result_fingerprint=plan_record.match_result_fingerprint,
+        plan_version=plan_record.plan_version,
+        lifecycle_status=plan_record.lifecycle_status,
+        scoring_separation_policy=plan_record.scoring_separation_policy,
+        input_snapshot_hash=plan_record.input_snapshot_hash,
+        content_hash=plan_record.content_hash or preview_dto.content_hash,
+        common_template_summary=preview_dto.common_template_summary,
+        supplemental_questions=preview_dto.supplemental_questions,
+        coverage_summary=preview_dto.coverage_summary,
+        validation_report=preview_dto.validation_report,
+        supplemental_catalogue_version=plan.supplemental_catalogue_version,
+        policy_version=plan.policy_version,
+        created_by_user_id=plan_record.created_by_user_id,
+        created_at=plan_record.created_at,
+    )
+

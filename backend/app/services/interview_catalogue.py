@@ -580,3 +580,134 @@ def get_catalogue_rubric(rubric_template_id: str) -> Optional[RubricTemplateEntr
     if rubric and rubric.is_active:
         return rubric
     return None
+
+
+# =========================================================================
+# Supplemental Evidence Clarification Question Catalogue
+# =========================================================================
+
+SUPPLEMENTAL_QUESTION_CATALOGUE_VERSION: str = "1.0.0"
+
+
+class SupplementalQuestionTemplateEntry(FrozenSchema):
+    """Immutable curated catalogue template entry for non-scored candidate supplemental evidence questions."""
+
+    template_id: str = Field(min_length=3, max_length=100)
+    version: str = Field(default=SUPPLEMENTAL_QUESTION_CATALOGUE_VERSION)
+    match_state: str = Field(min_length=3, max_length=50)
+    text_template: str = Field(min_length=10, max_length=2000)
+    question_intent: str = Field(min_length=5, max_length=1000)
+    clarification_purpose: str = Field(min_length=5, max_length=1000)
+    facts_to_confirm: List[str] = Field(default_factory=list)
+    prohibited_inferences: List[str] = Field(default_factory=list)
+    estimated_duration_minutes: int = Field(default=4, ge=1, le=15)
+    is_active: bool = True
+    catalogue_order: int = Field(default=0, ge=0)
+
+
+CURATED_SUPPLEMENTAL_CATALOGUE: Dict[str, SupplementalQuestionTemplateEntry] = {
+    "CONFLICTING_EVIDENCE": SupplementalQuestionTemplateEntry(
+        template_id="SUPP-Q-CONFLICT-01",
+        version=SUPPLEMENTAL_QUESTION_CATALOGUE_VERSION,
+        match_state="CONFLICTING_EVIDENCE",
+        text_template="We found differing details related to {label}. Could you clarify the relevant context, dates or responsibilities?",
+        question_intent="Request factual reconciliation without accusation.",
+        clarification_purpose="Reconcile timeline, context, or differing detail points neutrally.",
+        facts_to_confirm=[
+            "Timeline and project dates",
+            "Specific roles and responsibilities",
+            "Contextual technical environment",
+        ],
+        prohibited_inferences=[
+            "Do not imply dishonesty or falsehood.",
+            "Do not use accusatory phrasing.",
+        ],
+        estimated_duration_minutes=4,
+        catalogue_order=1,
+    ),
+    "INSUFFICIENT_EVIDENCE": SupplementalQuestionTemplateEntry(
+        template_id="SUPP-Q-INSUFFICIENT-01",
+        version=SUPPLEMENTAL_QUESTION_CATALOGUE_VERSION,
+        match_state="INSUFFICIENT_EVIDENCE",
+        text_template="Could you provide a concrete example that demonstrates your experience with {label}, including your actions and the result?",
+        question_intent="Request a clearer example or additional context.",
+        clarification_purpose="Obtain specific contextual evidence and concrete technical actions.",
+        facts_to_confirm=[
+            "Concrete technical actions taken",
+            "Problem context and tooling used",
+            "Verification or outcome achieved",
+        ],
+        prohibited_inferences=[
+            "Do not convert automated extraction confidence into a negative conclusion.",
+            "Do not infer candidate character or communication style.",
+        ],
+        estimated_duration_minutes=4,
+        catalogue_order=2,
+    ),
+    "NOT_EVIDENCED": SupplementalQuestionTemplateEntry(
+        template_id="SUPP-Q-NOT-EVIDENCED-01",
+        version=SUPPLEMENTAL_QUESTION_CATALOGUE_VERSION,
+        match_state="NOT_EVIDENCED",
+        text_template="The reviewed material did not provide enough information about {label}. Would you like to describe any relevant experience or transferable work in this area?",
+        question_intent="Give the candidate a neutral opportunity to provide relevant experience not present in the reviewed material.",
+        clarification_purpose="Provide neutral opportunity to present relevant unlisted or transferable experience.",
+        facts_to_confirm=[
+            "Relevant projects or prior experience",
+            "Transferable skills or related technology use",
+            "Practical application context",
+        ],
+        prohibited_inferences=[
+            "Do not treat missing resume evidence as proof of missing skill.",
+            "Do not imply negligence or lack of qualification.",
+        ],
+        estimated_duration_minutes=4,
+        catalogue_order=3,
+    ),
+    "PARTIALLY_MATCHED": SupplementalQuestionTemplateEntry(
+        template_id="SUPP-Q-PARTIAL-01",
+        version=SUPPLEMENTAL_QUESTION_CATALOGUE_VERSION,
+        match_state="PARTIALLY_MATCHED",
+        text_template="Please describe your experience with {label}, including the scope of your work and the responsibilities you personally handled.",
+        question_intent="Clarify scope, duration, complexity or a missing requirement dimension.",
+        clarification_purpose="Clarify scope, technical depth, and specific responsibilities handled.",
+        facts_to_confirm=[
+            "Technical scope and complexity",
+            "Direct responsibilities vs team contributions",
+            "Duration and recent practical application",
+        ],
+        prohibited_inferences=[
+            "Do not assume missing resume detail proves lack of technical ability.",
+            "Do not use defensive or evaluative tone.",
+        ],
+        estimated_duration_minutes=4,
+        catalogue_order=4,
+    ),
+    "MATCHED": SupplementalQuestionTemplateEntry(
+        template_id="SUPP-Q-MATCHED-01",
+        version=SUPPLEMENTAL_QUESTION_CATALOGUE_VERSION,
+        match_state="MATCHED",
+        text_template="Please describe a specific situation in which you applied {label}. What was your personal contribution, and what was the outcome?",
+        question_intent="Verify depth, ownership, context, trade-offs and result.",
+        clarification_purpose="Verify depth of practical ownership, technical context, and measurable outcomes.",
+        facts_to_confirm=[
+            "Specific role and technical ownership",
+            "Design constraints and trade-offs considered",
+            "Demonstrated project result or metric",
+        ],
+        prohibited_inferences=[
+            "Do not infer future performance from self-reported project scope alone.",
+            "Do not evaluate personality traits or presentation style.",
+        ],
+        estimated_duration_minutes=4,
+        catalogue_order=5,
+    ),
+}
+
+
+def get_catalogue_supplemental_template(match_state: str) -> Optional[SupplementalQuestionTemplateEntry]:
+    """Retrieves an active supplemental question template by match state string."""
+    state_key = match_state.value if hasattr(match_state, "value") else str(match_state)
+    tmpl = CURATED_SUPPLEMENTAL_CATALOGUE.get(state_key)
+    if tmpl and tmpl.is_active:
+        return tmpl
+    return None
