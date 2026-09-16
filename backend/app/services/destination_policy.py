@@ -31,7 +31,7 @@ class StrictDestinationPolicy(DestinationPolicyProtocol):
     - Full DNS prevalidation across IPv4 and IPv6.
     """
 
-    DEFAULT_LOCAL_ALLOWED_PORTS: Set[int] = {8080, 8000, 11434}
+    DEFAULT_LOCAL_ALLOWED_PORTS: Set[int] = {1234, 8080, 8000, 11434}
     DEFAULT_LOCAL_ALLOWED_HOSTS: Set[str] = {"127.0.0.1", "::1", "localhost"}
 
     def __init__(

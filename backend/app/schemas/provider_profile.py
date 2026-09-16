@@ -48,6 +48,10 @@ class ProviderProfile(FrozenSchema):
     enabled: bool = False
     compatibility_status: ProviderCompatibilityStatus = ProviderCompatibilityStatus.NOT_TESTED
     tested_at: Optional[datetime] = None
+    model_source: Optional[str] = Field(default=None, max_length=255, description="Owner-supplied model origin (e.g. HuggingFace repo/file)")
+    model_licence: Optional[str] = Field(default=None, max_length=100, description="Owner-supplied model license tag")
+    model_checksum: Optional[str] = Field(default=None, max_length=128, description="Owner-supplied SHA256 checksum")
+    last_compatibility_report: Optional[dict] = Field(default=None, description="Safe diagnostic summary from last compatibility run")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     version: int = Field(default=1, ge=1)

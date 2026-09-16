@@ -53,8 +53,12 @@ export interface AdminProviderProfileItem {
   egressClass: "LOCAL_ONLY" | "APPROVED_REMOTE";
   privacyReviewStatus: "APPROVED" | "PENDING_REVIEW" | "REJECTED";
   enabled: boolean;
-  compatibilityStatus: "COMPATIBLE" | "INCOMPATIBLE" | "NOT_TESTED";
+  compatibilityStatus: "HEALTHY" | "COMPATIBLE" | "INCOMPATIBLE" | "NOT_TESTED" | "DISABLED";
   testedAt?: string | null;
+  modelSource?: string | null;
+  modelLicence?: string | null;
+  modelChecksum?: string | null;
+  lastCompatibilityReport?: Record<string, any> | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -96,6 +100,12 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
   const [isLoadingProviders, setIsLoadingProviders] = useState(false);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [isTogglingProvider, setIsTogglingProvider] = useState<string | null>(null);
+  const [isTestingProvider, setIsTestingProvider] = useState<string | null>(null);
+
+  // Diagnostic Report Modal state
+  const [selectedReportProfile, setSelectedReportProfile] = useState<AdminProviderProfileItem | null>(null);
+  const [compatibilityReport, setCompatibilityReport] = useState<any | null>(null);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
 
   // Create Provider Modal
   const [isCreateProviderModalOpen, setIsCreateProviderModalOpen] = useState(false);
@@ -105,6 +115,9 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
   const [newBaseUrl, setNewBaseUrl] = useState("");
   const [newModelId, setNewModelId] = useState("");
   const [newSecretRef, setNewSecretRef] = useState("");
+  const [newModelSource, setNewModelSource] = useState("");
+  const [newModelLicence, setNewModelLicence] = useState("");
+  const [newModelChecksum, setNewModelChecksum] = useState("");
   const [createProviderModalError, setCreateProviderModalError] = useState<string | null>(null);
   const [isCreatingProvider, setIsCreatingProvider] = useState(false);
 
@@ -125,6 +138,33 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
       setProviderError(err?.message || "Failed to load AI provider profiles.");
     } finally {
       setIsLoadingProviders(false);
+    }
+  };
+
+  const handleTestCompatibility = async (profile: AdminProviderProfileItem) => {
+    try {
+      setIsTestingProvider(profile.profileId);
+      setProviderError(null);
+      const report = await apiFetch<any>(
+        `/api/v1/admin/provider-profiles/${profile.profileId}/test-compatibility`,
+        {
+          method: "POST",
+          body: JSON.stringify({ version: profile.version }),
+        }
+      );
+      setCompatibilityReport(report);
+      setSelectedReportProfile(profile);
+      setIsReportModalOpen(true);
+      if (report.is_compatible) {
+        setActionSuccess(`Compatibility check passed for '${profile.displayName}' (latency: ${report.latency_ms}ms).`);
+      } else {
+        setProviderError(`Compatibility check failed for '${profile.displayName}': ${report.safe_failure_message || report.safe_failure_code}`);
+      }
+      fetchProviders();
+    } catch (err: any) {
+      setProviderError(err?.message || "Compatibility test failed to execute.");
+    } finally {
+      setIsTestingProvider(null);
     }
   };
 
@@ -924,8 +964,25 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                           </span>
                         </td>
                         <td>
-                          <span className="compat-status-tag">
-                            {p.compatibilityStatus === "COMPATIBLE" ? "Compatible" : "Not Tested"}
+                          <span
+                            className={`compat-status-tag ${
+                              p.compatibilityStatus === "HEALTHY" || p.compatibilityStatus === "COMPATIBLE"
+                                ? "status-compatible"
+                                : p.compatibilityStatus === "INCOMPATIBLE"
+                                ? "status-incompatible"
+                                : "status-untested"
+                            }`}
+                            onClick={() => {
+                              if (p.lastCompatibilityReport) {
+                                setCompatibilityReport(p.lastCompatibilityReport);
+                                setSelectedReportProfile(p);
+                                setIsReportModalOpen(true);
+                              }
+                            }}
+                            style={{ cursor: p.lastCompatibilityReport ? "pointer" : "default" }}
+                            title={p.lastCompatibilityReport ? "Click to view diagnostic report" : undefined}
+                          >
+                            {p.compatibilityStatus === "HEALTHY" || p.compatibilityStatus === "COMPATIBLE" ? "✓ Compatible" : p.compatibilityStatus === "INCOMPATIBLE" ? "⚠ Incompatible" : "Not Tested"}
                           </span>
                         </td>
                         <td>
@@ -938,13 +995,22 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                           </span>
                         </td>
                         <td>
-                          <div className="table-actions-cell">
+                          <div className="table-actions-cell" style={{ display: "flex", gap: "6px" }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleTestCompatibility(p)}
+                              disabled={isTestingProvider === p.profileId || isTogglingProvider === p.profileId}
+                              title="Run non-personal synthetic compatibility check"
+                            >
+                              {isTestingProvider === p.profileId ? "Testing..." : "Test Compatibility"}
+                            </button>
                             {p.enabled ? (
                               <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
                                 onClick={() => handleDisableProvider(p)}
-                                disabled={isTogglingProvider === p.profileId}
+                                disabled={isTogglingProvider === p.profileId || isTestingProvider === p.profileId}
                               >
                                 {isTogglingProvider === p.profileId ? "Disabling..." : "Disable"}
                               </button>
@@ -953,7 +1019,7 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                                 type="button"
                                 className="btn btn-primary btn-sm"
                                 onClick={() => handleOpenActivateModal(p)}
-                                disabled={isTogglingProvider === p.profileId}
+                                disabled={isTogglingProvider === p.profileId || isTestingProvider === p.profileId}
                               >
                                 Activate
                               </button>
@@ -967,6 +1033,93 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Diagnostic Report Modal Dialog */}
+      {isReportModalOpen && compatibilityReport && selectedReportProfile && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
+          <div className="modal-dialog" style={{ maxWidth: "560px" }}>
+            <div className="modal-header">
+              <h3 id="report-modal-title" className="modal-title">
+                Diagnostic Report: {selectedReportProfile.displayName}
+              </h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setIsReportModalOpen(false)}
+                aria-label="Close modal"
+              >
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+
+            <div className="modal-form">
+              <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <strong>Status: </strong>
+                  <span className={compatibilityReport.is_compatible ? "status-pill status-active" : "status-pill status-inactive"}>
+                    {compatibilityReport.is_compatible ? "COMPATIBLE / HEALTHY" : "INCOMPATIBLE"}
+                  </span>
+                </div>
+                <div>
+                  <small className="text-muted">Latency: {compatibilityReport.latency_ms} ms</small>
+                </div>
+              </div>
+
+              {compatibilityReport.safe_failure_message && (
+                <div className="feedback-box error" style={{ marginBottom: "12px" }}>
+                  <Icon name="alert-triangle" size={16} />
+                  <p className="feedback-text">
+                    <strong>{compatibilityReport.safe_failure_code}: </strong>
+                    {compatibilityReport.safe_failure_message}
+                  </p>
+                </div>
+              )}
+
+              <div className="diagnostic-checklist" style={{ fontSize: "13px", lineHeight: "1.8", background: "var(--bg-subtle, #f8f9fa)", padding: "12px", borderRadius: "6px", marginBottom: "16px" }}>
+                <div>Reachability Check: {compatibilityReport.reachability_passed ? "✓ Passed" : "✗ Failed"}</div>
+                <div>Authentication: {compatibilityReport.auth_passed ? "✓ Verified" : "✗ Failed / Not Checked"}</div>
+                <div>Model Discovery: {compatibilityReport.model_discovered ? "✓ Model Verified" : "✗ Model Not Found"}</div>
+                <div>Dry-Run Completion: {compatibilityReport.dry_run_completion_passed ? "✓ Non-streaming Verified" : "✗ Failed"}</div>
+                <div>Unicode Handling: {compatibilityReport.unicode_handling_passed ? "✓ Passed" : "✗ Failed"}</div>
+                {compatibilityReport.discovered_model_ids && compatibilityReport.discovered_model_ids.length > 0 && (
+                  <div style={{ marginTop: "6px" }}>
+                    <strong>Discovered Models on Endpoint:</strong>
+                    <div style={{ fontFamily: "monospace", fontSize: "12px", marginTop: "2px" }}>
+                      {compatibilityReport.discovered_model_ids.join(", ")}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {selectedReportProfile.modelSource && (
+                <div style={{ fontSize: "12px", color: "var(--text-muted, #666)", marginBottom: "4px" }}>
+                  <strong>Model Source:</strong> {selectedReportProfile.modelSource}
+                </div>
+              )}
+              {selectedReportProfile.modelLicence && (
+                <div style={{ fontSize: "12px", color: "var(--text-muted, #666)", marginBottom: "4px" }}>
+                  <strong>Licence:</strong> {selectedReportProfile.modelLicence}
+                </div>
+              )}
+              {selectedReportProfile.modelChecksum && (
+                <div style={{ fontSize: "12px", color: "var(--text-muted, #666)", marginBottom: "12px" }}>
+                  <strong>SHA-256 Checksum:</strong> <code>{selectedReportProfile.modelChecksum}</code>
+                </div>
+              )}
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsReportModalOpen(false)}
+                >
+                  Close Report
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1004,7 +1157,7 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                   id="provider-display-name"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Local llama.cpp Qwen3 / OpenAI Production"
+                  placeholder="e.g. Local LM Studio Qwen3 / OpenAI Production"
                   value={newDisplayName}
                   onChange={(e) => setNewDisplayName(e.target.value)}
                   required
@@ -1021,8 +1174,8 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                   value={newProviderType}
                   onChange={(e) => setNewProviderType(e.target.value as any)}
                 >
-                  <option value="LOCAL_OPENAI_COMPATIBLE">Local OpenAI-Compatible (e.g. llama.cpp / Ollama)</option>
-                  <option value="REMOTE_OPENAI_COMPATIBLE">Remote OpenAI-Compatible (e.g. OpenAI / Azure)</option>
+                  <option value="LOCAL_OPENAI_COMPATIBLE">Local OpenAI-Compatible (LM Studio / llama.cpp)</option>
+                  <option value="REMOTE_OPENAI_COMPATIBLE">Remote OpenAI-Compatible (OpenAI / Azure)</option>
                 </select>
               </div>
 
@@ -1051,7 +1204,7 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                   className="form-input"
                   placeholder={
                     newEgressClass === "LOCAL_ONLY"
-                      ? "http://127.0.0.1:8080/v1"
+                      ? "http://127.0.0.1:1234/v1"
                       : "https://api.openai.com/v1"
                   }
                   value={newBaseUrl}
@@ -1067,7 +1220,7 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                   id="provider-model-id"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. qwen2.5:7b or gpt-4o-mini"
+                  placeholder="e.g. qwen3-4b-instruct or gpt-4o-mini"
                   value={newModelId}
                   onChange={(e) => setNewModelId(e.target.value)}
                 />
@@ -1081,7 +1234,7 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                   id="provider-secret-ref"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. env:LLM_OPENAI_API_KEY"
+                  placeholder="e.g. env:LLM_API_KEY"
                   value={newSecretRef}
                   onChange={(e) => setNewSecretRef(e.target.value)}
                 />

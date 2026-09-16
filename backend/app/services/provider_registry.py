@@ -17,11 +17,14 @@ from app.schemas.provider_admin import (
     AdminProviderProfileResponse,
     CreateProviderProfileRequest,
     DisableProviderProfileRequest,
+    ProviderCompatibilityReportResponse,
     RecruiterAIAvailabilityResponse,
+    TestProviderCompatibilityRequest,
     UpdateProviderProfileRequest,
 )
 from app.schemas.provider_profile import ProviderProfile
 from app.services.destination_policy import StrictDestinationPolicy
+from app.services.provider_compatibility_service import ProviderCompatibilityService
 from app.services.provider_eligibility import evaluate_provider_eligibility
 from app.services.secret_resolver import EnvironmentSecretResolver
 
@@ -56,7 +59,7 @@ class ProviderRegistry:
     - Optimistic version checks.
     - Inactive-only mutations.
     - Destination & secret validation through Phase 3A.3 policies.
-    - Newly activated profiles remain NOT_TESTED.
+    - Newly activated profiles remain NOT_TESTED unless compatibility verified.
     """
 
     def __init__(self, settings: Optional[Settings] = None):
@@ -79,13 +82,13 @@ class ProviderRegistry:
         """Initializes default local and remote profiles if empty."""
         with self._lock:
             if not self._profiles:
-                # Default Local Profile
+                # Default Local Profile (LM Studio / Qwen3)
                 local_profile = ProviderProfile(
                     profile_id=uuid4(),
-                    display_name="Local Qwen3 Engine (llama.cpp)",
+                    display_name="Local LM Studio (Qwen3-4B)",
                     provider_type=ProviderType.LOCAL_OPENAI_COMPATIBLE,
-                    base_url=self._settings.llm_base_url or "http://127.0.0.1:8080/v1",
-                    model_identifier=self._settings.llm_model or "qwen2.5-7b-instruct",
+                    base_url=self._settings.llm_base_url or "http://127.0.0.1:1234/v1",
+                    model_identifier=self._settings.llm_model or "qwen3-4b-instruct",
                     secret_ref=None,
                     supported_operations=[
                         ProviderOperation.REWORD_QUESTION,
@@ -99,6 +102,8 @@ class ProviderRegistry:
                     privacy_review_status=PrivacyReviewStatus.APPROVED,
                     enabled=False,
                     compatibility_status=ProviderCompatibilityStatus.NOT_TESTED,
+                    model_source="Qwen/Qwen2.5-7B-Instruct-GGUF (or Qwen3-4B GGUF Q4_K_M)",
+                    model_licence="Apache-2.0",
                     version=1,
                 )
                 self._profiles[local_profile.profile_id] = local_profile
@@ -166,6 +171,9 @@ class ProviderRegistry:
                 enabled=False,
                 compatibility_status=ProviderCompatibilityStatus.NOT_TESTED,
                 tested_at=None,
+                model_source=request.model_source,
+                model_licence=request.model_licence,
+                model_checksum=request.model_checksum,
                 version=1,
                 created_at=now,
                 updated_at=now,
@@ -227,12 +235,84 @@ class ProviderRegistry:
                 enabled=False,
                 compatibility_status=ProviderCompatibilityStatus.NOT_TESTED,
                 tested_at=existing.tested_at,
+                model_source=request.model_source if request.model_source is not None else existing.model_source,
+                model_licence=request.model_licence if request.model_licence is not None else existing.model_licence,
+                model_checksum=request.model_checksum if request.model_checksum is not None else existing.model_checksum,
+                last_compatibility_report=existing.last_compatibility_report,
                 version=existing.version + 1,
                 created_at=existing.created_at,
                 updated_at=now,
             )
             self._profiles[profile_id] = updated
             return updated
+
+    async def test_compatibility(
+        self,
+        profile_id: UUID,
+        request: TestProviderCompatibilityRequest,
+        actor_id: UUID,
+        compatibility_service: Optional[ProviderCompatibilityService] = None,
+    ) -> ProviderCompatibilityReportResponse:
+        """Runs the diagnostic compatibility test against the profile and records safe report."""
+        with self._lock:
+            existing = self._profiles.get(profile_id)
+            if not existing:
+                raise KeyError(f"Provider profile '{profile_id}' not found.")
+
+            if existing.version != request.version:
+                raise StaleVersionError(
+                    f"Profile version conflict. Current version is {existing.version}, but request specified {request.version}."
+                )
+
+        runner = compatibility_service or ProviderCompatibilityService(
+            destination_policy=self._destination_policy,
+            secret_resolver=self._secret_resolver,
+        )
+
+        report = await runner.test_compatibility(
+            profile=existing,
+            timeout_override_seconds=request.timeout_override_seconds,
+        )
+
+        with self._lock:
+            # Re-fetch profile to ensure safety
+            current = self._profiles.get(profile_id)
+            if current:
+                now = datetime.now(timezone.utc)
+                new_status = report.compatibility_status
+                updated_profile = ProviderProfile(
+                    profile_id=current.profile_id,
+                    organization_id=current.organization_id,
+                    display_name=current.display_name,
+                    provider_type=current.provider_type,
+                    api_mode=current.api_mode,
+                    base_url=current.base_url,
+                    model_identifier=report.model_identifier or current.model_identifier,
+                    secret_ref=current.secret_ref,
+                    supported_operations=current.supported_operations,
+                    connect_timeout_seconds=current.connect_timeout_seconds,
+                    request_timeout_seconds=current.request_timeout_seconds,
+                    max_input_tokens=current.max_input_tokens,
+                    max_output_tokens=current.max_output_tokens,
+                    max_response_bytes=current.max_response_bytes,
+                    max_concurrency=current.max_concurrency,
+                    retry_limit=current.retry_limit,
+                    egress_class=current.egress_class,
+                    privacy_review_status=current.privacy_review_status,
+                    enabled=current.enabled,
+                    compatibility_status=new_status,
+                    tested_at=report.tested_at,
+                    model_source=current.model_source,
+                    model_licence=current.model_licence,
+                    model_checksum=current.model_checksum,
+                    last_compatibility_report=report.model_dump(mode="json"),
+                    version=current.version + 1,
+                    created_at=current.created_at,
+                    updated_at=now,
+                )
+                self._profiles[profile_id] = updated_profile
+
+        return report
 
     def activate_profile(
         self,
@@ -294,13 +374,17 @@ class ProviderRegistry:
                             enabled=False,
                             compatibility_status=p.compatibility_status,
                             tested_at=p.tested_at,
+                            model_source=p.model_source,
+                            model_licence=p.model_licence,
+                            model_checksum=p.model_checksum,
+                            last_compatibility_report=p.last_compatibility_report,
                             version=p.version + 1,
                             created_at=p.created_at,
                             updated_at=now,
                         )
                         self._profiles[p_id] = disabled_p
 
-            # Activate target profile (remains NOT_TESTED)
+            # Activate target profile (preserves compatibility_status)
             activated = ProviderProfile(
                 profile_id=existing.profile_id,
                 organization_id=existing.organization_id,
@@ -321,8 +405,12 @@ class ProviderRegistry:
                 egress_class=existing.egress_class,
                 privacy_review_status=existing.privacy_review_status,
                 enabled=True,
-                compatibility_status=ProviderCompatibilityStatus.NOT_TESTED,
+                compatibility_status=existing.compatibility_status,
                 tested_at=existing.tested_at,
+                model_source=existing.model_source,
+                model_licence=existing.model_licence,
+                model_checksum=existing.model_checksum,
+                last_compatibility_report=existing.last_compatibility_report,
                 version=existing.version + 1,
                 created_at=existing.created_at,
                 updated_at=now,
@@ -369,6 +457,10 @@ class ProviderRegistry:
                 enabled=False,
                 compatibility_status=existing.compatibility_status,
                 tested_at=existing.tested_at,
+                model_source=existing.model_source,
+                model_licence=existing.model_licence,
+                model_checksum=existing.model_checksum,
+                last_compatibility_report=existing.last_compatibility_report,
                 version=existing.version + 1,
                 created_at=existing.created_at,
                 updated_at=now,
@@ -418,6 +510,10 @@ class ProviderRegistry:
             enabled=profile.enabled,
             compatibility_status=profile.compatibility_status,
             tested_at=profile.tested_at,
+            model_source=profile.model_source,
+            model_licence=profile.model_licence,
+            model_checksum=profile.model_checksum,
+            last_compatibility_report=profile.last_compatibility_report,
             version=profile.version,
             created_at=profile.created_at,
             updated_at=profile.updated_at,
@@ -473,3 +569,4 @@ def get_provider_registry(settings: Settings = Depends(get_settings)) -> Provide
         if _global_provider_registry is None:
             _global_provider_registry = ProviderRegistry(settings)
         return _global_provider_registry
+
