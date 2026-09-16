@@ -45,6 +45,16 @@ from app.schemas.provider_profile import ProviderProfile
 from app.services.destination_policy import StrictDestinationPolicy
 from app.services.secret_resolver import EnvironmentSecretResolver, SecretResolutionError
 
+from app.schemas.wording_contract import (
+    PROMPT_TEMPLATE_VERSION,
+    WORDING_RESPONSE_SCHEMA_VERSION,
+    BoundedWordingRequest,
+    BoundedWordingResponse,
+    StructuredWordingVariant,
+    WordingRationaleCode,
+)
+from app.services.wording_prompt_package import assemble_wording_messages
+
 logger = logging.getLogger("ai_hiring.wording_provider")
 
 
@@ -65,6 +75,14 @@ class BaseWordingProvider(ABC):
         request: ProviderCapabilityRequest,
     ) -> ProviderCapabilityResponse:
         """Executes bounded question rewording or returns typed failure."""
+        pass
+
+    @abstractmethod
+    async def request_wording_assistance(
+        self,
+        request: BoundedWordingRequest,
+    ) -> BoundedWordingResponse:
+        """Executes strict structured wording assistance for one authorized question."""
         pass
 
 
@@ -92,6 +110,15 @@ class DisabledWordingProvider(BaseWordingProvider):
             completed_at=datetime.now(timezone.utc),
         )
 
+    async def request_wording_assistance(
+        self,
+        request: BoundedWordingRequest,
+    ) -> BoundedWordingResponse:
+        raise ProviderTransportError(
+            error_code=ProviderErrorCode.PROVIDER_DISABLED,
+            safe_message="Model provider is disabled by system policy.",
+        )
+
 
 class FakeWordingProvider(BaseWordingProvider):
     """Deterministic fake provider for automated unit and integration tests.
@@ -106,11 +133,15 @@ class FakeWordingProvider(BaseWordingProvider):
         reworded_text_override: Optional[str] = None,
         custom_error_code: Optional[ProviderErrorCode] = None,
         custom_error_message: Optional[str] = None,
+        simulated_variants_override: Optional[List[StructuredWordingVariant]] = None,
+        simulated_raw_json_override: Optional[Dict[str, Any]] = None,
     ):
         self.simulated_mode = simulated_mode
         self.reworded_text_override = reworded_text_override
         self.custom_error_code = custom_error_code
         self.custom_error_message = custom_error_message
+        self.simulated_variants_override = simulated_variants_override
+        self.simulated_raw_json_override = simulated_raw_json_override
 
     async def reword_question(
         self,
@@ -223,6 +254,64 @@ class FakeWordingProvider(BaseWordingProvider):
                 fallback_used=True,
                 policy_reference=request.policy_reference,
                 completed_at=now,
+            )
+
+    async def request_wording_assistance(
+        self,
+        request: BoundedWordingRequest,
+    ) -> BoundedWordingResponse:
+        if self.simulated_mode == "SUCCESS":
+            if self.simulated_variants_override is not None:
+                variants = self.simulated_variants_override
+            else:
+                orig_text = request.deterministic_question_text
+                reworded = self.reworded_text_override or f"Could you provide an example of when: {orig_text}"
+                variants = [
+                    StructuredWordingVariant(
+                        variant_text=reworded,
+                        rationale_code=WordingRationaleCode.PROFESSIONAL_TONE,
+                        referenced_identifiers=list(request.allowed_reference_ids),
+                    )
+                ]
+            return BoundedWordingResponse(
+                operation="REWORD_QUESTION",
+                response_schema_version=WORDING_RESPONSE_SCHEMA_VERSION,
+                variants=variants[: request.max_variants],
+            )
+        elif self.simulated_mode == "TIMEOUT":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_TIMEOUT,
+                safe_message="Simulated request timeout.",
+            )
+        elif self.simulated_mode == "UNAVAILABLE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                safe_message="Simulated provider endpoint unavailable.",
+            )
+        elif self.simulated_mode == "AUTH_FAILED":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.AUTHENTICATION_FAILED,
+                safe_message="Simulated authentication failure.",
+            )
+        elif self.simulated_mode == "MODEL_NOT_AVAILABLE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.MODEL_NOT_AVAILABLE,
+                safe_message="Simulated configured model not found on endpoint.",
+            )
+        elif self.simulated_mode == "OVERSIZED_RESPONSE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_RESPONSE_TOO_LARGE,
+                safe_message="Simulated response exceeded maximum allowed bytes.",
+            )
+        elif self.simulated_mode == "INVALID_RESPONSE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="Simulated response was malformed or failed schema.",
+            )
+        else:
+            raise ProviderTransportError(
+                error_code=self.custom_error_code or ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                safe_message=self.custom_error_message or "Simulated provider error.",
             )
 
 
@@ -361,7 +450,7 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
 
                 try:
                     parsed_json = json.loads(content_bytes.decode("utf-8"))
-                except Exception as e:
+                except Exception:
                     raise ProviderTransportError(
                         error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
                         safe_message="Provider response could not be parsed as valid JSON.",
@@ -393,15 +482,82 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
                 if should_close:
                     await client.aclose()
 
+    async def request_wording_assistance(
+        self,
+        request: BoundedWordingRequest,
+    ) -> BoundedWordingResponse:
+        """Executes strict structured wording assistance using the active profile."""
+        if not self.profile.enabled:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_DISABLED,
+                safe_message="Target provider profile is currently disabled.",
+            )
+
+        normalized_base = self._validate_local_endpoint()
+        chat_url = f"{normalized_base}/chat/completions"
+
+        messages = assemble_wording_messages(request)
+
+        payload = {
+            "model": self.profile.model_identifier or "default",
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": min(self.profile.max_output_tokens, 600),
+            "stream": False,
+        }
+
+        raw_response = await self._send_bounded_request(chat_url, payload)
+
+        choices = raw_response.get("choices")
+        if not choices or not isinstance(choices, list) or len(choices) == 0:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="OpenAI-compatible response missing 'choices' array.",
+            )
+
+        message = choices[0].get("message", {})
+        raw_content = message.get("content", "").strip()
+
+        if not raw_content:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="OpenAI-compatible response contained empty message content.",
+            )
+
+        # Parse JSON from content (stripping markdown fences if present)
+        clean_json_str = raw_content
+        if clean_json_str.startswith("```json"):
+            clean_json_str = clean_json_str[7:]
+        elif clean_json_str.startswith("```"):
+            clean_json_str = clean_json_str[3:]
+        if clean_json_str.endswith("```"):
+            clean_json_str = clean_json_str[:-3]
+        clean_json_str = clean_json_str.strip()
+
+        try:
+            parsed_data = json.loads(clean_json_str)
+        except Exception as e:
+            logger.warning("Failed to parse JSON from provider wording response: %s", e)
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="Provider response could not be parsed into valid JSON structure.",
+            )
+
+        try:
+            structured_response = BoundedWordingResponse.model_validate(parsed_data)
+            return structured_response
+        except Exception as e:
+            logger.warning("Provider wording response failed schema validation: %s", e)
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message=f"Provider response schema validation failed: {str(e)}",
+            )
+
     async def reword_question(
         self,
         request: ProviderCapabilityRequest,
     ) -> ProviderCapabilityResponse:
-        """Bounded question rewording dispatch seam.
-        
-        NOTE: Production question rewording prompt and semantic output validation are implemented
-        in Phase 3C.2. This method establishes the transport dispatch and failure mapping seam.
-        """
+        """Legacy capability dispatch seam maintained for backwards compatibility."""
         now = datetime.now(timezone.utc)
 
         if not self.profile.enabled:
@@ -420,8 +576,6 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
             normalized_base = self._validate_local_endpoint()
             chat_url = f"{normalized_base}/chat/completions"
 
-            # Form bounded non-streaming chat completions payload
-            # (Note: production rewording prompt schema belongs to Phase 3C.2)
             orig_text = request.reword_payload.original_text if request.reword_payload else ""
             intent = request.reword_payload.question_intent if request.reword_payload else ""
 
@@ -444,7 +598,6 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
 
             raw_response = await self._send_bounded_request(chat_url, payload)
 
-            # Extract content from OpenAI format choices[0].message.content
             choices = raw_response.get("choices")
             if not choices or not isinstance(choices, list) or len(choices) == 0:
                 raise ProviderTransportError(
