@@ -244,3 +244,141 @@ class CandidateInterviewPlanDraftCreateResponse(FrozenSchema):
     created_by_user_id: uuid.UUID
     created_at: datetime
 
+
+# =========================================================================
+# Phase 3B.4: Review, Safe Editing, Validation, Versioning and Approval
+# =========================================================================
+
+class QuestionEditItem(FrozenSchema):
+    """Specific allowed question-level edit payload."""
+    question_id: uuid.UUID
+    question_text: str = Field(min_length=5, max_length=2000)
+    display_order: int = Field(ge=0)
+    estimated_time_minutes: int = Field(ge=1, le=60)
+    permitted_probes: List[str] = Field(default_factory=list)
+
+
+class InterviewTemplateEditRequest(FrozenSchema):
+    """Request payload for safe editing of a template draft."""
+    expected_record_version: int = Field(ge=1)
+    expected_content_hash: str = Field(min_length=64, max_length=64)
+    edit_reason: Optional[str] = Field(default=None, max_length=500)
+    questions: List[QuestionEditItem] = Field(min_length=1)
+
+
+class CandidateSupplementalQuestionEditItem(FrozenSchema):
+    """Specific allowed candidate supplemental question edit payload."""
+    question_id: uuid.UUID
+    question_text: str = Field(min_length=5, max_length=2000)
+    display_order: int = Field(ge=0)
+    estimated_time_minutes: int = Field(ge=1, le=15)
+    clarification_purpose: Optional[str] = Field(default=None, max_length=1000)
+
+
+class CandidatePlanEditRequest(FrozenSchema):
+    """Request payload for safe editing of a candidate plan draft."""
+    expected_record_version: int = Field(ge=1)
+    expected_content_hash: str = Field(min_length=64, max_length=64)
+    edit_reason: Optional[str] = Field(default=None, max_length=500)
+    supplemental_questions: List[CandidateSupplementalQuestionEditItem] = Field(default_factory=list)
+
+
+class InterviewApprovalRequest(FrozenSchema):
+    """Request payload for approving a validated template or plan."""
+    expected_content_hash: str = Field(min_length=64, max_length=64)
+    approval_confirmation: bool = Field(default=True)
+    approval_notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class SuccessorDraftCreateRequest(FrozenSchema):
+    """Request payload for creating a successor draft from an approved version."""
+    edit_reason: str = Field(min_length=3, max_length=500)
+
+
+class ValidationSummaryResponse(FrozenSchema):
+    """Result of an explicit validation operation."""
+    record_id: uuid.UUID
+    record_version: int
+    lifecycle_status: PlanLifecycle
+    is_valid: bool
+    content_hash: str
+    validated_content_hash: Optional[str] = None
+    blocking_errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    checked_rules_count: int
+    validator_version: str
+    policy_version: str
+    validation_timestamp: datetime
+
+
+class ApprovalSummaryResponse(FrozenSchema):
+    """Result of an explicit approval operation."""
+    record_id: uuid.UUID
+    record_version: int
+    lifecycle_status: PlanLifecycle
+    approved_by_user_id: uuid.UUID
+    approved_at: datetime
+    content_hash: str
+    is_immutable: bool = True
+    parent_record_id: Optional[uuid.UUID] = None
+    superseded_parent_id: Optional[uuid.UUID] = None
+
+
+class VersionSummaryItem(FrozenSchema):
+    """Summary of a single template or plan version in history."""
+    version_id: uuid.UUID
+    version_number: int
+    lifecycle_status: PlanLifecycle
+    content_hash: str
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+    approved_by_user_id: Optional[uuid.UUID] = None
+    approved_at: Optional[datetime] = None
+    parent_id: Optional[uuid.UUID] = None
+    policy_version: str
+    questions_count: int
+    total_duration_minutes: int
+    edit_reason: Optional[str] = None
+
+
+class VersionHistoryResponse(FrozenSchema):
+    """Version history list for a job template or candidate plan."""
+    resource_type: str
+    resource_id: uuid.UUID
+    current_active_version: int
+    versions: List[VersionSummaryItem]
+
+
+class QuestionDiffItem(FrozenSchema):
+    """Field-level difference between two versions of a question."""
+    question_id: str
+    display_order_v1: Optional[int] = None
+    display_order_v2: Optional[int] = None
+    text_changed: bool = False
+    text_v1: Optional[str] = None
+    text_v2: Optional[str] = None
+    time_changed: bool = False
+    time_v1: Optional[int] = None
+    time_v2: Optional[int] = None
+    probes_changed: bool = False
+    probes_v1: List[str] = Field(default_factory=list)
+    probes_v2: List[str] = Field(default_factory=list)
+    change_type: str  # "UNCHANGED", "MODIFIED", "ADDED", "REMOVED"
+
+
+class VersionDiffResponse(FrozenSchema):
+    """Safe, structured comparison of two versions."""
+    resource_type: str
+    resource_id: uuid.UUID
+    version_from: int
+    version_to: int
+    lifecycle_status_from: PlanLifecycle
+    lifecycle_status_to: PlanLifecycle
+    content_hash_from: str
+    content_hash_to: str
+    total_duration_minutes_from: int
+    total_duration_minutes_to: int
+    changed_questions_count: int
+    question_diffs: List[QuestionDiffItem]
+
+

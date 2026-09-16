@@ -13,14 +13,23 @@ from app.api.auth import (
 from app.database import get_db
 from app.models.auth import AuditEventType, AuditReasonCode, AuditResult
 from app.schemas.interview_api import (
+    ApprovalSummaryResponse,
     BlueprintCoverageResponse,
     BlueprintValidationReportResponse,
+    CandidatePlanEditRequest,
+    CandidateSupplementalQuestionResponse,
     CompetencySelectionResponse,
+    InterviewApprovalRequest,
     InterviewQuestionResponse,
     InterviewRubricResponse,
     InterviewTemplateDraftCreateResponse,
+    InterviewTemplateEditRequest,
     InterviewTemplatePreviewResponse,
     RequirementClassificationResponse,
+    SuccessorDraftCreateRequest,
+    ValidationSummaryResponse,
+    VersionDiffResponse,
+    VersionHistoryResponse,
 )
 from app.schemas.phase3_audit import Phase3AuditEvent
 from app.schemas.phase3_enums import AuditRetentionClass
@@ -29,6 +38,22 @@ from app.services.interview_generator_service import (
     GeneratedDeterministicBlueprint,
     create_deterministic_interview_template_draft,
     preview_deterministic_interview_template,
+)
+from app.services.interview_lifecycle_service import (
+    LifecycleConflictError,
+    LifecycleValidationError,
+    approve_candidate_interview_plan,
+    approve_job_interview_template,
+    compute_candidate_plan_version_diff,
+    compute_template_version_diff,
+    create_candidate_interview_plan_successor,
+    create_job_interview_template_successor,
+    edit_candidate_interview_plan_draft,
+    edit_job_interview_template_draft,
+    get_candidate_plan_version_history,
+    get_template_version_history,
+    validate_candidate_interview_plan_draft,
+    validate_job_interview_template_draft,
 )
 from app.services.interview_snapshot_service import (
     InterviewCandidateNotFoundError,
@@ -672,4 +697,638 @@ async def create_candidate_interview_plan_draft_endpoint(
         created_by_user_id=plan_record.created_by_user_id,
         created_at=plan_record.created_at,
     )
+
+
+# =========================================================================
+# Phase 3B.4: Template Endpoints (Edit, Validate, Approve, Successor, History, Diff)
+# =========================================================================
+
+@router.patch(
+    "/{template_id}/edit",
+    response_model=InterviewTemplateDraftCreateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Safe Edit Template Draft",
+)
+async def edit_template_draft_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    payload: InterviewTemplateEditRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> InterviewTemplateDraftCreateResponse:
+    actor = auth_ctx.user
+    try:
+        updated_template = edit_job_interview_template_draft(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="interview_template_edit",
+            resource_id=str(template_id),
+            safe_metadata={"error_code": exc.code},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "message": exc.message},
+        )
+    except (InterviewRequisitionNotFoundError, InterviewSnapshotError) as exc:
+        if getattr(exc, "status_code", None) == 404:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": exc.code, "message": exc.message})
+        raise HTTPException(status_code=getattr(exc, "status_code", 400), detail={"code": exc.code, "message": exc.message})
+    except LifecycleValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": exc.code, "message": exc.message, "blocking_errors": exc.blocking_errors},
+        )
+    except LifecycleConflictError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        )
+
+    # Safe audit log
+    Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)),
+        event_type="INTERVIEW_TEMPLATE_DRAFT_EDITED",
+        resource_type="job_interview_template",
+        resource_id=str(updated_template.template_id),
+        policy_version=updated_template.guardrail_policy_version,
+        safe_metadata={
+            "job_id": str(job_id),
+            "template_version": updated_template.template_version,
+            "record_version": updated_template.record_version,
+            "content_hash": updated_template.content_hash,
+        },
+    )
+
+    preview = preview_deterministic_interview_template(
+        actor=actor,
+        job_id=job_id,
+        expected_revision=updated_template.revision,
+        db=db,
+    )
+    preview_dto = _map_blueprint_to_preview_dto(preview, job_id, updated_template.job_version_id, updated_template.revision)
+
+    return InterviewTemplateDraftCreateResponse(
+        template_id=updated_template.template_id,
+        organization_id=updated_template.organization_id,
+        job_id=job_id,
+        job_version_id=updated_template.job_version_id,
+        job_revision=updated_template.revision,
+        template_version=updated_template.template_version,
+        lifecycle_status=updated_template.lifecycle_status,
+        input_snapshot_hash=updated_template.input_snapshot_hash,
+        content_hash=updated_template.content_hash or preview_dto.content_hash,
+        common_core_questions=preview_dto.common_core_questions,
+        coverage_summary=preview_dto.coverage_summary,
+        validation_report=preview_dto.validation_report,
+        builder_version=updated_template.deterministic_builder_version,
+        question_catalogue_version=updated_template.question_catalogue_version,
+        rubric_catalogue_version=updated_template.rubric_catalogue_version,
+        created_by_user_id=updated_template.created_by_user_id,
+        created_at=updated_template.created_at,
+    )
+
+
+@router.post(
+    "/{template_id}/validate",
+    response_model=ValidationSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Validate Template Draft",
+)
+async def validate_template_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> ValidationSummaryResponse:
+    actor = auth_ctx.user
+    try:
+        report = validate_job_interview_template_draft(actor=actor, job_id=job_id, template_id=template_id, db=db)
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except LifecycleConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    # Safe audit log
+    Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)),
+        event_type="INTERVIEW_TEMPLATE_VALIDATED" if report.is_valid else "INTERVIEW_TEMPLATE_VALIDATION_FAILED",
+        resource_type="job_interview_template",
+        resource_id=str(template_id),
+        policy_version=report.policy_version,
+        safe_metadata={
+            "job_id": str(job_id),
+            "is_valid": report.is_valid,
+            "blocking_errors_count": len(report.blocking_errors),
+            "warnings_count": len(report.warnings),
+            "content_hash": report.content_hash,
+        },
+    )
+
+    return report
+
+
+@router.post(
+    "/{template_id}/approve",
+    response_model=ApprovalSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Approve Template",
+)
+async def approve_template_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    payload: InterviewApprovalRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> ApprovalSummaryResponse:
+    actor = auth_ctx.user
+    try:
+        summary = approve_job_interview_template(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except LifecycleConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    # Safe audit log
+    Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)),
+        event_type="INTERVIEW_TEMPLATE_APPROVED",
+        resource_type="job_interview_template",
+        resource_id=str(template_id),
+        safe_metadata={
+            "job_id": str(job_id),
+            "template_version": summary.record_version,
+            "content_hash": summary.content_hash,
+            "superseded_parent_id": str(summary.superseded_parent_id) if summary.superseded_parent_id else None,
+        },
+    )
+
+    return summary
+
+
+@router.post(
+    "/{template_id}/successor",
+    response_model=InterviewTemplateDraftCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Successor Draft From Approved Template",
+)
+async def create_template_successor_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    payload: SuccessorDraftCreateRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> InterviewTemplateDraftCreateResponse:
+    actor = auth_ctx.user
+    try:
+        successor = create_job_interview_template_successor(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except LifecycleConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    preview = preview_deterministic_interview_template(
+        actor=actor,
+        job_id=job_id,
+        expected_revision=successor.revision,
+        db=db,
+    )
+    preview_dto = _map_blueprint_to_preview_dto(preview, job_id, successor.job_version_id, successor.revision)
+
+    return InterviewTemplateDraftCreateResponse(
+        template_id=successor.template_id,
+        organization_id=successor.organization_id,
+        job_id=job_id,
+        job_version_id=successor.job_version_id,
+        job_revision=successor.revision,
+        template_version=successor.template_version,
+        lifecycle_status=successor.lifecycle_status,
+        input_snapshot_hash=successor.input_snapshot_hash,
+        content_hash=successor.content_hash or preview_dto.content_hash,
+        common_core_questions=preview_dto.common_core_questions,
+        coverage_summary=preview_dto.coverage_summary,
+        validation_report=preview_dto.validation_report,
+        builder_version=successor.deterministic_builder_version,
+        question_catalogue_version=successor.question_catalogue_version,
+        rubric_catalogue_version=successor.rubric_catalogue_version,
+        created_by_user_id=successor.created_by_user_id,
+        created_at=successor.created_at,
+    )
+
+
+@router.get(
+    "/history",
+    response_model=VersionHistoryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Template Version History",
+)
+async def get_template_history_endpoint(
+    job_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> VersionHistoryResponse:
+    actor = auth_ctx.user
+    try:
+        return get_template_version_history(actor=actor, job_id=job_id, db=db)
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.get(
+    "/diff",
+    response_model=VersionDiffResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Compare Template Versions",
+)
+async def get_template_diff_endpoint(
+    job_id: uuid.UUID,
+    version_from: int = Query(..., ge=1),
+    version_to: int = Query(..., ge=1),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> VersionDiffResponse:
+    actor = auth_ctx.user
+    try:
+        return compute_template_version_diff(
+            actor=actor,
+            job_id=job_id,
+            version_from=version_from,
+            version_to=version_to,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except (InterviewSnapshotError, LifecycleConflictError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+# =========================================================================
+# Phase 3B.4: Candidate Plan Endpoints (Edit, Validate, Approve, Successor, History, Diff)
+# =========================================================================
+
+@router.patch(
+    "/{template_id}/candidate-plans/{plan_id}/edit",
+    response_model=CandidateInterviewPlanDraftCreateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Safe Edit Candidate Plan Draft",
+)
+async def edit_candidate_plan_draft_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    payload: CandidatePlanEditRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> CandidateInterviewPlanDraftCreateResponse:
+    actor = auth_ctx.user
+    try:
+        updated_plan = edit_candidate_interview_plan_draft(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except LifecycleValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": exc.code, "message": exc.message, "blocking_errors": exc.blocking_errors},
+        )
+    except LifecycleConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    # Safe audit log
+    Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)),
+        event_type="CANDIDATE_INTERVIEW_PLAN_DRAFT_EDITED",
+        resource_type="candidate_interview_plan",
+        resource_id=str(updated_plan.plan_id),
+        policy_version=updated_plan.guardrail_policy_version,
+        safe_metadata={
+            "job_id": str(job_id),
+            "template_id": str(template_id),
+            "candidate_id": str(updated_plan.candidate_id),
+            "plan_version": updated_plan.plan_version,
+            "record_version": updated_plan.record_version,
+            "content_hash": updated_plan.content_hash,
+        },
+    )
+
+    from app.services.candidate_plan_generator_service import preview_deterministic_candidate_interview_plan
+    plan_preview = preview_deterministic_candidate_interview_plan(
+        actor=actor,
+        job_id=job_id,
+        template_id=template_id,
+        candidate_id=updated_plan.candidate_id,
+        expected_revision=updated_plan.template.revision,
+        profile_version=updated_plan.profile_version,
+        match_result_id=updated_plan.match_result_id,
+        db=db,
+    )
+    preview_dto = _map_candidate_plan_to_preview_dto(plan_preview)
+
+    return CandidateInterviewPlanDraftCreateResponse(
+        plan_id=updated_plan.plan_id,
+        organization_id=updated_plan.organization_id,
+        job_id=job_id,
+        job_revision=updated_plan.template.revision,
+        template_id=updated_plan.template_id,
+        template_version=updated_plan.template_version,
+        candidate_id=updated_plan.candidate_id,
+        profile_id=updated_plan.profile_id,
+        profile_version=updated_plan.profile_version,
+        match_result_id=updated_plan.match_result_id,
+        match_result_fingerprint=updated_plan.match_result_fingerprint,
+        plan_version=updated_plan.plan_version,
+        lifecycle_status=updated_plan.lifecycle_status,
+        scoring_separation_policy=updated_plan.scoring_separation_policy,
+        input_snapshot_hash=updated_plan.input_snapshot_hash,
+        content_hash=updated_plan.content_hash or preview_dto.content_hash,
+        common_template_summary=preview_dto.common_template_summary,
+        supplemental_questions=preview_dto.supplemental_questions,
+        coverage_summary=preview_dto.coverage_summary,
+        validation_report=preview_dto.validation_report,
+        supplemental_catalogue_version=plan_preview.supplemental_catalogue_version,
+        policy_version=plan_preview.policy_version,
+        created_by_user_id=updated_plan.created_by_user_id,
+        created_at=updated_plan.created_at,
+    )
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/validate",
+    response_model=ValidationSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Validate Candidate Plan Draft",
+)
+async def validate_candidate_plan_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> ValidationSummaryResponse:
+    actor = auth_ctx.user
+    try:
+        report = validate_candidate_interview_plan_draft(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except LifecycleConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    # Safe audit log
+    Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)),
+        event_type="CANDIDATE_INTERVIEW_PLAN_VALIDATED" if report.is_valid else "CANDIDATE_INTERVIEW_PLAN_VALIDATION_FAILED",
+        resource_type="candidate_interview_plan",
+        resource_id=str(plan_id),
+        policy_version=report.policy_version,
+        safe_metadata={
+            "job_id": str(job_id),
+            "template_id": str(template_id),
+            "is_valid": report.is_valid,
+            "blocking_errors_count": len(report.blocking_errors),
+            "content_hash": report.content_hash,
+        },
+    )
+
+    return report
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/approve",
+    response_model=ApprovalSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Approve Candidate Plan",
+)
+async def approve_candidate_plan_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    payload: InterviewApprovalRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> ApprovalSummaryResponse:
+    actor = auth_ctx.user
+    try:
+        summary = approve_candidate_interview_plan(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except LifecycleConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    # Safe audit log
+    Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)),
+        event_type="CANDIDATE_INTERVIEW_PLAN_APPROVED",
+        resource_type="candidate_interview_plan",
+        resource_id=str(plan_id),
+        safe_metadata={
+            "job_id": str(job_id),
+            "template_id": str(template_id),
+            "plan_version": summary.record_version,
+            "content_hash": summary.content_hash,
+            "superseded_parent_id": str(summary.superseded_parent_id) if summary.superseded_parent_id else None,
+        },
+    )
+
+    return summary
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/successor",
+    response_model=CandidateInterviewPlanDraftCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Successor Draft From Approved Candidate Plan",
+)
+async def create_candidate_plan_successor_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    payload: SuccessorDraftCreateRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> CandidateInterviewPlanDraftCreateResponse:
+    actor = auth_ctx.user
+    try:
+        successor = create_candidate_interview_plan_successor(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except LifecycleConflictError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    from app.services.candidate_plan_generator_service import preview_deterministic_candidate_interview_plan
+    plan_preview = preview_deterministic_candidate_interview_plan(
+        actor=actor,
+        job_id=job_id,
+        template_id=template_id,
+        candidate_id=successor.candidate_id,
+        expected_revision=successor.template.revision,
+        profile_version=successor.profile_version,
+        match_result_id=successor.match_result_id,
+        db=db,
+    )
+    preview_dto = _map_candidate_plan_to_preview_dto(plan_preview)
+
+    return CandidateInterviewPlanDraftCreateResponse(
+        plan_id=successor.plan_id,
+        organization_id=successor.organization_id,
+        job_id=job_id,
+        job_revision=successor.template.revision,
+        template_id=successor.template_id,
+        template_version=successor.template_version,
+        candidate_id=successor.candidate_id,
+        profile_id=successor.profile_id,
+        profile_version=successor.profile_version,
+        match_result_id=successor.match_result_id,
+        match_result_fingerprint=successor.match_result_fingerprint,
+        plan_version=successor.plan_version,
+        lifecycle_status=successor.lifecycle_status,
+        scoring_separation_policy=successor.scoring_separation_policy,
+        input_snapshot_hash=successor.input_snapshot_hash,
+        content_hash=successor.content_hash or preview_dto.content_hash,
+        common_template_summary=preview_dto.common_template_summary,
+        supplemental_questions=preview_dto.supplemental_questions,
+        coverage_summary=preview_dto.coverage_summary,
+        validation_report=preview_dto.validation_report,
+        supplemental_catalogue_version=plan_preview.supplemental_catalogue_version,
+        policy_version=plan_preview.policy_version,
+        created_by_user_id=successor.created_by_user_id,
+        created_at=successor.created_at,
+    )
+
+
+@router.get(
+    "/{template_id}/candidate-plans/{candidate_id}/history",
+    response_model=VersionHistoryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Candidate Plan Version History",
+)
+async def get_candidate_plan_history_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> VersionHistoryResponse:
+    actor = auth_ctx.user
+    try:
+        return get_candidate_plan_version_history(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            candidate_id=candidate_id,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.get(
+    "/{template_id}/candidate-plans/{candidate_id}/diff",
+    response_model=VersionDiffResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Compare Candidate Plan Versions",
+)
+async def get_candidate_plan_diff_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    version_from: int = Query(..., ge=1),
+    version_to: int = Query(..., ge=1),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> VersionDiffResponse:
+    actor = auth_ctx.user
+    try:
+        return compute_candidate_plan_version_diff(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            candidate_id=candidate_id,
+            version_from=version_from,
+            version_to=version_to,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except (InterviewSnapshotError, LifecycleConflictError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
 

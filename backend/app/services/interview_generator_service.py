@@ -552,8 +552,8 @@ class InterviewPolicyValidator:
         for q in questions:
             if q.layer != InterviewLayer.COMMON_CORE:
                 blocking_errors.append(f"Question '{q.question_id}' has invalid layer '{q.layer}'; must be COMMON_CORE.")
-            if q.authoring_origin != AuthoringOrigin.DETERMINISTIC:
-                blocking_errors.append(f"Question '{q.question_id}' has invalid origin '{q.authoring_origin}'; must be DETERMINISTIC.")
+            if q.authoring_origin not in {AuthoringOrigin.DETERMINISTIC, AuthoringOrigin.RECRUITER_EDITED}:
+                blocking_errors.append(f"Question '{q.question_id}' has invalid origin '{q.authoring_origin}'; must be DETERMINISTIC or RECRUITER_EDITED.")
             if not q.included_in_common_score:
                 blocking_errors.append(f"Common core question '{q.question_id}' must have included_in_common_score=True.")
 
