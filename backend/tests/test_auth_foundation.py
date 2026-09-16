@@ -298,6 +298,7 @@ def test_audit_event_enum_constraints():
         "PROVIDER_PROFILE_ACTIVATED",
         "PROVIDER_PROFILE_DISABLED",
         "PROVIDER_CONFIG_REJECTED",
+        "PROVIDER_COMPATIBILITY_TESTED",
         "ACCESS_DENIED",
     }
     assert set([e.value for e in AuditResult]) == {"SUCCESS", "FAILURE", "DENIED"}
@@ -315,6 +316,8 @@ def test_audit_event_enum_constraints():
         "PROVIDER_DISABLED",
         "PROVIDER_INVALID_CONFIG",
         "PROVIDER_INCOMPATIBLE",
+        "PROVIDER_COMPATIBILITY_SUCCESS",
+        "PROVIDER_COMPATIBILITY_FAILED",
         "ACCESS_DENIED",
         "STALE_VERSION",
         "MASS_ASSIGNMENT_ATTEMPT",

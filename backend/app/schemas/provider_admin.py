@@ -49,6 +49,9 @@ class CreateProviderProfileRequest(BaseModel):
     max_concurrency: int = Field(default=1, ge=1, le=20)
     retry_limit: int = Field(default=0, ge=0, le=3)
     egress_class: ProviderEgressClass = ProviderEgressClass.LOCAL_ONLY
+    model_source: Optional[str] = Field(default=None, max_length=255, description="Owner-supplied source repository/file")
+    model_licence: Optional[str] = Field(default=None, max_length=100, description="Owner-supplied model license")
+    model_checksum: Optional[str] = Field(default=None, max_length=128, description="Owner-supplied SHA256 checksum")
 
     @field_validator("secret_ref")
     @classmethod
@@ -103,6 +106,9 @@ class UpdateProviderProfileRequest(BaseModel):
     max_concurrency: Optional[int] = Field(default=None, ge=1, le=20)
     retry_limit: Optional[int] = Field(default=None, ge=0, le=3)
     egress_class: Optional[ProviderEgressClass] = None
+    model_source: Optional[str] = Field(default=None, max_length=255)
+    model_licence: Optional[str] = Field(default=None, max_length=100)
+    model_checksum: Optional[str] = Field(default=None, max_length=128)
 
     @field_validator("secret_ref")
     @classmethod
@@ -140,6 +146,43 @@ class DisableProviderProfileRequest(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=500, description="Reason for disabling.")
 
 
+class TestProviderCompatibilityRequest(BaseModel):
+    """Command schema for executing an Admin-only compatibility check."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: int = Field(ge=1, description="Expected profile version.")
+    timeout_override_seconds: Optional[float] = Field(default=None, gt=0.0, le=60.0)
+
+
+class ProviderCompatibilityReportResponse(FrozenSchema):
+    """Safe diagnostic report of an Admin compatibility test run.
+    
+    Contains strictly non-confidential test metadata, latency metrics, and discovered capabilities.
+    Zero exposure of API keys, Authorization headers, or full prompt/completion bodies.
+    """
+    profile_id: UUID
+    display_name: str
+    provider_type: ProviderType
+    model_identifier: Optional[str] = None
+    compatibility_status: ProviderCompatibilityStatus
+    is_compatible: bool
+    safe_failure_code: Optional[str] = None
+    safe_failure_message: Optional[str] = None
+    reachability_passed: bool
+    auth_passed: bool
+    model_discovered: bool
+    discovered_model_ids: List[str] = Field(default_factory=list)
+    dry_run_completion_passed: bool
+    non_streaming_enforced: bool
+    unicode_handling_passed: bool
+    latency_ms: float
+    tested_at: datetime
+    model_source: Optional[str] = None
+    model_licence: Optional[str] = None
+    model_checksum: Optional[str] = None
+    suite_version: str = "1.0.0"
+
+
 class AdminProviderProfileResponse(FrozenSchema):
     """Safe provider profile representation for Administrator management.
     
@@ -168,6 +211,10 @@ class AdminProviderProfileResponse(FrozenSchema):
     enabled: bool
     compatibility_status: ProviderCompatibilityStatus
     tested_at: Optional[datetime] = None
+    model_source: Optional[str] = None
+    model_licence: Optional[str] = None
+    model_checksum: Optional[str] = None
+    last_compatibility_report: Optional[dict] = None
     version: int
     created_at: datetime
     updated_at: datetime

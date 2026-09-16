@@ -39,6 +39,8 @@ from app.schemas.provider_admin import (
     AdminProviderProfileResponse,
     CreateProviderProfileRequest,
     DisableProviderProfileRequest,
+    ProviderCompatibilityReportResponse,
+    TestProviderCompatibilityRequest,
     UpdateProviderProfileRequest,
 )
 from app.services.provider_registry import (
@@ -721,4 +723,72 @@ async def disable_provider_profile(
     db.commit()
 
     return registry.to_safe_admin_response(disabled)
+
+
+@router.post(
+    "/provider-profiles/{profile_id}/test-compatibility",
+    response_model=ProviderCompatibilityReportResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Test AI Provider Endpoint Compatibility",
+    description="Executes synthetic compatibility verification against a provider endpoint (Admin only). Returns safe diagnostics without secrets.",
+)
+async def test_provider_compatibility(
+    profile_id: uuid.UUID,
+    test_req: TestProviderCompatibilityRequest = Body(...),
+    auth_ctx: AuthenticatedContext = Depends(verify_csrf_and_origin),
+    admin_auth: AuthenticatedContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> ProviderCompatibilityReportResponse:
+    try:
+        report = await registry.test_compatibility(
+            profile_id=profile_id,
+            request=test_req,
+            actor_id=admin_auth.user.user_id,
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider profile '{profile_id}' not found.",
+        )
+    except StaleVersionError as e:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.PROVIDER_CONFIG_REJECTED,
+            result=AuditResult.FAILURE,
+            reason_code=AuditReasonCode.STALE_VERSION,
+            actor_user_id=admin_auth.user.user_id,
+            resource_type="provider_profile",
+            resource_id=str(profile_id),
+            safe_metadata={"error": str(e), "requested_version": test_req.version},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.PROVIDER_COMPATIBILITY_TESTED,
+        result=AuditResult.SUCCESS if report.is_compatible else AuditResult.FAILURE,
+        reason_code=AuditReasonCode.PROVIDER_COMPATIBILITY_SUCCESS if report.is_compatible else AuditReasonCode.PROVIDER_COMPATIBILITY_FAILED,
+        actor_user_id=admin_auth.user.user_id,
+        resource_type="provider_profile",
+        resource_id=str(profile_id),
+        safe_metadata={
+            "is_compatible": report.is_compatible,
+            "compatibility_status": report.compatibility_status.value,
+            "provider_type": report.provider_type.value,
+            "model_identifier": report.model_identifier,
+            "latency_ms": report.latency_ms,
+            "safe_failure_code": report.safe_failure_code,
+            "suite_version": report.suite_version,
+            "discovered_model_count": len(report.discovered_model_ids),
+        },
+    )
+    db.commit()
+
+    return report
+
 
