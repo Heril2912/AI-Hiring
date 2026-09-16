@@ -19,9 +19,11 @@ export type IconName =
   | "chevron-right"
   | "chevron-left"
   | "chevron-down"
+  | "chevron-up"
   | "x"
   | "copy"
   | "check"
+  | "check-circle"
   | "alert-triangle"
   | "sparkles"
   | "file-text"
@@ -29,6 +31,8 @@ export type IconName =
   | "upload"
   | "refresh"
   | "shield"
+  | "shield-check"
+  | "save"
   | "trash"
   | "plus"
   | "eye"
@@ -174,6 +178,8 @@ export function Icon({ name, size = 18, className = "", "aria-label": ariaLabel,
         return <path d="m15 18-6-6 6-6" />;
       case "chevron-down":
         return <path d="m6 9 6 6 6-6" />;
+      case "chevron-up":
+        return <path d="m18 15-6-6-6 6" />;
       case "x":
         return (
           <>
@@ -190,6 +196,28 @@ export function Icon({ name, size = 18, className = "", "aria-label": ariaLabel,
         );
       case "check":
         return <polyline points="20 6 9 17 4 12" />;
+      case "check-circle":
+        return (
+          <>
+            <circle cx="12" cy="12" r="10" />
+            <path d="m9 12 2 2 4-4" />
+          </>
+        );
+      case "shield-check":
+        return (
+          <>
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="m9 12 2 2 4-4" />
+          </>
+        );
+      case "save":
+        return (
+          <>
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+            <polyline points="17 21 17 13 7 13 7 21" />
+            <polyline points="7 3 7 8 15 8" />
+          </>
+        );
       case "alert-triangle":
         return (
           <>
