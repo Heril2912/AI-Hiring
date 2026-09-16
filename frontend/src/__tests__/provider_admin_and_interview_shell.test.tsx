@@ -190,8 +190,8 @@ describe("Phase 3A.4 Provider Administration & Interview Workspace", () => {
       expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
       expect(screen.getByText("Local AI Active")).toBeInTheDocument();
       expect(screen.getByText("87.5%")).toBeInTheDocument();
-      expect(screen.getByText("EMPTY PLAN (PHASE 3A SHELL)")).toBeInTheDocument();
-      expect(screen.getByText("Interview Plan Ready for Generation")).toBeInTheDocument();
+      expect(screen.getByText("Standardized Job Interview Template")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Generate Standardized Template/i })).toBeInTheDocument();
     });
 
     it("displays access restriction message when unauthorized", async () => {
