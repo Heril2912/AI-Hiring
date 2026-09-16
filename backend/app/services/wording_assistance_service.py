@@ -44,12 +44,14 @@ from app.models.job import JobRequisition, JobRequirement
 from app.schemas.phase3_audit import Phase3AuditEvent
 from app.schemas.phase3_enums import (
     AuditRetentionClass,
+    AuthoringOrigin,
     InterviewLayer,
     PlanLifecycle,
     ProviderCompatibilityStatus,
     ProviderErrorCode,
     ProviderOperation,
     ProviderType,
+    ValidationErrorCode,
 )
 from app.schemas.provider_profile import ProviderProfile
 from app.schemas.safety_policy import (
@@ -77,6 +79,10 @@ from app.services.wording_provider import (
     BaseWordingProvider,
     DisabledWordingProvider,
     ProviderTransportError,
+)
+from app.services.wording_validation_service import (
+    SemanticValidationOutcome,
+    SemanticWordingValidator,
 )
 
 logger = logging.getLogger("ai_hiring.wording_assistance_service")
@@ -130,12 +136,13 @@ def _verify_recruiter_access(actor: UserRecord, job: JobRequisition) -> None:
 def _load_authoritative_question(
     question_id: UUID,
     db: Session,
-) -> Tuple[InterviewQuestionRecord, JobRequisition, Optional[JobInterviewTemplateRecord], Optional[CandidateInterviewPlanRecord]]:
+) -> Tuple[InterviewQuestionRecord, JobRequisition, Optional[JobInterviewTemplateRecord], Optional[CandidateInterviewPlanRecord], List[InterviewQuestionRecord]]:
     """Authoritatively loads the question record, verifying DRAFT status and relationships."""
     stmt = (
         select(InterviewQuestionRecord)
         .options(
             selectinload(InterviewQuestionRecord.template).selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(InterviewQuestionRecord.template).selectinload(JobInterviewTemplateRecord.questions),
             selectinload(InterviewQuestionRecord.rubric),
             selectinload(InterviewQuestionRecord.provenance).selectinload(SupplementalQuestionProvenanceRecord.plan),
             selectinload(InterviewQuestionRecord.provenance).selectinload(SupplementalQuestionProvenanceRecord.source_requirement),
@@ -158,7 +165,8 @@ def _load_authoritative_question(
             job = db.execute(stmt_job).scalar_one_or_none()
         if job is None:
             raise QuestionNotFoundError("Parent job requisition not found.")
-        return question, job, template, None
+        siblings = [q for q in (template.questions or []) if q.question_id != question.question_id]
+        return question, job, template, None, siblings
 
     # Check supplemental question linked to candidate plan via provenance
     prov = question.provenance
@@ -168,11 +176,15 @@ def _load_authoritative_question(
             raise QuestionNotDraftError(
                 f"Question belongs to candidate plan '{plan.plan_id}' with status '{plan.lifecycle_status.value}'. Only DRAFT records are editable."
             )
-        template_stmt = select(JobInterviewTemplateRecord).options(selectinload(JobInterviewTemplateRecord.requisition)).where(JobInterviewTemplateRecord.template_id == plan.template_id)
+        template_stmt = select(JobInterviewTemplateRecord).options(
+            selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(JobInterviewTemplateRecord.questions),
+        ).where(JobInterviewTemplateRecord.template_id == plan.template_id)
         parent_template = db.execute(template_stmt).scalar_one_or_none()
         if parent_template is None or parent_template.requisition is None:
             raise QuestionNotFoundError("Parent job requisition for candidate plan not found.")
-        return question, parent_template.requisition, parent_template, plan
+        siblings = [q for q in (parent_template.questions or []) if q.question_id != question.question_id]
+        return question, parent_template.requisition, parent_template, plan, siblings
 
     raise QuestionNotFoundError(f"Question '{question_id}' has no valid parent template or plan.")
 
@@ -181,7 +193,6 @@ def _resolve_permitted_terminology(question: InterviewQuestionRecord, db: Sessio
     """Resolves authoritative permitted terminology keywords from associated requirements."""
     permitted: List[str] = []
     if question.requirement_ids:
-        # Load labels from JobRequirement records safely
         try:
             req_uuids = [UUID(str(rid)) for rid in question.requirement_ids if rid]
             if req_uuids:
@@ -229,8 +240,8 @@ async def request_question_wording_assistance(
     start_time = time.perf_counter()
     reg = provider_registry or get_provider_registry()
 
-    # 1. Authoritatively load question and verify Recruiter access
-    question, job, template, plan = _load_authoritative_question(question_id=question_id, db=db)
+    # 1. Authoritatively load question, verify relationships, and verify Recruiter access
+    question, job, template, plan, siblings = _load_authoritative_question(question_id=question_id, db=db)
     _verify_recruiter_access(actor=actor, job=job)
 
     # 2. Extract authoritative server-owned fields
@@ -275,77 +286,132 @@ async def request_question_wording_assistance(
     input_hash = hashlib.sha256(bounded_request.deterministic_question_text.encode("utf-8")).hexdigest()
     input_size = len(bounded_request.deterministic_question_text)
 
-    # 5. Dispatch to Provider with Safe Fallback
+    # 5. Dispatch to Provider with Safe Fallback & Semantic Validation Pipeline
     try:
         response: BoundedWordingResponse = await provider.request_wording_assistance(bounded_request)
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-        # Build output hash and check references against allowlist
+        # Build raw output hash for provenance
         output_concat = "".join(v.variant_text for v in response.variants)
         output_hash = hashlib.sha256(output_concat.encode("utf-8")).hexdigest()
         output_size = len(output_concat)
 
-        # Filter references against server-created allowlist
-        filtered_variants = []
-        allowed_ref_set = set(bounded_request.allowed_reference_ids)
-        for v in response.variants:
-            safe_refs = [ref for ref in v.referenced_identifiers if ref in allowed_ref_set]
-            filtered_variants.append(
-                StructuredWordingVariant(
-                    variant_text=v.variant_text,
-                    rationale_code=v.rationale_code,
-                    referenced_identifiers=safe_refs,
-                )
+        # 6. Execute Phase 3C.3 Semantic Validation Pipeline
+        validation_outcome: SemanticValidationOutcome = SemanticWordingValidator.validate_wording_response(
+            source_question=question,
+            request=bounded_request,
+            response=response,
+            sibling_questions=siblings,
+            allowed_reference_ids=set(bounded_request.allowed_reference_ids),
+        )
+
+        if validation_outcome.is_valid:
+            # Audit Event for Accepted AI Proposal (MODEL_PROVENANCE, safe metadata only)
+            Phase3AuditEvent(
+                event_id=uuid.uuid4(),
+                actor_user_id=actor.user_id,
+                organization_id=org_id,
+                event_type="QUESTION_WORDING_VALIDATED",
+                resource_type="interview_question",
+                resource_id=str(question.question_id),
+                resource_version=question.question_version,
+                policy_version=SAFETY_POLICY_VERSION,
+                policy_hash=SAFETY_POLICY_HASH,
+                retention_class=AuditRetentionClass.MODEL_PROVENANCE,
+                result_code="VALIDATED",
+                safe_metadata={
+                    "operation": "REWORD_QUESTION",
+                    "request_schema_version": WORDING_REQUEST_SCHEMA_VERSION,
+                    "prompt_template_version": PROMPT_TEMPLATE_VERSION,
+                    "provider_profile_id": str(active_profile.profile_id) if active_profile else None,
+                    "provider_class": active_profile.provider_type.value if active_profile else "DISABLED",
+                    "model_identifier": active_profile.model_identifier if active_profile else None,
+                    "authoring_origin": AuthoringOrigin.AI_ASSISTED.value,
+                    "input_hash": input_hash,
+                    "output_hash": output_hash,
+                    "input_chars": input_size,
+                    "output_chars": output_size,
+                    "latency_ms": latency_ms,
+                    "variants_count": len(validation_outcome.validated_variants),
+                    "validation_status": "PASSED",
+                },
             )
 
-        # Audit Event (Safe metadata only, no full prompt/response/secrets/PII)
-        Phase3AuditEvent(
-            event_id=uuid.uuid4(),
-            actor_user_id=actor.user_id,
-            organization_id=org_id,
-            event_type="QUESTION_WORDING_ASSISTED",
-            resource_type="interview_question",
-            resource_id=str(question.question_id),
-            resource_version=question.question_version,
-            policy_version=SAFETY_POLICY_VERSION,
-            policy_hash=SAFETY_POLICY_HASH,
-            retention_class=AuditRetentionClass.OPERATIONAL_TRACE,
-            result_code="SUCCESS",
-            safe_metadata={
-                "operation": "REWORD_QUESTION",
-                "request_schema_version": WORDING_REQUEST_SCHEMA_VERSION,
-                "prompt_template_version": PROMPT_TEMPLATE_VERSION,
-                "provider_profile_id": str(active_profile.profile_id) if active_profile else None,
-                "provider_class": active_profile.provider_type.value if active_profile else "DISABLED",
-                "model_identifier": active_profile.model_identifier if active_profile else None,
-                "input_hash": input_hash,
-                "output_hash": output_hash,
-                "input_chars": input_size,
-                "output_chars": output_size,
-                "latency_ms": latency_ms,
-                "variants_count": len(filtered_variants),
-            },
-        )
+            return CandidateWordingResult(
+                source_question_id=question.question_id,
+                source_question_version=question.question_version,
+                operation="REWORD_QUESTION",
+                request_schema_version=WORDING_REQUEST_SCHEMA_VERSION,
+                prompt_template_version=PROMPT_TEMPLATE_VERSION,
+                deterministic_question_text=question.question_text,
+                proposed_variants=validation_outcome.validated_variants,
+                allowed_references_checked=True,
+                is_validated=True,
+                validation_codes=[],
+                rejection_reasons=[],
+                authoring_origin=AuthoringOrigin.AI_ASSISTED,
+                provider_fallback_used=False,
+                provider_error_code=None,
+                safe_error_message=None,
+            )
+        else:
+            # Semantic validation rejected output -> safe deterministic fallback
+            Phase3AuditEvent(
+                event_id=uuid.uuid4(),
+                actor_user_id=actor.user_id,
+                organization_id=org_id,
+                event_type="QUESTION_WORDING_VALIDATION_FAILED",
+                resource_type="interview_question",
+                resource_id=str(question.question_id),
+                resource_version=question.question_version,
+                policy_version=SAFETY_POLICY_VERSION,
+                policy_hash=SAFETY_POLICY_HASH,
+                retention_class=AuditRetentionClass.MODEL_PROVENANCE,
+                result_code="VALIDATION_FAILED",
+                safe_metadata={
+                    "operation": "REWORD_QUESTION",
+                    "provider_profile_id": str(active_profile.profile_id) if active_profile else None,
+                    "provider_class": active_profile.provider_type.value if active_profile else "DISABLED",
+                    "model_identifier": active_profile.model_identifier if active_profile else None,
+                    "input_hash": input_hash,
+                    "output_hash": output_hash,
+                    "input_chars": input_size,
+                    "output_chars": output_size,
+                    "latency_ms": latency_ms,
+                    "validation_codes": validation_outcome.validation_codes,
+                    "validation_status": "BLOCKED",
+                },
+            )
 
-        return CandidateWordingResult(
-            source_question_id=question.question_id,
-            source_question_version=question.question_version,
-            operation="REWORD_QUESTION",
-            request_schema_version=WORDING_REQUEST_SCHEMA_VERSION,
-            prompt_template_version=PROMPT_TEMPLATE_VERSION,
-            deterministic_question_text=question.question_text,
-            proposed_variants=filtered_variants,
-            allowed_references_checked=True,
-            provider_fallback_used=False,
-            provider_error_code=None,
-            safe_error_message=None,
-        )
+            return CandidateWordingResult(
+                source_question_id=question.question_id,
+                source_question_version=question.question_version,
+                operation="REWORD_QUESTION",
+                request_schema_version=WORDING_REQUEST_SCHEMA_VERSION,
+                prompt_template_version=PROMPT_TEMPLATE_VERSION,
+                deterministic_question_text=question.question_text,
+                proposed_variants=[
+                    StructuredWordingVariant(
+                        variant_text=question.question_text,
+                        rationale_code=WordingRationaleCode.NEUTRAL_PHRASING,
+                        referenced_identifiers=[],
+                    )
+                ],
+                allowed_references_checked=True,
+                is_validated=False,
+                validation_codes=validation_outcome.validation_codes,
+                rejection_reasons=validation_outcome.rejection_reasons,
+                authoring_origin=AuthoringOrigin.DETERMINISTIC,
+                provider_fallback_used=True,
+                provider_error_code=validation_outcome.validation_codes[0] if validation_outcome.validation_codes else None,
+                safe_error_message="Proposed wording failed semantic validation checks. Deterministic wording retained.",
+            )
 
     except ProviderTransportError as e:
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
         logger.info("Provider transport failure during wording assistance: %s - %s", e.error_code, e.safe_message)
 
-        # Audit Event for Failure
+        # Audit Event for Transport Failure
         Phase3AuditEvent(
             event_id=uuid.uuid4(),
             actor_user_id=actor.user_id,
@@ -383,6 +449,10 @@ async def request_question_wording_assistance(
                 )
             ],
             allowed_references_checked=True,
+            is_validated=False,
+            validation_codes=[e.error_code.value if hasattr(e.error_code, "value") else str(e.error_code)],
+            rejection_reasons=[e.safe_message],
+            authoring_origin=AuthoringOrigin.DETERMINISTIC,
             provider_fallback_used=True,
             provider_error_code=e.error_code.value if hasattr(e.error_code, "value") else str(e.error_code),
             safe_error_message=e.safe_message,
