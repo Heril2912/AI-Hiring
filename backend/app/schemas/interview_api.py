@@ -133,3 +133,114 @@ class InterviewTemplateDraftCreateResponse(FrozenSchema):
     rubric_catalogue_version: str
     created_by_user_id: uuid.UUID
     created_at: datetime
+
+
+# =========================================================================
+# Candidate Interview Plan Schemas (Phase 3B.3)
+# =========================================================================
+
+class SupplementalQuestionGuidanceResponse(FrozenSchema):
+    """Safe, non-scored guidance for an evidence clarification question."""
+    clarification_purpose: str
+    facts_to_confirm: List[str]
+    prohibited_inferences: List[str]
+
+
+class SupplementalQuestionProvenanceResponse(FrozenSchema):
+    """Provenance references binding a supplemental question to authoritative match results."""
+    source_requirement_id: uuid.UUID
+    source_match_result_id: uuid.UUID
+    source_match_state: str
+    allowlisted_evidence_ids: List[str]
+    excluded_from_common_score: bool = True
+
+
+class CandidateSupplementalQuestionResponse(FrozenSchema):
+    """Supplemental evidence clarification question DTO."""
+    question_id: uuid.UUID
+    layer: InterviewLayer = InterviewLayer.SUPPLEMENTAL_EVIDENCE
+    question_type: QuestionType = QuestionType.EVIDENCE_CLARIFICATION
+    authoring_origin: AuthoringOrigin = AuthoringOrigin.DETERMINISTIC
+    display_order: int
+    requirement_references: List[uuid.UUID]
+    deterministic_template_id: str
+    deterministic_template_version: str
+    question_text: str
+    question_intent: str
+    estimated_time_minutes: int
+    included_in_common_score: bool = False
+    validation_state: ValidationState
+    guidance: SupplementalQuestionGuidanceResponse
+    provenance: SupplementalQuestionProvenanceResponse
+
+
+class CandidateInterviewPlanSummaryResponse(FrozenSchema):
+    """Safe summary of the bound common-core template."""
+    template_id: uuid.UUID
+    template_version: int
+    template_content_hash: str
+    job_id: uuid.UUID
+    job_revision: int
+    common_core_questions_count: int
+    common_core_duration_minutes: int
+
+
+class CandidatePlanCoverageSummaryResponse(FrozenSchema):
+    """Coverage summary for candidate-specific clarification questions."""
+    selected_target_count: int
+    target_selection_reasons: Dict[str, str]
+    match_states_clarified: List[str]
+    total_supplemental_duration_minutes: int
+
+
+class CandidateInterviewPlanPreviewResponse(FrozenSchema):
+    """Response DTO for candidate interview plan preview."""
+    plan_id: uuid.UUID
+    job_id: uuid.UUID
+    job_revision: int
+    template_id: uuid.UUID
+    template_version: int
+    candidate_id: uuid.UUID
+    profile_id: uuid.UUID
+    profile_version: int
+    match_result_id: uuid.UUID
+    match_result_fingerprint: str
+    lifecycle_status: PlanLifecycle
+    scoring_separation_policy: str
+    input_snapshot_hash: str
+    content_hash: str
+    common_template_summary: CandidateInterviewPlanSummaryResponse
+    supplemental_questions: List[CandidateSupplementalQuestionResponse]
+    coverage_summary: CandidatePlanCoverageSummaryResponse
+    validation_report: BlueprintValidationReportResponse
+    supplemental_catalogue_version: str
+    policy_version: str
+
+
+class CandidateInterviewPlanDraftCreateResponse(FrozenSchema):
+    """Response DTO for created candidate interview plan draft."""
+    plan_id: uuid.UUID
+    organization_id: uuid.UUID
+    job_id: uuid.UUID
+    job_revision: int
+    template_id: uuid.UUID
+    template_version: int
+    candidate_id: uuid.UUID
+    profile_id: uuid.UUID
+    profile_version: int
+    match_result_id: uuid.UUID
+    match_result_fingerprint: str
+    plan_version: int
+    lifecycle_status: PlanLifecycle
+    scoring_separation_policy: str
+    input_snapshot_hash: str
+    content_hash: str
+    common_template_summary: CandidateInterviewPlanSummaryResponse
+    supplemental_questions: List[CandidateSupplementalQuestionResponse]
+    coverage_summary: CandidatePlanCoverageSummaryResponse
+    validation_report: BlueprintValidationReportResponse
+    supplemental_catalogue_version: str
+    policy_version: str
+    created_by_user_id: uuid.UUID
+    created_at: datetime
+
