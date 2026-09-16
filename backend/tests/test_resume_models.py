@@ -45,6 +45,11 @@ def test_models_exported_and_tables_registered():
         "gap_reports",
         "gap_report_items",
         "gap_audit_events",
+        "job_interview_templates",
+        "interview_questions",
+        "interview_rubrics",
+        "candidate_interview_plans",
+        "supplemental_question_provenances",
     }
 
 

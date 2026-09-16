@@ -45,8 +45,14 @@ from app.models.gap_report import (
     GapReportItemRecord,
     GapReportRecord,
 )
+from app.models.interview import (
+    CandidateInterviewPlanRecord,
+    InterviewQuestionRecord,
+    InterviewRubricRecord,
+    JobInterviewTemplateRecord,
+    SupplementalQuestionProvenanceRecord,
+)
 from app.models.resume import (
-
     ArtifactFormat,
     ArtifactValidationStatus,
     ProcessingJob,
@@ -116,4 +122,9 @@ __all__ = [
     "GapReportItemRecord",
     "GapAuditEventType",
     "GapAuditEventRecord",
+    "JobInterviewTemplateRecord",
+    "InterviewQuestionRecord",
+    "InterviewRubricRecord",
+    "CandidateInterviewPlanRecord",
+    "SupplementalQuestionProvenanceRecord",
 ]

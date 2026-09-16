@@ -4,6 +4,21 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
+from app.schemas.interview_snapshot import (
+    DETERMINISTIC_BUILDER_VERSION,
+    QUESTION_CATALOGUE_VERSION,
+    RUBRIC_CATALOGUE_VERSION,
+    SCORING_SEPARATION_POLICY,
+    CandidatePlanInputSnapshot,
+    CandidateRequirementResultSnapshotItem,
+    JobBlueprintInputSnapshot,
+    JobRequirementSnapshotItem,
+    PolicyVersionReference,
+    canonicalize_candidate_plan_snapshot,
+    canonicalize_job_blueprint_snapshot,
+    compute_candidate_plan_snapshot_hash,
+    compute_job_blueprint_snapshot_hash,
+)
 from app.schemas.matching import FrozenSchema, verify_no_prohibited_keys
 from app.schemas.phase3_enums import (
     AuthoringOrigin,
@@ -21,14 +36,6 @@ from app.schemas.safety_policy import (
 )
 
 BLUEPRINT_SCHEMA_VERSION: str = "1.0.0"
-
-
-class PolicyVersionReference(FrozenSchema):
-    """Immutable reference to an authoritative versioned safety policy."""
-    policy_id: str = Field(default=SAFETY_POLICY_ID, min_length=1)
-    policy_version: str = Field(default=SAFETY_POLICY_VERSION, min_length=1)
-    policy_hash: str = Field(default=SAFETY_POLICY_HASH, min_length=64, max_length=64)
-    schema_version: str = Field(default=SAFETY_POLICY_SCHEMA_VERSION, min_length=1)
 
 
 class BlueprintInputSnapshot(FrozenSchema):
