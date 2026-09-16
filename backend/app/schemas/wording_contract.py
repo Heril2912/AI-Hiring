@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 
 from app.schemas.matching import FrozenSchema, verify_no_prohibited_keys
-from app.schemas.phase3_enums import InterviewLayer, QuestionType, ValidationState
+from app.schemas.phase3_enums import AuthoringOrigin, InterviewLayer, QuestionType, ValidationState
 from app.schemas.safety_policy import (
     SAFETY_POLICY_HASH,
     SAFETY_POLICY_ID,
@@ -140,8 +140,9 @@ class BoundedWordingResponse(FrozenSchema):
 class CandidateWordingResult(FrozenSchema):
     """Candidate wording result returned for internal evaluation / Recruiter display.
     
-    NOTE: In Phase 3C.2, receiving this result does NOT mark it safe, does not persist it,
-    does not alter lifecycle state, and does not replace deterministic text.
+    In Phase 3C.3, this contains the semantic validation outcome and safe validation codes.
+    Receiving this result does NOT automatically replace the deterministic question in the DB,
+    does NOT approve it, and does NOT alter lifecycle state.
     """
     source_question_id: UUID
     source_question_version: int
@@ -151,6 +152,10 @@ class CandidateWordingResult(FrozenSchema):
     deterministic_question_text: str
     proposed_variants: List[StructuredWordingVariant]
     allowed_references_checked: bool = True
+    is_validated: bool = False
+    validation_codes: List[str] = Field(default_factory=list)
+    rejection_reasons: List[str] = Field(default_factory=list)
+    authoring_origin: AuthoringOrigin = AuthoringOrigin.DETERMINISTIC
     provider_fallback_used: bool = False
     provider_error_code: Optional[str] = None
     safe_error_message: Optional[str] = None
