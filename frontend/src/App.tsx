@@ -14,6 +14,7 @@ import { JobEditor } from "./components/jobs/JobEditor";
 import { CandidateComparisonView } from "./components/jobs/CandidateComparisonView";
 import { RequirementGapReportView } from "./components/jobs/RequirementGapReportView";
 import { InterviewWorkspace } from "./components/interviews/InterviewWorkspace";
+import { SimulationWorkspace } from "./components/interviews/SimulationWorkspace";
 import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
@@ -53,10 +54,11 @@ function AuthenticatedApp() {
     role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews"
   );
   const [activeView, setActiveView] = useState<
-    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace"
+    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace" | "interview_simulation"
   >("candidates");
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [interviewRoute, setInterviewRoute] = useState<InterviewRouteState | null>(null);
+  const [simulationRoute, setSimulationRoute] = useState<{ planId: string; jobId: string } | null>(null);
 
   // Health check
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
@@ -482,6 +484,10 @@ function AuthenticatedApp() {
                 <InterviewWorkspace
                   jobId={interviewRoute.jobId}
                   resumeId={interviewRoute.resumeId}
+                  onNavigateToSimulation={(planId, jId) => {
+                    setSimulationRoute({ planId, jobId: jId });
+                    setActiveView("interview_simulation");
+                  }}
                   onNavigateBack={() => {
                     if (interviewRoute.resumeId && comparisonParams) {
                       setActiveView("compare_candidates");
@@ -493,6 +499,16 @@ function AuthenticatedApp() {
                       setActiveView("jobs");
                       setActiveNavTab("jobs");
                     }
+                  }}
+                />
+              )}
+
+              {activeView === "interview_simulation" && simulationRoute && (
+                <SimulationWorkspace
+                  planId={simulationRoute.planId}
+                  jobId={simulationRoute.jobId}
+                  onNavigateBack={() => {
+                    setActiveView("interview_workspace");
                   }}
                 />
               )}

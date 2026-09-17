@@ -14,6 +14,7 @@ import {
   GenerateTemplateAiWordingResponse,
 } from "../../types/interview";
 import { WordingComparisonModal } from "./WordingComparisonModal";
+import { AnchoredRubricModal } from "./AnchoredRubricModal";
 
 export interface RecruiterAIAvailability {
   ai_enabled: boolean;
@@ -45,6 +46,7 @@ interface InterviewWorkspaceProps {
   jobId: string;
   resumeId?: string | null;
   onNavigateBack: () => void;
+  onNavigateToSimulation?: (planId: string, jobId: string) => void;
 }
 
 /**
@@ -90,6 +92,7 @@ export function InterviewWorkspace({
   jobId,
   resumeId,
   onNavigateBack,
+  onNavigateToSimulation,
 }: InterviewWorkspaceProps) {
   const [context, setContext] = useState<InterviewContextData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -124,6 +127,7 @@ export function InterviewWorkspace({
   const [isApplyingSuggestion, setIsApplyingSuggestion] = useState<boolean>(false);
   const [announcement, setAnnouncement] = useState<string>("");
   const [expandedProvenanceQuestionId, setExpandedProvenanceQuestionId] = useState<string | null>(null);
+  const [isRestoringQuestionId, setIsRestoringQuestionId] = useState<string | null>(null);
 
   // Validation report
   const [validationReport, setValidationReport] = useState<ValidationSummaryResponse | null>(null);
@@ -273,8 +277,12 @@ export function InterviewWorkspace({
             return {
               ...q,
               question_text: res.question_text,
+              question_version: res.question_version ?? q.question_version,
               authoring_origin: res.authoring_origin,
-              deterministic_source_text: res.deterministic_question_text,
+              deterministic_source_text: res.deterministic_question_text ?? q.deterministic_source_text,
+              deterministic_source_available: !!(res.deterministic_question_text || q.deterministic_source_text),
+              has_wording_drift: res.authoring_origin !== "DETERMINISTIC",
+              can_restore: res.authoring_origin !== "DETERMINISTIC" && !!(res.deterministic_question_text || q.deterministic_source_text),
             };
           }
           return q;
@@ -513,13 +521,14 @@ export function InterviewWorkspace({
     question: TemplateQuestion,
     layer: "COMMON_CORE" | "SUPPLEMENTAL_EVIDENCE" = "COMMON_CORE"
   ) => {
-    if (!template) return;
+    if (!template || isRestoringQuestionId) return;
     const confirmRestore = window.confirm(
       "Restore the original deterministic wording for this question? Any recruiter edits or AI suggestions will be replaced by the blueprint baseline."
     );
     if (!confirmRestore) return;
 
     try {
+      setIsRestoringQuestionId(question.question_id);
       setActionError(null);
       const response = await apiFetch<QuestionActionResponse>(
         `/api/v1/jobs/${jobId}/interview-templates/${template.template_id}/questions/${question.question_id}/restore-deterministic`,
@@ -540,6 +549,10 @@ export function InterviewWorkspace({
                 question_version: response.question_version,
                 authoring_origin: response.authoring_origin,
                 deterministic_source_text: response.deterministic_source_text,
+                can_restore: response.can_restore,
+                deterministic_source_available: response.deterministic_source_available,
+                has_wording_drift: response.has_wording_drift,
+                restore_unavailable_reason: response.restore_unavailable_reason,
                 safe_metadata: response.safe_metadata,
                 ai_provenance: null,
               }
@@ -555,6 +568,10 @@ export function InterviewWorkspace({
                 question_version: response.question_version,
                 authoring_origin: response.authoring_origin,
                 deterministic_source_text: response.deterministic_source_text,
+                can_restore: response.can_restore,
+                deterministic_source_available: response.deterministic_source_available,
+                has_wording_drift: response.has_wording_drift,
+                restore_unavailable_reason: response.restore_unavailable_reason,
                 safe_metadata: response.safe_metadata,
                 ai_provenance: null,
               }
@@ -564,9 +581,30 @@ export function InterviewWorkspace({
       }
 
       setValidationReport(null);
-      setSuccessMessage("Deterministic blueprint wording restored.");
+      setSuccessMessage("Original wording restored.");
+      setAnnouncement("Original wording restored.");
     } catch (err: any) {
-      setActionError(err?.message || "Failed to restore deterministic wording.");
+      if (err?.status === 409 || err?.message?.includes("conflict") || err?.message?.includes("modified")) {
+        // Concurrency conflict: reload latest template to get up-to-date versions
+        try {
+          const refreshed = await apiFetch<JobInterviewTemplateResponse>(
+            `/api/v1/jobs/${jobId}/interview-templates/latest?revision=${context?.job_revision}`
+          );
+          if (refreshed) {
+            setTemplate(refreshed);
+            setEditableQuestions(refreshed.common_core_questions || []);
+          }
+        } catch {
+          // ignore reload error
+        }
+        setActionError("The question changed in another action. The latest version was loaded.");
+      } else if (err?.code === "NO_DETERMINISTIC_SOURCE" || err?.message?.includes("no deterministic")) {
+        setActionError("This question has no deterministic original.");
+      } else {
+        setActionError(err?.message || "Failed to restore deterministic wording.");
+      }
+    } finally {
+      setIsRestoringQuestionId(null);
     }
   };
 
@@ -1081,7 +1119,10 @@ export function InterviewWorkspace({
               const isAiExpanded = expandedProvenanceQuestionId === q.question_id;
               const isAiOrigin = q.authoring_origin === "AI_ASSISTED";
               const isEditedOrigin = q.authoring_origin === "RECRUITER_EDITED";
-              const canRestore = (isAiOrigin || isEditedOrigin) && isTemplateDraft;
+              const canRestore = (q.can_restore !== undefined
+                ? q.can_restore
+                : (Boolean(q.deterministic_source_text) && q.deterministic_source_text !== q.question_text)) && isTemplateDraft;
+              const isRestoring = isRestoringQuestionId === q.question_id;
               const isEditing = editingQuestionId === q.question_id;
               const isComparing = comparingQuestionId === q.question_id;
 
@@ -1099,6 +1140,16 @@ export function InterviewWorkspace({
                         {formatCompetencyName(q.competency_name || (q as any).competency_id || (q.rubric as any)?.competency_definition)}
                       </span>
                       <span className="badge badge-outline text-xs">{q.question_type}</span>
+
+                      {/* Manual Question Required Warning Badge */}
+                      {q.unresolved_manual_required && (
+                        <span
+                          className="badge badge-warning text-xs font-semibold"
+                          title="No deterministic question was available and AI generation could not resolve this slot. Please enter question wording manually."
+                        >
+                          Manual Question Required
+                        </span>
+                      )}
 
                       {/* Origin Badge */}
                       {isAiOrigin ? (
@@ -1236,10 +1287,11 @@ export function InterviewWorkspace({
                           type="button"
                           className="btn btn-ghost btn-xs text-muted"
                           onClick={() => handleRestoreDeterministic(q, "COMMON_CORE")}
+                          disabled={isRestoring}
                           title="Restore original deterministic baseline wording"
                         >
                           <Icon name="history" size={12} />
-                          <span>Restore original</span>
+                          <span>{isRestoring ? "Restoring..." : "Restore original"}</span>
                         </button>
                       )}
 
@@ -1401,9 +1453,21 @@ export function InterviewWorkspace({
           {candidatePlan ? (
             <div className="candidate-plan-box border rounded p-4 bg-gray-50">
               <div className="flex justify-between items-center mb-3">
-                <span className="badge badge-info">
-                  Plan v{candidatePlan.plan_version} &bull; {(candidatePlan as any).lifecycle_status || candidatePlan.lifecycle_state || "DRAFT"}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="badge badge-info">
+                    Plan v{candidatePlan.plan_version} &bull; {(candidatePlan as any).lifecycle_status || candidatePlan.lifecycle_state || "DRAFT"}
+                  </span>
+                  {((candidatePlan as any).lifecycle_status === "APPROVED" || candidatePlan.lifecycle_state === "APPROVED") && onNavigateToSimulation && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-xs flex items-center gap-1"
+                      onClick={() => onNavigateToSimulation(candidatePlan.plan_id, jobId)}
+                    >
+                      <Icon name="play" size={12} />
+                      <span>Start Text Simulation</span>
+                    </button>
+                  )}
+                </div>
                 <span className="text-xs text-muted">
                   Supplemental Duration: {candidatePlan.supplemental_duration_minutes || 15} min &bull; Total: {candidatePlan.total_duration_minutes || 60} min
                 </span>
@@ -1451,53 +1515,11 @@ export function InterviewWorkspace({
         </div>
       ))}
 
-      {/* Anchored Rubric Modal / Drawer */}
-      {selectedRubricQuestion && selectedRubricQuestion.rubric && (
-        <div className="modal-backdrop fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="modal-box bg-white rounded-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4 border-b pb-2">
-              <div>
-                <h3 className="font-semibold text-lg">
-                  Anchored Rubric: {formatCompetencyName(selectedRubricQuestion.competency_name || (selectedRubricQuestion.rubric as any).competency_definition || selectedRubricQuestion.rubric.target_competency)}
-                </h3>
-                <p className="text-xs text-muted">
-                  {(selectedRubricQuestion.rubric as any).question_intent || "Authoritative behavioral scoring anchors"}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setSelectedRubricQuestion(null)}
-              >
-                <Icon name="x" size={18} />
-              </button>
-            </div>
-
-            {/* Behavioral Rating Anchors (1-5 Scale) */}
-            {(selectedRubricQuestion.rubric as any).rating_anchors && (
-              <div className="rubric-anchors space-y-3 mb-4">
-                <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Behavioral Rating Anchors</h4>
-                {Object.entries((selectedRubricQuestion.rubric as any).rating_anchors).map(([score, description]) => (
-                  <div key={score} className="rubric-level-card border rounded p-3 bg-gray-50 flex items-start gap-3">
-                    <span className="badge badge-primary font-bold text-sm px-2 py-1">Score {score}</span>
-                    <p className="text-sm text-gray-800 m-0">{String(description)}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setSelectedRubricQuestion(null)}
-              >
-                Close Rubric
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Semantic Accessible Anchored Rubric Modal */}
+      <AnchoredRubricModal
+        question={selectedRubricQuestion}
+        onClose={() => setSelectedRubricQuestion(null)}
+      />
 
       {/* Version History Modal */}
       {showHistoryModal && (

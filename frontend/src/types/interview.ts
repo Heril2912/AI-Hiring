@@ -28,8 +28,18 @@ export interface RubricLevel {
 
 export interface AnchoredRubric {
   rubric_id: string;
-  target_competency: string;
-  levels: RubricLevel[];
+  rubric_version?: number;
+  target_competency?: string;
+  competency_definition?: string;
+  question_intent?: string;
+  observable_indicators?: string[];
+  observable_signals?: string[];
+  rating_anchors?: Record<string | number, string>;
+  levels?: RubricLevel[];
+  sufficient_evidence_guidance?: string;
+  insufficient_evidence_guidance?: string;
+  permitted_probes?: string[];
+  prohibited_inferences?: string[];
 }
 
 export interface TemplateQuestion {
@@ -51,6 +61,11 @@ export interface TemplateQuestion {
   content_hash?: string | null;
   deterministic_source_text?: string | null;
   deterministic_source_hash?: string | null;
+  deterministic_source_available?: boolean;
+  has_wording_drift?: boolean;
+  can_restore?: boolean;
+  restore_unavailable_reason?: string | null;
+  unresolved_manual_required?: boolean;
   safe_metadata?: Record<string, any>;
   ai_provenance?: {
     provider_class?: string;
@@ -183,16 +198,25 @@ export interface QuestionActionResponse {
   authoring_origin: AuthoringOrigin;
   validation_state: string;
   deterministic_source_text?: string | null;
+  deterministic_source_available?: boolean;
+  has_wording_drift?: boolean;
+  can_restore?: boolean;
+  restore_unavailable_reason?: string | null;
+  content_hash?: string | null;
   safe_metadata: Record<string, any>;
+  message?: string | null;
 }
 
 export interface QuestionBatchWordingResult {
   question_id: string;
-  status: "AI_READY" | "DETERMINISTIC_FALLBACK" | "FAILED_RETRYABLE";
+  display_order?: number;
+  status: "AI_READY" | "DETERMINISTIC_FALLBACK" | "FAILED_RETRYABLE" | string;
   authoring_origin: AuthoringOrigin;
   question_text: string;
-  deterministic_question_text: string;
+  question_version?: number;
+  deterministic_question_text?: string;
   safe_message?: string | null;
+  error_message?: string | null;
 }
 
 export interface GenerateTemplateAiWordingResponse {
@@ -210,3 +234,83 @@ export interface GenerateTemplateAiWordingResponse {
   message?: string;
 }
 
+// =========================================================================
+// Phase 3D.1: Recruiter Text-Only Simulation Types
+// =========================================================================
+
+export type SimulationLifecycleState = "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED";
+
+export interface SimulationAnswerItem {
+  answer_id: string;
+  question_id: string;
+  question_version: number;
+  display_order: number;
+  layer: InterviewLayer;
+  answer_text: string;
+  answer_version: number;
+  is_submitted: boolean;
+  content_hash: string;
+  updated_at: string;
+}
+
+export interface SimulationQuestionSnapshot {
+  question_id: string;
+  question_version: number;
+  display_order: number;
+  layer: InterviewLayer;
+  question_type: QuestionType;
+  competency_name: string;
+  question_text: string;
+  estimated_time_minutes: number;
+  permitted_probes: string[];
+  rubric?: AnchoredRubric | null;
+}
+
+export interface SimulationAttemptResponse {
+  attempt_id: string;
+  organization_id: string;
+  recruiter_user_id: string;
+  candidate_id: string;
+  candidate_name?: string;
+  job_id: string;
+  job_title?: string;
+  job_version_id: string;
+  job_revision: number;
+  candidate_profile_version: number;
+  match_result_id?: string | null;
+  plan_id: string;
+  template_id: string;
+  plan_version: number;
+  record_version: number;
+  authoritative_content_hash: string;
+  lifecycle_status: SimulationLifecycleState;
+  guardrail_policy_version: string;
+  total_questions_count: number;
+  answered_questions_count: number;
+  started_at: string;
+  submitted_at?: string | null;
+  questions: SimulationQuestionSnapshot[];
+  answers: Record<string, SimulationAnswerItem>; // keyed by question_id
+}
+
+export interface SimulationAnswerSaveRequest {
+  expected_answer_version: number;
+  answer_text: string;
+}
+
+export interface SimulationAnswerSaveResponse {
+  answer: SimulationAnswerItem;
+  answered_questions_count: number;
+  total_questions_count: number;
+  attempt_status: SimulationLifecycleState;
+}
+
+export interface SimulationSubmitResponse {
+  attempt_id: string;
+  lifecycle_status: "SUBMITTED";
+  submitted_at: string;
+  total_questions_count: number;
+  answered_questions_count: number;
+  authoritative_content_hash: string;
+  message: string;
+}

@@ -45,7 +45,10 @@ export type IconName =
   | "alert-circle"
   | "info"
   | "message-square"
-  | "bar-chart";
+  | "bar-chart"
+  | "play"
+  | "pause"
+  | "lock";
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName;
@@ -356,6 +359,24 @@ export function Icon({ name, size = 18, className = "", "aria-label": ariaLabel,
       case "message-square":
         return (
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        );
+      case "play":
+        return (
+          <polygon points="5 3 19 12 5 21 5 3" />
+        );
+      case "pause":
+        return (
+          <>
+            <rect x="6" y="4" width="4" height="16" />
+            <rect x="14" y="4" width="4" height="16" />
+          </>
+        );
+      case "lock":
+        return (
+          <>
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </>
         );
       case "info":
       default:

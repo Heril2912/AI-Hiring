@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import uuid
 from typing import Optional
@@ -35,13 +36,20 @@ from app.schemas.interview_api import (
     InterviewTemplateEditRequest,
     InterviewTemplatePreviewResponse,
     RequirementClassificationResponse,
+    SimulationAnswerItemResponse,
+    SimulationAnswerSaveRequest,
+    SimulationAnswerSaveResponse,
+    SimulationAttemptResponse,
+    SimulationQuestionSnapshotResponse,
+    SimulationSubmitRequest,
+    SimulationSubmitResponse,
     SuccessorDraftCreateRequest,
     ValidationSummaryResponse,
     VersionDiffResponse,
     VersionHistoryResponse,
 )
 from app.schemas.phase3_audit import Phase3AuditEvent
-from app.schemas.phase3_enums import AuditRetentionClass
+from app.schemas.phase3_enums import AuditRetentionClass, AuthoringOrigin, PlanLifecycle
 from app.services.interview_generator_service import (
     BlueprintCoverageSummary,
     GeneratedDeterministicBlueprint,
@@ -63,6 +71,12 @@ from app.services.interview_lifecycle_service import (
     get_template_version_history,
     validate_candidate_interview_plan_draft,
     validate_job_interview_template_draft,
+)
+from app.services.interview_simulation_service import (
+    get_simulation_attempt,
+    save_draft_simulation_answer,
+    start_or_resume_simulation_attempt,
+    submit_simulation_attempt,
 )
 from app.services.interview_snapshot_service import (
     InterviewCandidateNotFoundError,
@@ -128,6 +142,13 @@ def _map_blueprint_to_preview_dto(
                 permitted_probes=list(q.permitted_probes),
                 validation_state=q.validation_state,
                 included_in_common_score=q.included_in_common_score,
+                deterministic_source_text=q.question_text if q.authoring_origin == AuthoringOrigin.DETERMINISTIC else None,
+                deterministic_source_available=(q.authoring_origin == AuthoringOrigin.DETERMINISTIC),
+                has_wording_drift=False,
+                can_restore=False,
+                restore_unavailable_reason="ALREADY_RESTORED" if q.authoring_origin == AuthoringOrigin.DETERMINISTIC else "NO_DETERMINISTIC_SOURCE",
+                content_hash=hashlib.sha256(q.question_text.encode("utf-8")).hexdigest(),
+                safe_metadata=getattr(q, "safe_metadata", {}) or {},
                 rubric=rubric_dto,
             )
         )
@@ -213,6 +234,76 @@ def _map_blueprint_to_preview_dto(
         policy_version=blueprint.policy_reference.policy_version,
         policy_hash=blueprint.policy_reference.policy_hash,
     )
+
+
+def _map_template_record_questions_to_dto(
+    template_rec: JobInterviewTemplateRecord,
+) -> List[InterviewQuestionResponse]:
+    questions_dto = []
+    if not template_rec or not template_rec.questions:
+        return []
+
+    for q in sorted(template_rec.questions, key=lambda x: x.display_order if x.display_order is not None else 0):
+        rubric_dto = None
+        if q.rubric:
+            rubric_dto = InterviewRubricResponse(
+                rubric_id=q.rubric.rubric_id,
+                rubric_version=q.rubric.rubric_version,
+                competency_definition=q.rubric.competency_definition,
+                question_intent=q.rubric.question_intent,
+                observable_indicators=list(q.rubric.observable_indicators) if q.rubric.observable_indicators else [],
+                rating_anchors={int(k): str(v) for k, v in q.rubric.rating_anchors.items()} if q.rubric.rating_anchors else {},
+                sufficient_evidence_guidance=q.rubric.sufficient_evidence_guidance,
+                insufficient_evidence_guidance=q.rubric.insufficient_evidence_guidance,
+                incomplete_answer_guidance=q.rubric.incomplete_answer_guidance,
+                permitted_probes=list(q.rubric.permitted_probes) if q.rubric.permitted_probes else [],
+                prohibited_inferences=list(q.rubric.prohibited_inferences) if q.rubric.prohibited_inferences else [],
+                subject_matter_review_status="REVIEWED",
+                validation_state=q.rubric.validation_state,
+            )
+        meta = dict(q.safe_metadata or {})
+        det_src = meta.get("deterministic_source_text") or (q.question_text if q.authoring_origin == AuthoringOrigin.DETERMINISTIC else None)
+        det_avail = bool(meta.get("deterministic_source_text") or q.authoring_origin == AuthoringOrigin.DETERMINISTIC)
+        drift = bool(det_avail and det_src and q.question_text.strip() != det_src.strip())
+        is_tmpl_draft = (template_rec.lifecycle_status == PlanLifecycle.DRAFT)
+        can_rst = bool(det_avail and drift and is_tmpl_draft)
+        rst_unavail_reason = (
+            "TEMPLATE_IMMUTABLE" if not is_tmpl_draft
+            else "NO_DETERMINISTIC_SOURCE" if not det_avail
+            else "NO_WORDING_DIFF" if not drift
+            else None
+        )
+        content_h = hashlib.sha256(q.question_text.encode("utf-8")).hexdigest()
+
+        questions_dto.append(
+            InterviewQuestionResponse(
+                question_id=q.question_id,
+                question_version=q.question_version,
+                layer=q.layer,
+                question_type=q.question_type,
+                competency_id=q.competency_id,
+                requirement_references=[uuid.UUID(r) if isinstance(r, str) else r for r in (q.requirement_ids or [])],
+                deterministic_template_id=q.deterministic_template_id,
+                deterministic_template_version=q.deterministic_template_version,
+                question_text=q.question_text,
+                question_intent=q.question_intent,
+                authoring_origin=q.authoring_origin,
+                display_order=q.display_order,
+                estimated_time_minutes=q.estimated_time_minutes,
+                permitted_probes=list(q.permitted_probes) if q.permitted_probes else [],
+                validation_state=q.validation_state,
+                included_in_common_score=q.included_in_common_score,
+                deterministic_source_text=det_src,
+                deterministic_source_available=det_avail,
+                has_wording_drift=drift,
+                can_restore=can_rst,
+                restore_unavailable_reason=rst_unavail_reason,
+                content_hash=content_h,
+                safe_metadata=meta,
+                rubric=rubric_dto,
+            )
+        )
+    return questions_dto
 
 
 @router.get(
@@ -388,7 +479,7 @@ async def create_job_interview_template_draft(
         lifecycle_status=template_record.lifecycle_status,
         input_snapshot_hash=template_record.input_snapshot_hash,
         content_hash=template_record.content_hash or preview_dto.content_hash,
-        common_core_questions=preview_dto.common_core_questions,
+        common_core_questions=_map_template_record_questions_to_dto(template_record),
         coverage_summary=preview_dto.coverage_summary,
         validation_report=preview_dto.validation_report,
         builder_version=template_record.deterministic_builder_version,
@@ -451,47 +542,6 @@ async def get_latest_job_interview_template(
     )
     preview_dto = _map_blueprint_to_preview_dto(preview, job_id, template_rec.job_version_id, template_rec.revision)
 
-    # Map persisted questions
-    questions_dto = []
-    for q in sorted(template_rec.questions, key=lambda x: x.display_order):
-        rubric_dto = None
-        if q.rubric:
-            rubric_dto = InterviewRubricResponse(
-                rubric_id=q.rubric.rubric_id,
-                rubric_version=q.rubric.rubric_version,
-                competency_definition=q.rubric.competency_definition,
-                question_intent=q.rubric.question_intent,
-                observable_indicators=list(q.rubric.observable_indicators) if q.rubric.observable_indicators else [],
-                rating_anchors={int(k): str(v) for k, v in q.rubric.rating_anchors.items()} if q.rubric.rating_anchors else {},
-                sufficient_evidence_guidance=q.rubric.sufficient_evidence_guidance,
-                insufficient_evidence_guidance=q.rubric.insufficient_evidence_guidance,
-                incomplete_answer_guidance=q.rubric.incomplete_answer_guidance,
-                permitted_probes=list(q.rubric.permitted_probes) if q.rubric.permitted_probes else [],
-                prohibited_inferences=list(q.rubric.prohibited_inferences) if q.rubric.prohibited_inferences else [],
-                subject_matter_review_status="REVIEWED",
-                validation_state=q.rubric.validation_state,
-            )
-        questions_dto.append(
-            InterviewQuestionResponse(
-                question_id=q.question_id,
-                layer=q.layer,
-                question_type=q.question_type,
-                competency_id=q.competency_id,
-                requirement_references=[uuid.UUID(r) if isinstance(r, str) else r for r in (q.requirement_ids or [])],
-                deterministic_template_id=q.deterministic_template_id,
-                deterministic_template_version=q.deterministic_template_version,
-                question_text=q.question_text,
-                question_intent=q.question_intent,
-                authoring_origin=q.authoring_origin,
-                display_order=q.display_order,
-                estimated_time_minutes=q.estimated_time_minutes,
-                permitted_probes=list(q.permitted_probes) if q.permitted_probes else [],
-                validation_state=q.validation_state,
-                included_in_common_score=q.included_in_common_score,
-                rubric=rubric_dto,
-            )
-        )
-
     return InterviewTemplateDraftCreateResponse(
         template_id=template_rec.template_id,
         organization_id=template_rec.organization_id,
@@ -502,7 +552,7 @@ async def get_latest_job_interview_template(
         lifecycle_status=template_rec.lifecycle_status,
         input_snapshot_hash=template_rec.input_snapshot_hash,
         content_hash=template_rec.content_hash or preview_dto.content_hash,
-        common_core_questions=questions_dto,
+        common_core_questions=_map_template_record_questions_to_dto(template_rec),
         coverage_summary=preview_dto.coverage_summary,
         validation_report=preview_dto.validation_report,
         builder_version=template_rec.deterministic_builder_version,
@@ -609,6 +659,58 @@ def _map_candidate_plan_to_preview_dto(
         supplemental_catalogue_version=plan.supplemental_catalogue_version,
         policy_version=plan.policy_version,
     )
+
+
+def _map_plan_record_supplemental_questions_to_dto(
+    plan_rec: CandidateInterviewPlanRecord,
+) -> List[CandidateSupplementalQuestionResponse]:
+    supp_dtos = []
+    if not plan_rec:
+        return []
+
+    questions = []
+    if hasattr(plan_rec, "supplemental_questions") and plan_rec.supplemental_questions:
+        questions = plan_rec.supplemental_questions
+    elif hasattr(plan_rec, "provenances") and plan_rec.provenances:
+        questions = [p.question for p in plan_rec.provenances if getattr(p, "question", None) is not None]
+
+    if not questions:
+        return []
+
+    for q in sorted(questions, key=lambda x: x.display_order if x.display_order is not None else 0):
+        prov = getattr(q, "provenance", None)
+        guidance_dto = SupplementalQuestionGuidanceResponse(
+            clarification_purpose="Verify candidate experience against requirement.",
+            facts_to_confirm=[],
+            prohibited_inferences=[],
+        )
+        prov_dto = SupplementalQuestionProvenanceResponse(
+            source_requirement_id=prov.source_requirement_id if prov else uuid.uuid4(),
+            source_match_result_id=prov.source_match_result_id if prov else uuid.uuid4(),
+            source_match_state=prov.source_match_state.value if prov and hasattr(prov.source_match_state, "value") else "GAP",
+            allowlisted_evidence_ids=list(prov.allowlisted_evidence_ids) if prov and prov.allowlisted_evidence_ids else [],
+            excluded_from_common_score=True,
+        )
+        supp_dtos.append(
+            CandidateSupplementalQuestionResponse(
+                question_id=q.question_id,
+                layer=q.layer,
+                question_type=q.question_type,
+                authoring_origin=q.authoring_origin,
+                display_order=q.display_order,
+                requirement_references=[uuid.UUID(r) if isinstance(r, str) else r for r in (q.requirement_ids or [])],
+                deterministic_template_id=q.deterministic_template_id,
+                deterministic_template_version=q.deterministic_template_version,
+                question_text=q.question_text,
+                question_intent=q.question_intent,
+                estimated_time_minutes=q.estimated_time_minutes,
+                included_in_common_score=q.included_in_common_score,
+                validation_state=q.validation_state,
+                guidance=guidance_dto,
+                provenance=prov_dto,
+            )
+        )
+    return supp_dtos
 
 
 @router.get(
@@ -812,7 +914,7 @@ async def create_candidate_interview_plan_draft_endpoint(
         input_snapshot_hash=plan_record.input_snapshot_hash,
         content_hash=plan_record.content_hash or preview_dto.content_hash,
         common_template_summary=preview_dto.common_template_summary,
-        supplemental_questions=preview_dto.supplemental_questions,
+        supplemental_questions=_map_plan_record_supplemental_questions_to_dto(plan_record),
         coverage_summary=preview_dto.coverage_summary,
         validation_report=preview_dto.validation_report,
         supplemental_catalogue_version=plan.supplemental_catalogue_version,
@@ -862,41 +964,7 @@ async def get_latest_candidate_interview_plan(
     # Check authorization
     _check_recruiter_authorization(actor, plan_rec.template.requisition)
 
-    # Map supplemental questions DTO
-    supp_dtos = []
-    for q in sorted(plan_rec.supplemental_questions, key=lambda x: x.display_order):
-        prov = q.provenance
-        guidance_dto = SupplementalQuestionGuidanceResponse(
-            clarification_purpose="Verify candidate experience against requirement.",
-            facts_to_confirm=[],
-            prohibited_inferences=[],
-        )
-        prov_dto = SupplementalQuestionProvenanceResponse(
-            source_requirement_id=prov.source_requirement_id if prov else uuid.uuid4(),
-            source_match_result_id=prov.source_match_result_id if prov else uuid.uuid4(),
-            source_match_state=prov.source_match_state.value if prov and hasattr(prov.source_match_state, "value") else "GAP",
-            allowlisted_evidence_ids=list(prov.allowlisted_evidence_ids) if prov and prov.allowlisted_evidence_ids else [],
-            excluded_from_common_score=True,
-        )
-        supp_dtos.append(
-            CandidateSupplementalQuestionResponse(
-                question_id=q.question_id,
-                layer=q.layer,
-                question_type=q.question_type,
-                authoring_origin=q.authoring_origin,
-                display_order=q.display_order,
-                requirement_references=[uuid.UUID(r) if isinstance(r, str) else r for r in (q.requirement_ids or [])],
-                deterministic_template_id=q.deterministic_template_id,
-                deterministic_template_version=q.deterministic_template_version,
-                question_text=q.question_text,
-                question_intent=q.question_intent,
-                estimated_time_minutes=q.estimated_time_minutes,
-                included_in_common_score=q.included_in_common_score,
-                validation_state=q.validation_state,
-                guidance=guidance_dto,
-                provenance=prov_dto,
-            )
-        )
+    supp_dtos = _map_plan_record_supplemental_questions_to_dto(plan_rec)
 
     common_summary = CandidateInterviewPlanSummaryResponse(
         template_id=plan_rec.template_id,
@@ -1035,7 +1103,7 @@ async def edit_template_draft_endpoint(
         lifecycle_status=updated_template.lifecycle_status,
         input_snapshot_hash=updated_template.input_snapshot_hash,
         content_hash=updated_template.content_hash or preview_dto.content_hash,
-        common_core_questions=preview_dto.common_core_questions,
+        common_core_questions=_map_template_record_questions_to_dto(updated_template),
         coverage_summary=preview_dto.coverage_summary,
         validation_report=preview_dto.validation_report,
         builder_version=updated_template.deterministic_builder_version,
@@ -1184,7 +1252,7 @@ async def create_template_successor_endpoint(
         lifecycle_status=successor.lifecycle_status,
         input_snapshot_hash=successor.input_snapshot_hash,
         content_hash=successor.content_hash or preview_dto.content_hash,
-        common_core_questions=preview_dto.common_core_questions,
+        common_core_questions=_map_template_record_questions_to_dto(successor),
         coverage_summary=preview_dto.coverage_summary,
         validation_report=preview_dto.validation_report,
         builder_version=successor.deterministic_builder_version,
@@ -1333,7 +1401,7 @@ async def edit_candidate_plan_draft_endpoint(
         input_snapshot_hash=updated_plan.input_snapshot_hash,
         content_hash=updated_plan.content_hash or preview_dto.content_hash,
         common_template_summary=preview_dto.common_template_summary,
-        supplemental_questions=preview_dto.supplemental_questions,
+        supplemental_questions=_map_plan_record_supplemental_questions_to_dto(updated_plan),
         coverage_summary=preview_dto.coverage_summary,
         validation_report=preview_dto.validation_report,
         supplemental_catalogue_version=plan_preview.supplemental_catalogue_version,
@@ -1506,7 +1574,7 @@ async def create_candidate_plan_successor_endpoint(
         input_snapshot_hash=successor.input_snapshot_hash,
         content_hash=successor.content_hash or preview_dto.content_hash,
         common_template_summary=preview_dto.common_template_summary,
-        supplemental_questions=preview_dto.supplemental_questions,
+        supplemental_questions=_map_plan_record_supplemental_questions_to_dto(successor),
         coverage_summary=preview_dto.coverage_summary,
         validation_report=preview_dto.validation_report,
         supplemental_catalogue_version=plan_preview.supplemental_catalogue_version,
@@ -1787,6 +1855,139 @@ async def generate_template_ai_wording_endpoint(
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
     except InterviewSnapshotError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+# =========================================================================
+# Phase 3D.1: Recruiter-Controlled Text Simulation Endpoints
+# =========================================================================
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/start",
+    response_model=SimulationAttemptResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Start or Resume Recruiter Text Simulation",
+    description="Starts or resumes an authorized simulation attempt anchored to an APPROVED candidate plan.",
+)
+async def start_simulation_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> SimulationAttemptResponse:
+    actor = auth_ctx.user
+    try:
+        return start_or_resume_simulation_attempt(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.get(
+    "/{template_id}/candidate-plans/{plan_id}/simulation",
+    response_model=SimulationAttemptResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Active Candidate Simulation Attempt",
+    description="Retrieves the current simulation attempt and answers for the candidate interview plan.",
+)
+async def get_simulation_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: Optional[uuid.UUID] = Query(default=None),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> SimulationAttemptResponse:
+    actor = auth_ctx.user
+    try:
+        return get_simulation_attempt(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.put(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/answers/{question_id}",
+    response_model=SimulationAnswerSaveResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Save Draft Simulation Answer",
+    description="Saves or updates a draft simulation answer using optimistic concurrency without invoking AI.",
+)
+async def save_simulation_answer_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: SimulationAnswerSaveRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> SimulationAnswerSaveResponse:
+    actor = auth_ctx.user
+    try:
+        return save_draft_simulation_answer(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/submit",
+    response_model=SimulationSubmitResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Submit Simulation Attempt",
+    description="Finalizes the simulation attempt and renders all submitted answers immutable.",
+)
+async def submit_simulation_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    payload: SimulationSubmitRequest = SimulationSubmitRequest(),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> SimulationSubmitResponse:
+    actor = auth_ctx.user
+    try:
+        return submit_simulation_attempt(
+            actor=actor,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
 
 
 
