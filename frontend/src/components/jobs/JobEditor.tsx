@@ -31,9 +31,10 @@ interface JobEditorProps {
     revision: number;
     requirementsCount: number;
   }) => void;
+  onOpenInterviewTemplate?: (jobId: string) => void;
 }
 
-export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandidates }: JobEditorProps) {
+export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandidates, onOpenInterviewTemplate }: JobEditorProps) {
   // Main Draft Data
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(jobId));
@@ -622,6 +623,17 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
         </div>
 
         <div className="top-bar-right">
+          {jobId && onOpenInterviewTemplate && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-md"
+              onClick={() => onOpenInterviewTemplate(jobId)}
+              title="Open Standardized Interview Template and Question Drafts"
+            >
+              <Icon name="message-square" size={15} />
+              <span>Interview Template</span>
+            </button>
+          )}
           {isReadOnly ? (
             <>
               <button

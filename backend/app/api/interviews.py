@@ -3,7 +3,8 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.auth import (
     AuthenticatedContext,
@@ -11,7 +12,15 @@ from app.api.auth import (
     require_recruiter,
 )
 from app.database import get_db
-from app.models.auth import AuditEventType, AuditReasonCode, AuditResult
+from app.models.auth import AuditEventType, AuditReasonCode, AuditResult, UserRole
+from app.models.interview import (
+    CandidateInterviewPlanRecord,
+    InterviewQuestionRecord,
+    InterviewRubricRecord,
+    JobInterviewTemplateRecord,
+    SupplementalQuestionProvenanceRecord,
+)
+from app.models.job import JobRequisition
 from app.schemas.interview_api import (
     ApprovalSummaryResponse,
     BlueprintCoverageResponse,
@@ -390,6 +399,120 @@ async def create_job_interview_template_draft(
     )
 
 
+@router.get(
+    "/latest",
+    response_model=InterviewTemplateDraftCreateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Latest Job Interview Template",
+    description=(
+        "Retrieves the latest persisted interview template (draft or approved) for the specified job requisition."
+    ),
+)
+async def get_latest_job_interview_template(
+    job_id: uuid.UUID,
+    revision: Optional[int] = Query(default=None, ge=1),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> InterviewTemplateDraftCreateResponse:
+    actor = auth_ctx.user
+
+    # Verify job existence & recruiter access
+    stmt_job = select(JobRequisition).where(JobRequisition.job_id == job_id)
+    job = db.execute(stmt_job).scalar_one_or_none()
+    if job is None or (actor.role == UserRole.RECRUITER and job.created_by_user_id != actor.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job requisition not found or unauthorized."},
+        )
+
+    stmt = (
+        select(JobInterviewTemplateRecord)
+        .options(
+            selectinload(JobInterviewTemplateRecord.questions).selectinload(InterviewQuestionRecord.rubric)
+        )
+        .where(JobInterviewTemplateRecord.job_id == job_id)
+    )
+    if revision is not None:
+        stmt = stmt.where(JobInterviewTemplateRecord.revision == revision)
+    stmt = stmt.order_by(JobInterviewTemplateRecord.template_version.desc())
+    template_rec = db.execute(stmt).scalars().first()
+
+    if template_rec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "TEMPLATE_NOT_FOUND", "message": "No interview template found for job."},
+        )
+
+    preview = preview_deterministic_interview_template(
+        actor=actor,
+        job_id=job_id,
+        expected_revision=template_rec.revision,
+        db=db,
+    )
+    preview_dto = _map_blueprint_to_preview_dto(preview, job_id, template_rec.job_version_id, template_rec.revision)
+
+    # Map persisted questions
+    questions_dto = []
+    for q in sorted(template_rec.questions, key=lambda x: x.display_order):
+        rubric_dto = None
+        if q.rubric:
+            rubric_dto = InterviewRubricResponse(
+                rubric_id=q.rubric.rubric_id,
+                rubric_version=q.rubric.rubric_version,
+                competency_definition=q.rubric.competency_definition,
+                question_intent=q.rubric.question_intent,
+                observable_indicators=list(q.rubric.observable_indicators) if q.rubric.observable_indicators else [],
+                rating_anchors={int(k): str(v) for k, v in q.rubric.rating_anchors.items()} if q.rubric.rating_anchors else {},
+                sufficient_evidence_guidance=q.rubric.sufficient_evidence_guidance,
+                insufficient_evidence_guidance=q.rubric.insufficient_evidence_guidance,
+                incomplete_answer_guidance=q.rubric.incomplete_answer_guidance,
+                permitted_probes=list(q.rubric.permitted_probes) if q.rubric.permitted_probes else [],
+                prohibited_inferences=list(q.rubric.prohibited_inferences) if q.rubric.prohibited_inferences else [],
+                subject_matter_review_status="REVIEWED",
+                validation_state=q.rubric.validation_state,
+            )
+        questions_dto.append(
+            InterviewQuestionResponse(
+                question_id=q.question_id,
+                layer=q.layer,
+                question_type=q.question_type,
+                competency_id=q.competency_id,
+                requirement_references=[uuid.UUID(r) if isinstance(r, str) else r for r in (q.requirement_ids or [])],
+                deterministic_template_id=q.deterministic_template_id,
+                deterministic_template_version=q.deterministic_template_version,
+                question_text=q.question_text,
+                question_intent=q.question_intent,
+                authoring_origin=q.authoring_origin,
+                display_order=q.display_order,
+                estimated_time_minutes=q.estimated_time_minutes,
+                permitted_probes=list(q.permitted_probes) if q.permitted_probes else [],
+                validation_state=q.validation_state,
+                included_in_common_score=q.included_in_common_score,
+                rubric=rubric_dto,
+            )
+        )
+
+    return InterviewTemplateDraftCreateResponse(
+        template_id=template_rec.template_id,
+        organization_id=template_rec.organization_id,
+        job_id=job_id,
+        job_version_id=template_rec.job_version_id,
+        job_revision=template_rec.revision,
+        template_version=template_rec.template_version,
+        lifecycle_status=template_rec.lifecycle_status,
+        input_snapshot_hash=template_rec.input_snapshot_hash,
+        content_hash=template_rec.content_hash or preview_dto.content_hash,
+        common_core_questions=questions_dto,
+        coverage_summary=preview_dto.coverage_summary,
+        validation_report=preview_dto.validation_report,
+        builder_version=template_rec.deterministic_builder_version,
+        question_catalogue_version=template_rec.question_catalogue_version,
+        rubric_catalogue_version=template_rec.rubric_catalogue_version,
+        created_by_user_id=template_rec.created_by_user_id,
+        created_at=template_rec.created_at,
+    )
+
+
 # =========================================================================
 # Candidate Interview Plan Endpoints (Phase 3B.3)
 # =========================================================================
@@ -696,6 +819,127 @@ async def create_candidate_interview_plan_draft_endpoint(
         policy_version=plan.policy_version,
         created_by_user_id=plan_record.created_by_user_id,
         created_at=plan_record.created_at,
+    )
+
+
+@router.get(
+    "/{template_id}/candidate-plans/{candidate_id}/latest",
+    response_model=CandidateInterviewPlanDraftCreateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Latest Candidate Interview Plan",
+    description="Retrieves the latest persisted candidate interview plan for a specific candidate and template.",
+)
+async def get_latest_candidate_interview_plan(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> CandidateInterviewPlanDraftCreateResponse:
+    actor = auth_ctx.user
+
+    stmt = (
+        select(CandidateInterviewPlanRecord)
+        .options(
+            selectinload(CandidateInterviewPlanRecord.template).selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(CandidateInterviewPlanRecord.template).selectinload(JobInterviewTemplateRecord.questions),
+            selectinload(CandidateInterviewPlanRecord.supplemental_questions).selectinload(InterviewQuestionRecord.provenance),
+        )
+        .where(
+            CandidateInterviewPlanRecord.template_id == template_id,
+            CandidateInterviewPlanRecord.candidate_id == candidate_id,
+        )
+        .order_by(CandidateInterviewPlanRecord.plan_version.desc())
+    )
+    plan_rec = db.execute(stmt).scalars().first()
+
+    if plan_rec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "PLAN_NOT_FOUND", "message": "No candidate interview plan found."},
+        )
+
+    # Check authorization
+    _check_recruiter_authorization(actor, plan_rec.template.requisition)
+
+    # Map supplemental questions DTO
+    supp_dtos = []
+    for q in sorted(plan_rec.supplemental_questions, key=lambda x: x.display_order):
+        prov = q.provenance
+        guidance_dto = SupplementalQuestionGuidanceResponse(
+            clarification_purpose="Verify candidate experience against requirement.",
+            facts_to_confirm=[],
+            prohibited_inferences=[],
+        )
+        prov_dto = SupplementalQuestionProvenanceResponse(
+            source_requirement_id=prov.source_requirement_id if prov else uuid.uuid4(),
+            source_match_result_id=prov.source_match_result_id if prov else uuid.uuid4(),
+            source_match_state=prov.source_match_state.value if prov and hasattr(prov.source_match_state, "value") else "GAP",
+            allowlisted_evidence_ids=list(prov.allowlisted_evidence_ids) if prov and prov.allowlisted_evidence_ids else [],
+            excluded_from_common_score=True,
+        )
+        supp_dtos.append(
+            CandidateSupplementalQuestionResponse(
+                question_id=q.question_id,
+                layer=q.layer,
+                question_type=q.question_type,
+                authoring_origin=q.authoring_origin,
+                display_order=q.display_order,
+                requirement_references=[uuid.UUID(r) if isinstance(r, str) else r for r in (q.requirement_ids or [])],
+                deterministic_template_id=q.deterministic_template_id,
+                deterministic_template_version=q.deterministic_template_version,
+                question_text=q.question_text,
+                question_intent=q.question_intent,
+                estimated_time_minutes=q.estimated_time_minutes,
+                included_in_common_score=q.included_in_common_score,
+                validation_state=q.validation_state,
+                guidance=guidance_dto,
+                provenance=prov_dto,
+            )
+        )
+
+    common_summary = CandidateInterviewPlanSummaryResponse(
+        template_id=plan_rec.template_id,
+        template_version=plan_rec.template_version,
+        template_content_hash=plan_rec.template.content_hash if plan_rec.template else "",
+        job_id=job_id,
+        job_revision=plan_rec.template.revision if plan_rec.template else 1,
+        common_core_questions_count=len(plan_rec.template.questions) if plan_rec.template else 0,
+        common_core_duration_minutes=sum(q.estimated_time_minutes for q in plan_rec.template.questions) if plan_rec.template else 45,
+    )
+
+    cov_summary = CandidatePlanCoverageSummaryResponse(
+        selected_target_count=len(supp_dtos),
+        target_selection_reasons={},
+        match_states_clarified=[],
+        total_supplemental_duration_minutes=sum(q.estimated_time_minutes for q in supp_dtos),
+    )
+
+    return CandidateInterviewPlanDraftCreateResponse(
+        plan_id=plan_rec.plan_id,
+        organization_id=plan_rec.organization_id,
+        job_id=job_id,
+        job_revision=plan_rec.template.revision if plan_rec.template else 1,
+        template_id=plan_rec.template_id,
+        template_version=plan_rec.template_version,
+        candidate_id=plan_rec.candidate_id,
+        profile_id=plan_rec.profile_id,
+        profile_version=plan_rec.profile_version,
+        match_result_id=plan_rec.match_result_id,
+        match_result_fingerprint=plan_rec.match_result_fingerprint,
+        plan_version=plan_rec.plan_version,
+        lifecycle_status=plan_rec.lifecycle_status,
+        scoring_separation_policy=plan_rec.scoring_separation_policy,
+        input_snapshot_hash=plan_rec.input_snapshot_hash,
+        content_hash=plan_rec.content_hash,
+        common_template_summary=common_summary,
+        supplemental_questions=supp_dtos,
+        coverage_summary=cov_summary,
+        validation_report={"is_valid": True, "blocking_errors": [], "warnings": []},
+        supplemental_catalogue_version=plan_rec.supplemental_catalogue_version,
+        policy_version=plan_rec.guardrail_policy_version,
+        created_by_user_id=plan_rec.created_by_user_id,
+        created_at=plan_rec.created_at,
     )
 
 
@@ -1336,6 +1580,13 @@ async def get_candidate_plan_diff_endpoint(
 # Phase 3C.2: Recruiter Question Wording Assistance
 # =========================================================================
 
+from app.schemas.interview_api import (
+    ApplyWordingSuggestionRequest,
+    GenerateTemplateAiWordingRequest,
+    GenerateTemplateAiWordingResponse,
+    QuestionActionResponse,
+    RestoreDeterministicWordingRequest,
+)
 from app.schemas.wording_contract import (
     CandidateWordingResult,
     RecruiterWordingAssistRequest,
@@ -1343,7 +1594,11 @@ from app.schemas.wording_contract import (
 from app.services.wording_assistance_service import (
     QuestionNotDraftError,
     QuestionNotFoundError,
+    QuestionWordingError,
+    apply_wording_suggestion,
+    generate_template_ai_wording,
     request_question_wording_assistance,
+    restore_deterministic_wording,
 )
 
 
@@ -1391,7 +1646,148 @@ async def request_question_wording_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": exc.code, "message": exc.message})
     except QuestionNotDraftError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": exc.code, "message": exc.message})
+    except QuestionWordingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
     except InterviewSnapshotError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/questions/{question_id}/apply-suggestion",
+    response_model=QuestionActionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Apply Validated Wording Suggestion",
+    description="Applies a validated AI wording suggestion to an authorized DRAFT question. Sets authoring_origin to AI_ASSISTED and invalidates validation state.",
+)
+async def apply_question_wording_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: ApplyWordingSuggestionRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> QuestionActionResponse:
+    actor = auth_ctx.user
+    try:
+        return apply_wording_suggestion(
+            actor=actor,
+            question_id=question_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="apply_wording_suggestion",
+            resource_id=str(question_id),
+            safe_metadata={"error_code": exc.code},
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except QuestionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": exc.code, "message": exc.message})
+    except QuestionNotDraftError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": exc.code, "message": exc.message})
+    except QuestionWordingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/questions/{question_id}/restore-deterministic",
+    response_model=QuestionActionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Restore Deterministic Question Wording",
+    description="Restores original deterministic text on an authorized DRAFT question and sets origin to DETERMINISTIC.",
+)
+async def restore_question_wording_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: RestoreDeterministicWordingRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> QuestionActionResponse:
+    actor = auth_ctx.user
+    try:
+        return restore_deterministic_wording(
+            actor=actor,
+            question_id=question_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="restore_deterministic_wording",
+            resource_id=str(question_id),
+            safe_metadata={"error_code": exc.code},
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except QuestionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": exc.code, "message": exc.message})
+    except QuestionNotDraftError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": exc.code, "message": exc.message})
+    except QuestionWordingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/generate-ai-wording",
+    response_model=GenerateTemplateAiWordingResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generate AI Wording For Entire Interview Template",
+    description="Sequentially requests and validates AI wording for all questions in an authorized DRAFT template.",
+)
+async def generate_template_ai_wording_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    payload: GenerateTemplateAiWordingRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> GenerateTemplateAiWordingResponse:
+    actor = auth_ctx.user
+    try:
+        return await generate_template_ai_wording(
+            actor=actor,
+            template_id=template_id,
+            request=payload,
+            db=db,
+        )
+    except InterviewUnauthorizedError as exc:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="generate_template_ai_wording",
+            resource_id=str(template_id),
+            safe_metadata={"error_code": exc.code},
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
+    except QuestionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": exc.code, "message": exc.message})
+    except QuestionNotDraftError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": exc.code, "message": exc.message})
+    except QuestionWordingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+    except InterviewSnapshotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
 
 

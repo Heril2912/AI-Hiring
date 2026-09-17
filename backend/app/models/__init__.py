@@ -50,6 +50,7 @@ from app.models.interview import (
     InterviewQuestionRecord,
     InterviewRubricRecord,
     JobInterviewTemplateRecord,
+    ProviderProfileRecord,
     SupplementalQuestionProvenanceRecord,
 )
 from app.models.resume import (
@@ -127,4 +128,5 @@ __all__ = [
     "InterviewRubricRecord",
     "CandidateInterviewPlanRecord",
     "SupplementalQuestionProvenanceRecord",
+    "ProviderProfileRecord",
 ]

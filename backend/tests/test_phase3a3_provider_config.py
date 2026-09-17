@@ -94,6 +94,7 @@ def test_local_provider_configuration_and_destination_policy(monkeypatch):
         base_url="http://127.0.0.1:8080/v1",
         model_identifier="qwen3-4b-instruct",
         egress_class=ProviderEgressClass.LOCAL_ONLY,
+        compatibility_status=ProviderCompatibilityStatus.HEALTHY,
         enabled=True,
     )
     eligibility = evaluate_provider_eligibility(local_profile, destination_policy=policy)
@@ -226,3 +227,85 @@ def test_provider_eligibility_vs_health_separation(monkeypatch):
     assert "Remote provider requires APPROVED privacy_review_status." in eligibility.rejection_reasons
     # Compatibility status remains NOT_TESTED (never marked healthy without real call)
     assert profile.compatibility_status == ProviderCompatibilityStatus.NOT_TESTED
+
+
+def test_application_self_call_rejection(monkeypatch):
+    """Verifies that localhost:8000 / 127.0.0.1:8000 / [::1]:8000 are rejected with clear safe message."""
+    def mock_getaddrinfo(host, port, *args, **kwargs):
+        if host in {"127.0.0.1", "localhost"}:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+        elif host == "::1":
+            return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", port, 0, 0))]
+        raise socket.gaierror("Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+
+    policy = StrictDestinationPolicy(allow_remote=False)
+
+    # 1. Port 8000 self call rejection
+    res_8000 = policy.evaluate_destination("http://127.0.0.1:8000/v1", egress_class=ProviderEgressClass.LOCAL_ONLY)
+    assert res_8000.is_valid is False
+    assert res_8000.safe_error_code == "APPLICATION_SELF_CALL_FORBIDDEN"
+    assert res_8000.safe_error_message == "This address points to the application server, not an AI provider."
+
+    # 2. Port 8000 localhost
+    res_local_8000 = policy.evaluate_destination("http://localhost:8000/v1", egress_class=ProviderEgressClass.LOCAL_ONLY)
+    assert res_local_8000.is_valid is False
+    assert res_local_8000.safe_error_code == "APPLICATION_SELF_CALL_FORBIDDEN"
+
+    # 3. Port 8000 IPv6 loopback
+    res_ipv6_8000 = policy.evaluate_destination("http://[::1]:8000/v1", egress_class=ProviderEgressClass.LOCAL_ONLY)
+    assert res_ipv6_8000.is_valid is False
+    assert res_ipv6_8000.safe_error_code == "APPLICATION_SELF_CALL_FORBIDDEN"
+
+    # 4. Port 1234 LM Studio approved
+    res_1234 = policy.evaluate_destination("http://127.0.0.1:1234/v1", egress_class=ProviderEgressClass.LOCAL_ONLY)
+    assert res_1234.is_valid is True
+    assert res_1234.normalized_url == "http://127.0.0.1:1234/v1"
+
+
+def test_activation_blocked_for_incompatible_or_untested():
+    """Verifies that evaluate_provider_eligibility blocks activation when compatibility is NOT_TESTED or INCOMPATIBLE."""
+    policy = StrictDestinationPolicy(allow_remote=False)
+
+    # 1. NOT_TESTED profile
+    untested_profile = ProviderProfile(
+        display_name="Untested Local Qwen",
+        provider_type=ProviderType.LOCAL_OPENAI_COMPATIBLE,
+        base_url="http://127.0.0.1:1234/v1",
+        model_identifier="qwen/qwen3-4b-thinking-2507",
+        egress_class=ProviderEgressClass.LOCAL_ONLY,
+        compatibility_status=ProviderCompatibilityStatus.NOT_TESTED,
+        enabled=True,
+    )
+    elig_untested = evaluate_provider_eligibility(untested_profile, destination_policy=policy)
+    assert elig_untested.is_eligible is False
+    assert any("NOT_TESTED" in r for r in elig_untested.rejection_reasons)
+
+    # 2. INCOMPATIBLE profile
+    incompat_profile = ProviderProfile(
+        display_name="Incompatible Local Qwen",
+        provider_type=ProviderType.LOCAL_OPENAI_COMPATIBLE,
+        base_url="http://127.0.0.1:1234/v1",
+        model_identifier="qwen/qwen3-4b-thinking-2507",
+        egress_class=ProviderEgressClass.LOCAL_ONLY,
+        compatibility_status=ProviderCompatibilityStatus.INCOMPATIBLE,
+        enabled=True,
+    )
+    elig_incompat = evaluate_provider_eligibility(incompat_profile, destination_policy=policy)
+    assert elig_incompat.is_eligible is False
+    assert any("INCOMPATIBLE" in r for r in elig_incompat.rejection_reasons)
+
+    # 3. HEALTHY profile is eligible
+    healthy_profile = ProviderProfile(
+        display_name="Healthy Local Qwen",
+        provider_type=ProviderType.LOCAL_OPENAI_COMPATIBLE,
+        base_url="http://127.0.0.1:1234/v1",
+        model_identifier="qwen/qwen3-4b-thinking-2507",
+        egress_class=ProviderEgressClass.LOCAL_ONLY,
+        compatibility_status=ProviderCompatibilityStatus.HEALTHY,
+        enabled=True,
+    )
+    elig_healthy = evaluate_provider_eligibility(healthy_profile, destination_policy=policy)
+    assert elig_healthy.is_eligible is True
+

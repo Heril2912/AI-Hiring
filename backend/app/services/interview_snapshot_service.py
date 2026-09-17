@@ -141,14 +141,17 @@ def load_authoritative_job_blueprint_snapshot(
         raise InterviewRequisitionNotFoundError("Requisition is not active.")
 
     if expected_revision is not None:
-        target_version = next((v for v in req.versions if v.revision == expected_revision), None)
+        target_version = next(
+            (v for v in req.versions if v.revision == expected_revision or v.version_number == expected_revision),
+            None,
+        )
         if target_version is None:
             raise InterviewJobRevisionStaleError(f"Job revision {expected_revision} not found on requisition.")
     else:
         # Default to latest version
         if not req.versions:
             raise InterviewRequisitionNotFoundError("Requisition has no versions.")
-        target_version = req.versions[-1]
+        target_version = sorted(req.versions, key=lambda v: (v.version_number, v.revision))[-1]
 
     # Verify ready or approved state
     if target_version.version_status not in {JobVersionStatus.READY_FOR_MATCHING, JobVersionStatus.APPROVED}:

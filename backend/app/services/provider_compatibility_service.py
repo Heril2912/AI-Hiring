@@ -223,6 +223,15 @@ class ProviderCompatibilityService:
 
             reachability_passed = True
 
+            # Redirects are forbidden across all provider endpoints
+            if models_resp.status_code in {301, 302, 307, 308}:
+                return self._build_failure_response(
+                    profile, start_time, tested_at,
+                    ProviderErrorCode.DESTINATION_DENIED,
+                    f"HTTP redirect detected (HTTP {models_resp.status_code}). Destination redirects are prohibited by security policy.",
+                    reachability_passed=True
+                )
+
             if models_resp.status_code in {401, 403}:
                 return self._build_failure_response(
                     profile, start_time, tested_at,
@@ -307,7 +316,15 @@ class ProviderCompatibilityService:
                     discovered_model_ids=discovered_model_ids
                 )
 
-            if chat_resp.status_code == 404:
+            if chat_resp.status_code in {301, 302, 307, 308}:
+                return self._build_failure_response(
+                    profile, start_time, tested_at,
+                    ProviderErrorCode.DESTINATION_DENIED,
+                    f"HTTP redirect detected on chat completions (HTTP {chat_resp.status_code}). Destination redirects are prohibited by security policy.",
+                    reachability_passed=True, auth_passed=auth_passed,
+                    discovered_model_ids=discovered_model_ids
+                )
+            elif chat_resp.status_code == 404:
                 return self._build_failure_response(
                     profile, start_time, tested_at,
                     ProviderErrorCode.MODEL_NOT_AVAILABLE,
@@ -360,10 +377,8 @@ class ProviderCompatibilityService:
                         reachability_passed=True, auth_passed=True, model_discovered=model_discovered,
                         discovered_model_ids=discovered_model_ids
                     )
-                content = choices[0].get("message", {}).get("content", "")
-                if content is not None:
-                    dry_run_completion_passed = True
-                    unicode_handling_passed = True
+                dry_run_completion_passed = True
+                unicode_handling_passed = True
             except Exception:
                 return self._build_failure_response(
                     profile, start_time, tested_at,
@@ -371,6 +386,157 @@ class ProviderCompatibilityService:
                     "Chat completion response body could not be parsed as valid JSON.",
                     reachability_passed=True, auth_passed=True, model_discovered=model_discovered,
                     discovered_model_ids=discovered_model_ids
+                )
+
+            # Step C: Production Question Wording Capability Test
+            # Exercises actual Phase 3C structured question rewording with small non-personal synthetic fixture
+            wording_system_prompt = (
+                "You are an interview question wording assistant. Reword the provided interview question "
+                "to enhance professional tone while preserving exact competency intent. "
+                "Return ONLY a valid JSON object matching this schema exactly:\n"
+                "{\n"
+                '  "operation": "REWORD_QUESTION",\n'
+                '  "response_schema_version": "1.0.0",\n'
+                '  "variants": [\n'
+                '    {\n'
+                '      "variant_text": "<reworded question text>",\n'
+                '      "rationale_code": "PROFESSIONAL_TONE",\n'
+                '      "referenced_identifiers": []\n'
+                '    }\n'
+                '  ]\n'
+                "}\n"
+                "Do NOT output markdown fences, explanation, reasoning, or tool calls."
+            )
+            wording_user_prompt = (
+                "Reword this interview question for tone: 'Can you describe a time you optimized a complex database query?'\n"
+                "Intent: Assess database query optimization skills."
+            )
+
+            wording_payload = {
+                "model": test_model,
+                "messages": [
+                    {"role": "system", "content": wording_system_prompt},
+                    {"role": "user", "content": wording_user_prompt}
+                ],
+                "temperature": 0.1,
+                "max_tokens": min(profile.max_output_tokens, 600),
+                "stream": False,
+            }
+
+            try:
+                wording_resp = await client.post(chat_url, json=wording_payload, headers=headers)
+            except Exception as e:
+                return self._build_failure_response(
+                    profile, start_time, tested_at,
+                    ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                    f"Question wording capability test failed during HTTP transport: {type(e).__name__}",
+                    reachability_passed=True, auth_passed=True, model_discovered=model_discovered,
+                    discovered_model_ids=discovered_model_ids,
+                    dry_run_completion_passed=dry_run_completion_passed,
+                    unicode_handling_passed=unicode_handling_passed,
+                )
+
+            if wording_resp.status_code != 200:
+                return self._build_failure_response(
+                    profile, start_time, tested_at,
+                    ProviderErrorCode.PROFILE_MODE_INCOMPATIBLE,
+                    f"Question wording test endpoint returned status HTTP {wording_resp.status_code}.",
+                    reachability_passed=True, auth_passed=True, model_discovered=model_discovered,
+                    discovered_model_ids=discovered_model_ids,
+                    dry_run_completion_passed=dry_run_completion_passed,
+                    unicode_handling_passed=unicode_handling_passed,
+                    recommended_action="Ensure LM Studio is running and the model supports OpenAI chat completions.",
+                )
+
+            try:
+                wording_json = json.loads(wording_resp.content.decode("utf-8"))
+                w_choices = wording_json.get("choices", [])
+                if not w_choices or not isinstance(w_choices, list):
+                    return self._build_failure_response(
+                        profile, start_time, tested_at,
+                        ProviderErrorCode.PROFILE_MODE_INCOMPATIBLE,
+                        "Question wording response missing 'choices' array.",
+                        reachability_passed=True, auth_passed=True, model_discovered=model_discovered,
+                        discovered_model_ids=discovered_model_ids,
+                        dry_run_completion_passed=dry_run_completion_passed,
+                        unicode_handling_passed=unicode_handling_passed,
+                    )
+
+                w_choice = w_choices[0]
+                w_finish_reason = w_choice.get("finish_reason")
+                w_message = w_choice.get("message", {})
+                w_content = (w_message.get("content") or "").strip()
+                w_reasoning = w_message.get("reasoning_content")
+
+                # Reject if model consumed budget in reasoning or returned empty content
+                if not w_content:
+                    fail_msg = (
+                        "The selected model used its response budget for reasoning and returned no final wording. "
+                        "Select a compatible Instruct model and retry."
+                        if (w_reasoning or w_finish_reason == "length")
+                        else "Model returned empty message content for question wording operation."
+                    )
+                    return self._build_failure_response(
+                        profile, start_time, tested_at,
+                        ProviderErrorCode.PROFILE_MODE_INCOMPATIBLE,
+                        fail_msg,
+                        reachability_passed=True, auth_passed=True, model_discovered=model_discovered,
+                        discovered_model_ids=discovered_model_ids,
+                        dry_run_completion_passed=dry_run_completion_passed,
+                        unicode_handling_passed=unicode_handling_passed,
+                        recommended_action="Load and select Qwen3 4B Instruct (non-thinking model) in LM Studio.",
+                    )
+
+                if w_finish_reason == "length":
+                    return self._build_failure_response(
+                        profile, start_time, tested_at,
+                        ProviderErrorCode.RESPONSE_TRUNCATED,
+                        "Model output was truncated before structured JSON completion (finish_reason: length).",
+                        reachability_passed=True, auth_passed=True, model_discovered=model_discovered,
+                        discovered_model_ids=discovered_model_ids,
+                        dry_run_completion_passed=dry_run_completion_passed,
+                        unicode_handling_passed=unicode_handling_passed,
+                        recommended_action="Select a compatible Instruct model with low reasoning overhead.",
+                    )
+
+                # Clean markdown fences if present
+                clean_wording_str = w_content
+                if clean_wording_str.startswith("```json"):
+                    clean_wording_str = clean_wording_str[7:]
+                elif clean_wording_str.startswith("```"):
+                    clean_wording_str = clean_wording_str[3:]
+                if clean_wording_str.endswith("```"):
+                    clean_wording_str = clean_wording_str[:-3]
+                clean_wording_str = clean_wording_str.strip()
+
+                parsed_wording = json.loads(clean_wording_str)
+                if not isinstance(parsed_wording, dict):
+                    raise ValueError("Wording response is not a JSON object.")
+
+                if parsed_wording.get("operation") != "REWORD_QUESTION":
+                    raise ValueError(f"Invalid operation '{parsed_wording.get('operation')}'. Expected 'REWORD_QUESTION'.")
+
+                if parsed_wording.get("response_schema_version") != "1.0.0":
+                    raise ValueError(f"Invalid schema version '{parsed_wording.get('response_schema_version')}'. Expected '1.0.0'.")
+
+                variants = parsed_wording.get("variants")
+                if not variants or not isinstance(variants, list) or len(variants) == 0:
+                    raise ValueError("Wording response 'variants' list is missing or empty.")
+
+                first_var = variants[0]
+                if not isinstance(first_var, dict) or not first_var.get("variant_text") or not str(first_var["variant_text"]).strip():
+                    raise ValueError("Wording variant is missing non-empty 'variant_text'.")
+
+            except Exception as exc:
+                return self._build_failure_response(
+                    profile, start_time, tested_at,
+                    ProviderErrorCode.PROFILE_MODE_INCOMPATIBLE,
+                    f"Question wording capability test failed validation: {str(exc)}",
+                    reachability_passed=True, auth_passed=True, model_discovered=model_discovered,
+                    discovered_model_ids=discovered_model_ids,
+                    dry_run_completion_passed=dry_run_completion_passed,
+                    unicode_handling_passed=unicode_handling_passed,
+                    recommended_action="Load and select Qwen3 4B Instruct (non-thinking model) in LM Studio.",
                 )
 
             latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
@@ -390,8 +556,10 @@ class ProviderCompatibilityService:
                 model_discovered=model_discovered,
                 discovered_model_ids=discovered_model_ids,
                 dry_run_completion_passed=dry_run_completion_passed,
+                question_wording_passed=True,
                 non_streaming_enforced=True,
                 unicode_handling_passed=unicode_handling_passed,
+                recommended_action=None,
                 latency_ms=latency_ms,
                 tested_at=tested_at,
                 model_source=profile.model_source,
@@ -414,6 +582,9 @@ class ProviderCompatibilityService:
         auth_passed: bool = False,
         model_discovered: bool = False,
         discovered_model_ids: Optional[List[str]] = None,
+        dry_run_completion_passed: bool = False,
+        unicode_handling_passed: bool = False,
+        recommended_action: Optional[str] = None,
     ) -> ProviderCompatibilityReportResponse:
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
         return ProviderCompatibilityReportResponse(
@@ -429,9 +600,11 @@ class ProviderCompatibilityService:
             auth_passed=auth_passed,
             model_discovered=model_discovered,
             discovered_model_ids=discovered_model_ids or [],
-            dry_run_completion_passed=False,
+            dry_run_completion_passed=dry_run_completion_passed,
+            question_wording_passed=False,
             non_streaming_enforced=True,
-            unicode_handling_passed=False,
+            unicode_handling_passed=unicode_handling_passed,
+            recommended_action=recommended_action,
             latency_ms=latency_ms,
             tested_at=tested_at,
             model_source=profile.model_source,

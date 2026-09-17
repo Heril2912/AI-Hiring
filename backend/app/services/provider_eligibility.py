@@ -43,9 +43,14 @@ def evaluate_provider_eligibility(
         if profile.provider_type != ProviderType.DISABLED:
             reasons.append("Model identifier is missing or blank.")
 
-    # 4. Incompatible state check
+    # 4. Compatibility state check (must be verified HEALTHY or COMPATIBLE)
     if profile.compatibility_status == ProviderCompatibilityStatus.INCOMPATIBLE:
         reasons.append("Provider is flagged as INCOMPATIBLE.")
+    elif profile.compatibility_status == ProviderCompatibilityStatus.NOT_TESTED:
+        reasons.append("Provider has NOT_TESTED compatibility status. Test compatibility before activation.")
+    elif profile.compatibility_status not in {ProviderCompatibilityStatus.HEALTHY, ProviderCompatibilityStatus.COMPATIBLE}:
+        if profile.provider_type != ProviderType.DISABLED:
+            reasons.append(f"Provider compatibility status '{profile.compatibility_status.value}' is not eligible for activation.")
 
     # 5. Privacy review check for remote providers
     if profile.egress_class == ProviderEgressClass.APPROVED_REMOTE:

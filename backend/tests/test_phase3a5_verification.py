@@ -615,10 +615,12 @@ def test_step1_lifecycle_state_machine_transitions():
     [
         # Valid cases
         ("http://127.0.0.1:8080/v1", ProviderEgressClass.LOCAL_ONLY, False, [], {8080}, True, None),
-        ("http://localhost:8000/v1", ProviderEgressClass.LOCAL_ONLY, False, [], {8000}, True, None),
+        ("http://localhost:1234/v1", ProviderEgressClass.LOCAL_ONLY, False, [], {1234}, True, None),
         ("https://api.openai.com/v1", ProviderEgressClass.APPROVED_REMOTE, True, ["api.openai.com"], set(), True, None),
 
         # Rejected cases (explicitly required in Step 2)
+        ("http://localhost:8000/v1", ProviderEgressClass.LOCAL_ONLY, False, [], {8000}, False, "APPLICATION_SELF_CALL_FORBIDDEN"),
+        ("http://127.0.0.1:8000/v1", ProviderEgressClass.LOCAL_ONLY, False, [], {8000}, False, "APPLICATION_SELF_CALL_FORBIDDEN"),
         ("file:///etc/passwd", ProviderEgressClass.LOCAL_ONLY, False, [], {8080}, False, "UNSUPPORTED_SCHEME"),
         ("http://169.254.169.254/", ProviderEgressClass.LOCAL_ONLY, False, [], {8080}, False, "LOCAL_DESTINATION_FORBIDDEN"),
         ("http://169.254.169.254/", ProviderEgressClass.APPROVED_REMOTE, True, ["169.254.169.254"], set(), False, "REMOTE_HTTPS_REQUIRED"),
@@ -791,7 +793,13 @@ def test_step3_comprehensive_secret_non_disclosure(monkeypatch, caplog, client, 
     assert update_resp.status_code == 200
     assert fake_secret not in update_resp.text
 
-    # 5. Profile activation via API
+    # 5. Profile activation via API (must be HEALTHY/COMPATIBLE)
+    from app.services.provider_registry import get_provider_registry
+    registry = get_provider_registry()
+    p_rec = registry.get_profile(uuid.UUID(p_id))
+    if p_rec:
+        registry._profiles[p_rec.profile_id] = p_rec.model_copy(update={"compatibility_status": ProviderCompatibilityStatus.HEALTHY})
+
     act_resp = client.post(
         f"/api/v1/admin/provider-profiles/{p_id}/activate",
         json={"version": 2, "confirm_remote_egress": True},
@@ -981,6 +989,12 @@ def test_step5_transactional_activation_and_rollback(client, auth_tokens, auth_d
     assert resp_a.status_code == 201
     p_a_id = resp_a.json()["profile_id"]
 
+    # Set Profile A to HEALTHY
+    registry = get_provider_registry()
+    p_a = registry.get_profile(uuid.UUID(p_a_id))
+    if p_a:
+        registry._profiles[p_a.profile_id] = p_a.model_copy(update={"compatibility_status": ProviderCompatibilityStatus.HEALTHY})
+
     # Activate profile A
     act_a = client.post(
         f"/api/v1/admin/provider-profiles/{p_a_id}/activate",
@@ -989,7 +1003,6 @@ def test_step5_transactional_activation_and_rollback(client, auth_tokens, auth_d
     )
     assert act_a.status_code == 200
     assert act_a.json()["enabled"] is True
-    assert act_a.json()["compatibility_status"] == "NOT_TESTED"
 
     # Create profile B
     resp_b = client.post(
@@ -997,7 +1010,7 @@ def test_step5_transactional_activation_and_rollback(client, auth_tokens, auth_d
         json={
             "display_name": "Profile Beta",
             "provider_type": "LOCAL_OPENAI_COMPATIBLE",
-            "base_url": "http://127.0.0.1:8000/v1",
+            "base_url": "http://127.0.0.1:1234/v1",
             "model_identifier": "qwen2.5-14b",
             "egress_class": "LOCAL_ONLY",
         },
@@ -1005,6 +1018,11 @@ def test_step5_transactional_activation_and_rollback(client, auth_tokens, auth_d
     )
     assert resp_b.status_code == 201
     p_b_id = resp_b.json()["profile_id"]
+
+    # Set Profile B to HEALTHY
+    p_b = registry.get_profile(uuid.UUID(p_b_id))
+    if p_b:
+        registry._profiles[p_b.profile_id] = p_b.model_copy(update={"compatibility_status": ProviderCompatibilityStatus.HEALTHY})
 
     # Activate profile B -> Profile A must be deactivated transactionally
     act_b = client.post(

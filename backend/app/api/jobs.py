@@ -1025,6 +1025,73 @@ async def list_job_versions(
 
 
 @router.get(
+    "/{job_id}/interview-context",
+    response_model=InterviewContextResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Recruiter Job Interview Context",
+    description=(
+        "Returns authorized job and AI capability metadata for the Recruiter interview workspace shell "
+        "at the job requisition level without candidate binding."
+    ),
+)
+async def get_job_interview_workspace_context(
+    job_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> InterviewContextResponse:
+    actor = auth_ctx.user
+
+    # Verify job existence and recruiter ownership
+    stmt_job = (
+        select(JobRequisition)
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
+        )
+        .where(JobRequisition.job_id == job_id)
+    )
+    job = db.execute(stmt_job).scalar_one_or_none()
+
+    if job is None or (actor.role == UserRole.RECRUITER and job.created_by_user_id != actor.user_id):
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.ACCESS_DENIED,
+            actor_user_id=actor.user_id,
+            resource_type="interview_context",
+            resource_id=str(job_id),
+            safe_metadata={"reason": "UNAUTHORIZED_JOB_ACCESS"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job requisition not found or unauthorized."},
+        )
+
+    latest_version = sorted(job.versions, key=lambda v: (v.version_number, v.revision), reverse=True)[0]
+    active_profile = registry.get_active_profile()
+    ai_capability = registry.to_recruiter_capability(active_profile)
+
+    return InterviewContextResponse(
+        job_id=job.job_id,
+        job_title=latest_version.title,
+        job_version_id=latest_version.job_version_id,
+        job_revision=latest_version.revision,
+        candidate_id=None,
+        candidate_name=None,
+        candidate_email=None,
+        resume_artifact_id=None,
+        match_run_id=None,
+        match_score=None,
+        skill_gap_summary=None,
+        ai_capability=ai_capability,
+        interview_plan_state="EMPTY_PLAN",
+        message="Interview template workspace ready for job requisition.",
+    )
+
+
+@router.get(
     "/{job_id}/candidates/{resume_id}/interview-context",
     response_model=InterviewContextResponse,
     status_code=status.HTTP_200_OK,
@@ -1071,7 +1138,7 @@ async def get_interview_workspace_context(
         )
 
     # Resolve latest or active job version
-    latest_version = sorted(job.versions, key=lambda v: v.version_number, reverse=True)[0]
+    latest_version = sorted(job.versions, key=lambda v: (v.version_number, v.revision), reverse=True)[0]
 
     # Verify candidate / resume profile
     stmt_prof = (
@@ -1119,7 +1186,7 @@ async def get_interview_workspace_context(
         job_id=job.job_id,
         job_title=latest_version.title,
         job_version_id=latest_version.job_version_id,
-        job_revision=latest_version.version_number,
+        job_revision=latest_version.revision,
         candidate_id=candidate_profile.profile_id,
         candidate_name=candidate_name,
         candidate_email=candidate_email,

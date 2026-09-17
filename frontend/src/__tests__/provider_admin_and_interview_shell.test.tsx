@@ -80,23 +80,33 @@ describe("Phase 3A.4 Provider Administration & Interview Workspace", () => {
 
       render(<AdminWorkspace activeTab="ai_providers" />);
 
-      expect(screen.getByText("Loading provider profiles...")).toBeInTheDocument();
-
       await waitFor(() => {
         expect(screen.getByText("Local llama.cpp Qwen3")).toBeInTheDocument();
-        expect(screen.getByText("Remote OpenAI Production")).toBeInTheDocument();
       });
 
-      expect(screen.getByText("Local Only")).toBeInTheDocument();
-      expect(screen.getByText("Approved Remote")).toBeInTheDocument();
-      expect(screen.getByText("✓ Configured")).toBeInTheDocument();
-      expect(screen.getByText("Not Required")).toBeInTheDocument();
+      // Expand advanced settings accordion to see table and remote profiles
+      const advancedHeader = screen.getByText(/Advanced Provider Profiles & History/i);
+      fireEvent.click(advancedHeader);
+
+      await waitFor(() => {
+        expect(screen.getByText("Remote OpenAI Production")).toBeInTheDocument();
+        expect(screen.getByText("Local AI")).toBeInTheDocument();
+        expect(screen.getByText("Remote Provider")).toBeInTheDocument();
+      });
     });
 
     it("requires explicit confirmation when activating an approved remote provider", async () => {
       vi.mocked(clientModule.apiFetch).mockResolvedValueOnce(mockProfiles);
 
       render(<AdminWorkspace activeTab="ai_providers" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Local llama.cpp Qwen3")).toBeInTheDocument();
+      });
+
+      // Expand advanced settings
+      const advancedHeader = screen.getByText(/Advanced Provider Profiles & History/i);
+      fireEvent.click(advancedHeader);
 
       await waitFor(() => {
         expect(screen.getByText("Remote OpenAI Production")).toBeInTheDocument();
@@ -136,7 +146,7 @@ describe("Phase 3A.4 Provider Administration & Interview Workspace", () => {
             method: "POST",
             body: JSON.stringify({
               version: 1,
-              confirmRemoteEgress: true,
+              confirm_remote_egress: true,
             }),
           })
         );

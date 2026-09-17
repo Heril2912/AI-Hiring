@@ -31,8 +31,9 @@ class StrictDestinationPolicy(DestinationPolicyProtocol):
     - Full DNS prevalidation across IPv4 and IPv6.
     """
 
-    DEFAULT_LOCAL_ALLOWED_PORTS: Set[int] = {1234, 8080, 8000, 11434}
+    DEFAULT_LOCAL_ALLOWED_PORTS: Set[int] = {1234, 8080, 11434}
     DEFAULT_LOCAL_ALLOWED_HOSTS: Set[str] = {"127.0.0.1", "::1", "localhost"}
+    DEFAULT_APPLICATION_PORTS: Set[int] = {8000}
 
     def __init__(
         self,
@@ -40,11 +41,13 @@ class StrictDestinationPolicy(DestinationPolicyProtocol):
         remote_allowed_hosts: Optional[List[str]] = None,
         local_allowed_ports: Optional[Set[int]] = None,
         local_allowed_hosts: Optional[Set[str]] = None,
+        application_ports: Optional[Set[int]] = None,
     ):
         self.allow_remote = allow_remote
         self.remote_allowed_hosts = {h.strip().lower() for h in (remote_allowed_hosts or []) if h.strip()}
         self.local_allowed_ports = local_allowed_ports or self.DEFAULT_LOCAL_ALLOWED_PORTS
         self.local_allowed_hosts = {h.strip().lower() for h in (local_allowed_hosts or self.DEFAULT_LOCAL_ALLOWED_HOSTS)}
+        self.application_ports = application_ports or self.DEFAULT_APPLICATION_PORTS
 
     def validate_destination_url(self, target_url: str) -> bool:
         """Protocol method returning boolean validity."""
@@ -139,6 +142,15 @@ class StrictDestinationPolicy(DestinationPolicyProtocol):
 
             # Check port (default to 80 for http, 443 for https if not specified)
             port = parsed.port or (443 if scheme == "https" else 80)
+
+            # Reject self-calls targeting the running FastAPI application server port
+            if port in self.application_ports:
+                return DestinationPolicyResult(
+                    is_valid=False,
+                    safe_error_code="APPLICATION_SELF_CALL_FORBIDDEN",
+                    safe_error_message="This address points to the application server, not an AI provider.",
+                )
+
             if port not in self.local_allowed_ports:
                 return DestinationPolicyResult(
                     is_valid=False,

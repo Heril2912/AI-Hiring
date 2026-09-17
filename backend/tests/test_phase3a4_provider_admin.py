@@ -280,6 +280,13 @@ def test_remote_activation_requires_explicit_confirmation(client, auth_tokens, m
     assert create_resp.status_code == 201
     profile_id = create_resp.json()["profile_id"]
 
+    # Update profile in registry to HEALTHY for activation
+    from app.services.provider_registry import get_provider_registry
+    registry = get_provider_registry()
+    p = registry.get_profile(uuid.UUID(profile_id))
+    if p:
+        registry._profiles[p.profile_id] = p.model_copy(update={"compatibility_status": ProviderCompatibilityStatus.HEALTHY})
+
     # Activation without confirmation fails
     act_resp = client.post(
         f"/api/v1/admin/provider-profiles/{profile_id}/activate",
@@ -297,8 +304,7 @@ def test_remote_activation_requires_explicit_confirmation(client, auth_tokens, m
     )
     assert act_resp_ok.status_code == 200
     assert act_resp_ok.json()["enabled"] is True
-    # Activation means configured, NOT healthy (remains NOT_TESTED)
-    assert act_resp_ok.json()["compatibility_status"] == "NOT_TESTED"
+    assert act_resp_ok.json()["compatibility_status"] == "HEALTHY"
 
 
 def test_recruiter_ai_capability_safe_read_only(client, auth_tokens):

@@ -266,6 +266,24 @@ function AuthenticatedApp() {
                 onSelectJob={handleSelectJob}
                 onCreateJob={handleCreateJob}
                 onRefresh={loadJobsList}
+                onOpenInterviewTemplate={(jobId) => {
+                  setSelectedJobId(jobId);
+                  setInterviewRoute({ jobId, resumeId: "" });
+                  setActiveView("interview_workspace");
+                }}
+              />
+            ) : activeView === "interview_workspace" && interviewRoute ? (
+              <InterviewWorkspace
+                jobId={interviewRoute.jobId}
+                resumeId={interviewRoute.resumeId}
+                onNavigateBack={() => {
+                  if (selectedJobId) {
+                    setActiveView("edit_job");
+                  } else {
+                    setActiveView("jobs");
+                  }
+                  loadJobsList();
+                }}
               />
             ) : (
               <JobEditor
@@ -275,6 +293,10 @@ function AuthenticatedApp() {
                   loadJobsList();
                 }}
                 onJobCreated={handleJobCreated}
+                onOpenInterviewTemplate={(jobId) => {
+                  setInterviewRoute({ jobId, resumeId: "" });
+                  setActiveView("interview_workspace");
+                }}
               />
             )
           ) : (
@@ -324,6 +346,11 @@ function AuthenticatedApp() {
                   onSelectJob={handleSelectJob}
                   onCreateJob={handleCreateJob}
                   onRefresh={loadJobsList}
+                  onOpenInterviewTemplate={(jobId) => {
+                    setSelectedJobId(jobId);
+                    setInterviewRoute({ jobId, resumeId: "" });
+                    setActiveView("interview_workspace");
+                  }}
                 />
               )}
 
@@ -348,6 +375,10 @@ function AuthenticatedApp() {
                   onCompareCandidates={(params) => {
                     setComparisonParams(params);
                     setActiveView("compare_candidates");
+                  }}
+                  onOpenInterviewTemplate={(jobId) => {
+                    setInterviewRoute({ jobId, resumeId: "" });
+                    setActiveView("interview_workspace");
                   }}
                 />
               )}
@@ -452,12 +483,15 @@ function AuthenticatedApp() {
                   jobId={interviewRoute.jobId}
                   resumeId={interviewRoute.resumeId}
                   onNavigateBack={() => {
-                    if (comparisonParams) {
+                    if (interviewRoute.resumeId && comparisonParams) {
                       setActiveView("compare_candidates");
                       setActiveNavTab("jobs");
+                    } else if (selectedJobId) {
+                      setActiveView("edit_job");
+                      setActiveNavTab("jobs");
                     } else {
-                      setActiveView("candidates");
-                      setActiveNavTab("candidates");
+                      setActiveView("jobs");
+                      setActiveNavTab("jobs");
                     }
                   }}
                 />

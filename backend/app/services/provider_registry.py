@@ -79,8 +79,61 @@ class ProviderRegistry:
         self._bootstrap_default_profiles()
 
     def _bootstrap_default_profiles(self) -> None:
-        """Initializes default local and remote profiles if empty."""
+        """Initializes default local and remote profiles if empty, syncing with PostgreSQL."""
+        import os
         with self._lock:
+            # When running inside pytest, do not read from live development PostgreSQL to maintain complete test isolation
+            if "PYTEST_CURRENT_TEST" in os.environ:
+                self._profiles.clear()
+                return
+
+            # First try loading existing profiles from PostgreSQL database
+            try:
+                from app.database import SessionLocal
+                from app.models.interview import ProviderProfileRecord
+                db = SessionLocal()
+                try:
+                    records = db.query(ProviderProfileRecord).all()
+                    if records:
+                        for r in records:
+                            p = ProviderProfile(
+                                profile_id=r.profile_id,
+                                organization_id=r.organization_id,
+                                display_name=r.display_name,
+                                provider_type=r.provider_type,
+                                api_mode=r.api_mode,
+                                base_url=r.base_url,
+                                model_identifier=r.model_identifier,
+                                secret_ref=r.secret_ref,
+                                supported_operations=r.supported_operations or [],
+                                connect_timeout_seconds=r.connect_timeout_seconds,
+                                request_timeout_seconds=r.request_timeout_seconds,
+                                max_input_tokens=r.max_input_tokens,
+                                max_output_tokens=r.max_output_tokens,
+                                max_response_bytes=r.max_response_bytes,
+                                max_concurrency=r.max_concurrency,
+                                retry_limit=r.retry_limit,
+                                egress_class=r.egress_class,
+                                privacy_review_status=r.privacy_review_status,
+                                enabled=r.enabled,
+                                is_archived=getattr(r, "is_archived", False),
+                                compatibility_status=r.compatibility_status,
+                                tested_at=r.tested_at,
+                                model_source=r.model_source,
+                                model_licence=r.model_licence,
+                                model_checksum=r.model_checksum,
+                                last_compatibility_report=r.last_compatibility_report,
+                                version=r.version,
+                                created_at=r.created_at,
+                                updated_at=r.updated_at,
+                            )
+                            self._profiles[p.profile_id] = p
+                        return
+                finally:
+                    db.close()
+            except Exception:
+                pass
+
             if not self._profiles:
                 # Default Local Profile (LM Studio / Qwen3)
                 local_profile = ProviderProfile(
@@ -101,16 +154,106 @@ class ProviderRegistry:
                     egress_class=ProviderEgressClass.LOCAL_ONLY,
                     privacy_review_status=PrivacyReviewStatus.APPROVED,
                     enabled=False,
+                    is_archived=False,
                     compatibility_status=ProviderCompatibilityStatus.NOT_TESTED,
                     model_source="Qwen/Qwen2.5-7B-Instruct-GGUF (or Qwen3-4B GGUF Q4_K_M)",
                     model_licence="Apache-2.0",
                     version=1,
                 )
                 self._profiles[local_profile.profile_id] = local_profile
+                self._persist_profile_to_db(local_profile)
 
-    def list_profiles(self, organization_id: Optional[UUID] = None) -> List[ProviderProfile]:
+    def _persist_profile_to_db(self, profile: ProviderProfile, activated_by: Optional[UUID] = None, deactivated_by: Optional[UUID] = None) -> None:
+        """Persists profile state changes directly to PostgreSQL (disabled during tests)."""
+        import os
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+
+        try:
+            from app.database import SessionLocal
+            from app.models.interview import ProviderProfileRecord
+            db = SessionLocal()
+            try:
+                rec = db.query(ProviderProfileRecord).filter_by(profile_id=profile.profile_id).first()
+                if not rec:
+                    rec = ProviderProfileRecord(
+                        profile_id=profile.profile_id,
+                        organization_id=profile.organization_id,
+                        display_name=profile.display_name,
+                        provider_type=profile.provider_type,
+                        api_mode=profile.api_mode.value if hasattr(profile.api_mode, "value") else str(profile.api_mode),
+                        base_url=profile.base_url,
+                        model_identifier=profile.model_identifier,
+                        secret_ref=profile.secret_ref,
+                        supported_operations=[op.value if hasattr(op, "value") else str(op) for op in profile.supported_operations],
+                        connect_timeout_seconds=profile.connect_timeout_seconds,
+                        request_timeout_seconds=profile.request_timeout_seconds,
+                        max_input_tokens=profile.max_input_tokens,
+                        max_output_tokens=profile.max_output_tokens,
+                        max_response_bytes=profile.max_response_bytes,
+                        max_concurrency=profile.max_concurrency,
+                        retry_limit=profile.retry_limit,
+                        egress_class=profile.egress_class,
+                        privacy_review_status=profile.privacy_review_status,
+                        enabled=profile.enabled,
+                        is_archived=profile.is_archived,
+                        compatibility_status=profile.compatibility_status,
+                        tested_at=profile.tested_at,
+                        model_source=profile.model_source,
+                        model_licence=profile.model_licence,
+                        model_checksum=profile.model_checksum,
+                        last_compatibility_report=profile.last_compatibility_report,
+                        version=profile.version,
+                    )
+                    if profile.enabled and activated_by:
+                        rec.activated_by_user_id = activated_by
+                        rec.activated_at = datetime.now(timezone.utc)
+                    db.add(rec)
+                else:
+                    rec.display_name = profile.display_name
+                    rec.provider_type = profile.provider_type
+                    rec.api_mode = profile.api_mode.value if hasattr(profile.api_mode, "value") else str(profile.api_mode)
+                    rec.base_url = profile.base_url
+                    rec.model_identifier = profile.model_identifier
+                    rec.secret_ref = profile.secret_ref
+                    rec.supported_operations = [op.value if hasattr(op, "value") else str(op) for op in profile.supported_operations]
+                    rec.connect_timeout_seconds = profile.connect_timeout_seconds
+                    rec.request_timeout_seconds = profile.request_timeout_seconds
+                    rec.max_input_tokens = profile.max_input_tokens
+                    rec.max_output_tokens = profile.max_output_tokens
+                    rec.max_response_bytes = profile.max_response_bytes
+                    rec.max_concurrency = profile.max_concurrency
+                    rec.retry_limit = profile.retry_limit
+                    rec.egress_class = profile.egress_class
+                    rec.privacy_review_status = profile.privacy_review_status
+                    rec.enabled = profile.enabled
+                    rec.is_archived = profile.is_archived
+                    rec.compatibility_status = profile.compatibility_status
+                    rec.tested_at = profile.tested_at
+                    rec.model_source = profile.model_source
+                    rec.model_licence = profile.model_licence
+                    rec.model_checksum = profile.model_checksum
+                    rec.last_compatibility_report = profile.last_compatibility_report
+                    rec.version = profile.version
+                    if profile.enabled:
+                        if activated_by:
+                            rec.activated_by_user_id = activated_by
+                            rec.activated_at = datetime.now(timezone.utc)
+                    else:
+                        if deactivated_by:
+                            rec.deactivated_by_user_id = deactivated_by
+                            rec.deactivated_at = datetime.now(timezone.utc)
+                db.commit()
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+    def list_profiles(self, organization_id: Optional[UUID] = None, include_archived: bool = True) -> List[ProviderProfile]:
         with self._lock:
             profiles = list(self._profiles.values())
+            if not include_archived:
+                profiles = [p for p in profiles if not p.is_archived]
             if organization_id:
                 profiles = [p for p in profiles if p.organization_id is None or p.organization_id == organization_id]
             return sorted(profiles, key=lambda p: (not p.enabled, p.created_at))
@@ -179,6 +322,7 @@ class ProviderRegistry:
                 updated_at=now,
             )
             self._profiles[new_profile.profile_id] = new_profile
+            self._persist_profile_to_db(new_profile)
             return new_profile
 
     def update_profile(
@@ -244,6 +388,55 @@ class ProviderRegistry:
                 updated_at=now,
             )
             self._profiles[profile_id] = updated
+            self._persist_profile_to_db(updated)
+            return updated
+
+    def set_profile_model(
+        self,
+        profile_id: UUID,
+        model_identifier: str,
+        actor_id: UUID,
+    ) -> ProviderProfile:
+        """Directly updates the model identifier on a profile (active or inactive) and persists to DB."""
+        with self._lock:
+            existing = self._profiles.get(profile_id)
+            if not existing:
+                raise KeyError(f"Provider profile '{profile_id}' not found.")
+
+            now = datetime.now(timezone.utc)
+            updated = ProviderProfile(
+                profile_id=existing.profile_id,
+                organization_id=existing.organization_id,
+                display_name=existing.display_name,
+                provider_type=existing.provider_type,
+                api_mode=existing.api_mode,
+                base_url=existing.base_url,
+                model_identifier=model_identifier.strip(),
+                secret_ref=existing.secret_ref,
+                supported_operations=existing.supported_operations,
+                connect_timeout_seconds=existing.connect_timeout_seconds,
+                request_timeout_seconds=existing.request_timeout_seconds,
+                max_input_tokens=existing.max_input_tokens,
+                max_output_tokens=existing.max_output_tokens,
+                max_response_bytes=existing.max_response_bytes,
+                max_concurrency=existing.max_concurrency,
+                retry_limit=existing.retry_limit,
+                egress_class=existing.egress_class,
+                privacy_review_status=existing.privacy_review_status,
+                enabled=existing.enabled,
+                is_archived=existing.is_archived,
+                compatibility_status=ProviderCompatibilityStatus.NOT_TESTED,
+                tested_at=existing.tested_at,
+                model_source=existing.model_source,
+                model_licence=existing.model_licence,
+                model_checksum=existing.model_checksum,
+                last_compatibility_report=existing.last_compatibility_report,
+                version=existing.version + 1,
+                created_at=existing.created_at,
+                updated_at=now,
+            )
+            self._profiles[profile_id] = updated
+            self._persist_profile_to_db(updated)
             return updated
 
     async def test_compatibility(
@@ -311,6 +504,7 @@ class ProviderRegistry:
                     updated_at=now,
                 )
                 self._profiles[profile_id] = updated_profile
+                self._persist_profile_to_db(updated_profile)
 
         return report
 
@@ -383,6 +577,7 @@ class ProviderRegistry:
                             updated_at=now,
                         )
                         self._profiles[p_id] = disabled_p
+                        self._persist_profile_to_db(disabled_p, deactivated_by=actor_id)
 
             # Activate target profile (preserves compatibility_status)
             activated = ProviderProfile(
@@ -416,6 +611,7 @@ class ProviderRegistry:
                 updated_at=now,
             )
             self._profiles[profile_id] = activated
+            self._persist_profile_to_db(activated, activated_by=actor_id)
             return activated
 
     def disable_profile(
@@ -465,8 +661,61 @@ class ProviderRegistry:
                 created_at=existing.created_at,
                 updated_at=now,
             )
-            self._profiles[profile_id] = disabled
-            return disabled
+    def archive_profile(
+        self,
+        profile_id: UUID,
+        version: int,
+        archive: bool,
+        actor_id: UUID,
+    ) -> ProviderProfile:
+        with self._lock:
+            existing = self._profiles.get(profile_id)
+            if not existing:
+                raise KeyError(f"Provider profile '{profile_id}' not found.")
+
+            if existing.version != version:
+                raise StaleVersionError(
+                    f"Profile version conflict. Current version is {existing.version}, but request specified {version}."
+                )
+
+            if existing.enabled and archive:
+                raise InactiveProfileUpdateError("Cannot archive an active provider profile. Disable it first.")
+
+            now = datetime.now(timezone.utc)
+            updated = ProviderProfile(
+                profile_id=existing.profile_id,
+                organization_id=existing.organization_id,
+                display_name=existing.display_name,
+                provider_type=existing.provider_type,
+                api_mode=existing.api_mode,
+                base_url=existing.base_url,
+                model_identifier=existing.model_identifier,
+                secret_ref=existing.secret_ref,
+                supported_operations=existing.supported_operations,
+                connect_timeout_seconds=existing.connect_timeout_seconds,
+                request_timeout_seconds=existing.request_timeout_seconds,
+                max_input_tokens=existing.max_input_tokens,
+                max_output_tokens=existing.max_output_tokens,
+                max_response_bytes=existing.max_response_bytes,
+                max_concurrency=existing.max_concurrency,
+                retry_limit=existing.retry_limit,
+                egress_class=existing.egress_class,
+                privacy_review_status=existing.privacy_review_status,
+                enabled=existing.enabled,
+                is_archived=archive,
+                compatibility_status=existing.compatibility_status,
+                tested_at=existing.tested_at,
+                model_source=existing.model_source,
+                model_licence=existing.model_licence,
+                model_checksum=existing.model_checksum,
+                last_compatibility_report=existing.last_compatibility_report,
+                version=existing.version + 1,
+                created_at=existing.created_at,
+                updated_at=now,
+            )
+            self._profiles[profile_id] = updated
+            self._persist_profile_to_db(updated)
+            return updated
 
     def to_safe_admin_response(self, profile: ProviderProfile) -> AdminProviderProfileResponse:
         """Converts a ProviderProfile to safe Admin representation without secrets."""
@@ -508,6 +757,7 @@ class ProviderRegistry:
             egress_class=profile.egress_class,
             privacy_review_status=profile.privacy_review_status,
             enabled=profile.enabled,
+            is_archived=profile.is_archived,
             compatibility_status=profile.compatibility_status,
             tested_at=profile.tested_at,
             model_source=profile.model_source,
@@ -520,31 +770,38 @@ class ProviderRegistry:
         )
 
     def to_recruiter_capability(self, active_profile: Optional[ProviderProfile]) -> RecruiterAIAvailabilityResponse:
-        """Constructs a minimal safe capability descriptor for Recruiters."""
+        """Constructs a minimal safe capability descriptor for Recruiters derived from the active PostgreSQL profile snapshot."""
         if not active_profile or not active_profile.enabled or active_profile.provider_type == ProviderType.DISABLED:
             return RecruiterAIAvailabilityResponse(
                 ai_enabled=False,
                 provider_class="DISABLED",
                 availability_label="AI Assistance Disabled",
                 egress_class=ProviderEgressClass.LOCAL_ONLY,
+                active_model_name=None,
+                message="AI wording assistance is currently disabled by Administrator.",
             )
 
         if active_profile.provider_type == ProviderType.LOCAL_OPENAI_COMPATIBLE:
-            model_label = active_profile.model_identifier or "Qwen3"
+            raw_model = active_profile.model_identifier or "qwen/qwen3-4b-thinking-2507"
+            clean_model = "Qwen3 4B" if ("qwen3" in raw_model.lower() or "qwen" in raw_model.lower()) else raw_model.split("/")[-1]
             return RecruiterAIAvailabilityResponse(
                 ai_enabled=True,
                 provider_class="LOCAL",
-                availability_label=f"Local Engine ({model_label})",
+                availability_label=f"Local AI · {clean_model}",
                 egress_class=ProviderEgressClass.LOCAL_ONLY,
+                active_model_name=raw_model,
+                message=f"Local AI Engine active using model {raw_model}.",
             )
 
         if active_profile.provider_type == ProviderType.REMOTE_OPENAI_COMPATIBLE:
-            model_label = active_profile.model_identifier or "OpenAI-Compatible"
+            raw_model = active_profile.model_identifier or "OpenAI-Compatible"
             return RecruiterAIAvailabilityResponse(
                 ai_enabled=True,
                 provider_class="REMOTE",
-                availability_label=f"Remote Provider ({model_label})",
+                availability_label=f"Remote AI · {raw_model}",
                 egress_class=ProviderEgressClass.APPROVED_REMOTE,
+                active_model_name=raw_model,
+                message=f"Remote AI Provider active using model {raw_model}.",
             )
 
         return RecruiterAIAvailabilityResponse(
@@ -552,6 +809,7 @@ class ProviderRegistry:
             provider_class="DISABLED",
             availability_label="AI Assistance Disabled",
             egress_class=ProviderEgressClass.LOCAL_ONLY,
+            active_model_name=None,
         )
 
     def get_provider_instance(self, profile: Optional[ProviderProfile]) -> "BaseWordingProvider":
