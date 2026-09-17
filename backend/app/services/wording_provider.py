@@ -53,9 +53,18 @@ from app.schemas.wording_contract import (
     StructuredWordingVariant,
     WordingRationaleCode,
 )
-from app.services.wording_prompt_package import assemble_wording_messages
+from app.schemas.assessment_contract import (
+    BoundedAssessmentRequest,
+    BoundedAssessmentResponse,
+    StructuredCriterionObservation,
+)
+from app.services.wording_prompt_package import (
+    assemble_wording_messages,
+    assemble_assessment_messages,
+)
 
 logger = logging.getLogger("ai_hiring.wording_provider")
+
 
 
 class ProviderTransportError(Exception):
@@ -84,6 +93,15 @@ class BaseWordingProvider(ABC):
     ) -> BoundedWordingResponse:
         """Executes strict structured wording assistance for one authorized question."""
         pass
+
+    @abstractmethod
+    async def request_provisional_assessment(
+        self,
+        request: Any,
+    ) -> Any:
+        """Executes strict structured provisional assessment for one submitted question answer."""
+        pass
+
 
 
 class DisabledWordingProvider(BaseWordingProvider):
@@ -118,6 +136,16 @@ class DisabledWordingProvider(BaseWordingProvider):
             error_code=ProviderErrorCode.PROVIDER_DISABLED,
             safe_message="Model provider is disabled by system policy.",
         )
+
+    async def request_provisional_assessment(
+        self,
+        request: BoundedAssessmentRequest,
+    ) -> BoundedAssessmentResponse:
+        raise ProviderTransportError(
+            error_code=ProviderErrorCode.PROVIDER_DISABLED,
+            safe_message="Model provider is disabled by system policy.",
+        )
+
 
 
 class FakeWordingProvider(BaseWordingProvider):
@@ -313,6 +341,76 @@ class FakeWordingProvider(BaseWordingProvider):
                 error_code=self.custom_error_code or ProviderErrorCode.PROVIDER_UNAVAILABLE,
                 safe_message=self.custom_error_message or "Simulated provider error.",
             )
+
+    async def request_provisional_assessment(
+        self,
+        request: BoundedAssessmentRequest,
+    ) -> BoundedAssessmentResponse:
+        if self.simulated_mode == "SUCCESS":
+            if self.simulated_raw_json_override is not None:
+                return BoundedAssessmentResponse.model_validate(self.simulated_raw_json_override)
+            
+            # Default success response: Map first criterion to first segment
+            obs = []
+            cited_ids = list(request.citation_allowlist[:1]) if request.citation_allowlist else []
+            crit_ids = list(request.rubric.rating_anchors.keys())
+            provisional_level = crit_ids[0] if crit_ids else 3
+            
+            if request.citation_allowlist:
+                obs.append(
+                    StructuredCriterionObservation(
+                        criterion_id=f"CRIT-{provisional_level}",
+                        observation="Candidate demonstrated structured reasoning matching rubric criteria.",
+                        cited_segment_ids=cited_ids,
+                    )
+                )
+
+            return BoundedAssessmentResponse(
+                operation="PROVISIONAL_ASSESSMENT",
+                response_schema_version="1.0.0",
+                provisional_level=provisional_level,
+                insufficient_evidence_reason=None,
+                criterion_observations=obs,
+                cited_segment_ids=cited_ids,
+                uncertainty_codes=[],
+                safe_validation_metadata={"mock": True},
+            )
+        elif self.simulated_mode == "TIMEOUT":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_TIMEOUT,
+                safe_message="Simulated request timeout.",
+            )
+        elif self.simulated_mode == "UNAVAILABLE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                safe_message="Simulated provider endpoint unavailable.",
+            )
+        elif self.simulated_mode == "AUTH_FAILED":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.AUTHENTICATION_FAILED,
+                safe_message="Simulated authentication failure.",
+            )
+        elif self.simulated_mode == "MODEL_NOT_AVAILABLE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.MODEL_NOT_AVAILABLE,
+                safe_message="Simulated configured model not found on endpoint.",
+            )
+        elif self.simulated_mode == "OVERSIZED_RESPONSE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_RESPONSE_TOO_LARGE,
+                safe_message="Simulated response exceeded maximum allowed bytes.",
+            )
+        elif self.simulated_mode == "INVALID_RESPONSE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="Simulated response was malformed or failed schema.",
+            )
+        else:
+            raise ProviderTransportError(
+                error_code=self.custom_error_code or ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                safe_message=self.custom_error_message or "Simulated provider error.",
+            )
+
 
 
 class LocalOpenAICompatibleProvider(BaseWordingProvider):
@@ -579,6 +677,99 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
                 error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
                 safe_message=f"Provider response schema validation failed: {str(e)}",
             )
+
+    async def request_provisional_assessment(
+        self,
+        request: BoundedAssessmentRequest,
+    ) -> BoundedAssessmentResponse:
+        """Executes strict structured provisional assessment using the active profile."""
+        if not self.profile.enabled:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_DISABLED,
+                safe_message="Target provider profile is currently disabled.",
+            )
+
+        normalized_base = self._validate_local_endpoint()
+        chat_url = f"{normalized_base}/chat/completions"
+
+        messages = assemble_assessment_messages(request)
+
+        payload = {
+            "model": self.profile.model_identifier or "default",
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": min(self.profile.max_output_tokens, 800),
+            "stream": False,
+        }
+
+        raw_response = await self._send_bounded_request(chat_url, payload)
+
+        choices = raw_response.get("choices")
+        if not choices or not isinstance(choices, list) or len(choices) == 0:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="OpenAI-compatible response missing 'choices' array.",
+            )
+
+        choice = choices[0]
+        finish_reason = choice.get("finish_reason")
+        message = choice.get("message", {})
+        raw_content = message.get("content")
+        raw_reasoning = message.get("reasoning_content")
+
+        content_str = (raw_content or "").strip()
+
+        if not content_str:
+            if raw_reasoning or finish_reason == "length":
+                raise ProviderTransportError(
+                    error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                    safe_message="The selected model used its response budget for reasoning and returned no final assessment.",
+                )
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                safe_message="OpenAI-compatible response contained null, empty, or whitespace message content.",
+            )
+
+        if finish_reason == "length":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_TRUNCATED,
+                safe_message="Model assessment response was truncated before completing structured output (finish_reason: length).",
+            )
+
+        clean_json_str = content_str
+        if clean_json_str.startswith("```json"):
+            clean_json_str = clean_json_str[7:]
+        elif clean_json_str.startswith("```"):
+            clean_json_str = clean_json_str[3:]
+        if clean_json_str.endswith("```"):
+            clean_json_str = clean_json_str[:-3]
+        clean_json_str = clean_json_str.strip()
+
+        try:
+            parsed_data = json.loads(clean_json_str)
+        except Exception as e:
+            logger.warning("Failed to parse JSON from provider assessment response: %s", e)
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                safe_message="Provider response content could not be parsed into valid JSON structure.",
+            )
+
+        if not isinstance(parsed_data, dict):
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                safe_message="Provider response root is not a JSON object.",
+            )
+
+        try:
+            structured_response = BoundedAssessmentResponse.model_validate(parsed_data)
+            return structured_response
+        except Exception as e:
+            logger.warning("Provider assessment response failed schema validation: %s", e)
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                safe_message=f"Provider response schema validation failed: {str(e)}",
+            )
+
 
     async def reword_question(
         self,

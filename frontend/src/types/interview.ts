@@ -65,6 +65,10 @@ export interface TemplateQuestion {
   has_wording_drift?: boolean;
   can_restore?: boolean;
   restore_unavailable_reason?: string | null;
+  ai_suggestion_text?: string | null;
+  ai_suggestion_available?: boolean;
+  ai_suggestion_review_state?: string | null;
+  safe_fallback_reason?: string | null;
   unresolved_manual_required?: boolean;
   safe_metadata?: Record<string, any>;
   ai_provenance?: {
@@ -75,6 +79,7 @@ export interface TemplateQuestion {
     rationale_code?: string;
   } | null;
 }
+
 
 export interface JobInterviewTemplateResponse {
   template_id: string;
@@ -266,6 +271,26 @@ export interface SimulationQuestionSnapshot {
   rubric?: AnchoredRubric | null;
 }
 
+export interface CriterionObservation {
+  criterion_id: string;
+  observation?: string;
+  observation_text?: string;
+  cited_segment_ids: string[];
+}
+
+export interface ProvisionalAssessmentItem {
+  question_id: string;
+  assessment_status: "PROVISIONAL" | "INSUFFICIENT_EVIDENCE" | "VALIDATION_REJECTED" | "VALIDATION_FAILED" | "MANUAL_REVIEW_REQUIRED" | string;
+  provisional_level?: number | null;
+  insufficient_evidence_reason?: string | null;
+  failure_category?: string | null;
+  criterion_observations: CriterionObservation[];
+  cited_segment_ids: string[];
+  uncertainty_codes: string[];
+  validation_report?: Record<string, any>;
+  model_invocation_metadata?: Record<string, any>;
+}
+
 export interface SimulationAttemptResponse {
   attempt_id: string;
   organization_id: string;
@@ -283,7 +308,7 @@ export interface SimulationAttemptResponse {
   plan_version: number;
   record_version: number;
   authoritative_content_hash: string;
-  lifecycle_status: SimulationLifecycleState;
+  lifecycle_status: SimulationLifecycleState | "PROVISIONALLY_ASSESSED" | string;
   guardrail_policy_version: string;
   total_questions_count: number;
   answered_questions_count: number;
@@ -291,6 +316,19 @@ export interface SimulationAttemptResponse {
   submitted_at?: string | null;
   questions: SimulationQuestionSnapshot[];
   answers: Record<string, SimulationAnswerItem>; // keyed by question_id
+  assessments?: Record<string, ProvisionalAssessmentItem>; // keyed by question_id
+}
+
+export interface SimulationAssessmentRunResponse {
+  attempt_id: string;
+  lifecycle_status: string;
+  total_assessed: number;
+  provisional_count: number;
+  insufficient_evidence_count: number;
+  validation_rejected_count: number;
+  manual_review_required_count: number;
+  assessments: Record<string, ProvisionalAssessmentItem>;
+  safe_message: string;
 }
 
 export interface SimulationAnswerSaveRequest {
@@ -314,3 +352,4 @@ export interface SimulationSubmitResponse {
   authoritative_content_hash: string;
   message: string;
 }
+

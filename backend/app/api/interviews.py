@@ -275,6 +275,11 @@ def _map_template_record_questions_to_dto(
         )
         content_h = hashlib.sha256(q.question_text.encode("utf-8")).hexdigest()
 
+        ai_sug_text = meta.get("ai_suggestion_text") or meta.get("suggested_text")
+        ai_sug_avail = bool(ai_sug_text and ai_sug_text.strip() != q.question_text.strip())
+        ai_review_state = meta.get("ai_review_state", "PENDING" if ai_sug_avail else "NONE")
+        safe_fallback = meta.get("safe_fallback_reason") or ("AI fallback — no deterministic version available." if (q.authoring_origin == AuthoringOrigin.AI_ASSISTED and not det_avail) else None)
+
         questions_dto.append(
             InterviewQuestionResponse(
                 question_id=q.question_id,
@@ -298,12 +303,17 @@ def _map_template_record_questions_to_dto(
                 has_wording_drift=drift,
                 can_restore=can_rst,
                 restore_unavailable_reason=rst_unavail_reason,
+                ai_suggestion_text=ai_sug_text,
+                ai_suggestion_available=ai_sug_avail,
+                ai_suggestion_review_state=ai_review_state,
+                safe_fallback_reason=safe_fallback,
                 content_hash=content_h,
                 safe_metadata=meta,
                 rubric=rubric_dto,
             )
         )
     return questions_dto
+
 
 
 @router.get(
@@ -1987,6 +1997,89 @@ async def submit_simulation_endpoint(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": exc.code, "message": exc.message})
     except InterviewSnapshotError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+# =========================================================================
+# Phase 3D.2: Bounded Provisional Assessment Endpoints
+# =========================================================================
+
+from app.schemas.assessment_contract import SimulationAssessmentRunResponse
+from app.services.provisional_assessment_service import run_provisional_assessment_for_attempt
+from app.services.provider_registry import get_provider_registry
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/assess",
+    response_model=SimulationAssessmentRunResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Assess Submitted Simulation Attempt",
+    description="Deterministically segments submitted answers, requests bounded provisional assessment, and validates outputs without cloud fallback.",
+)
+async def assess_simulation_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> SimulationAssessmentRunResponse:
+    actor = auth_ctx.user
+    
+    # 1. Verify Job and Recruiter Access
+    stmt_job = select(JobRequisition).where(JobRequisition.job_id == job_id)
+    job = db.execute(stmt_job).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "JOB_NOT_FOUND", "message": "Job not found."})
+    if actor.role == UserRole.RECRUITER and job.created_by_user_id != actor.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": "ACCESS_DENIED", "message": "Unauthorized."})
+
+    # 2. Verify Template
+    stmt_tmpl = select(JobInterviewTemplateRecord).where(JobInterviewTemplateRecord.template_id == template_id)
+    template_rec = db.execute(stmt_tmpl).scalar_one_or_none()
+    if not template_rec or template_rec.job_id != job_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "TEMPLATE_NOT_FOUND", "message": "Template not found."})
+
+    # 3. Verify Attempt
+    stmt_att = (
+        select(SimulationAttemptRecord)
+        .options(
+            selectinload(SimulationAttemptRecord.answers),
+            selectinload(SimulationAttemptRecord.assessments),
+        )
+        .where(
+            SimulationAttemptRecord.attempt_id == attempt_id,
+            SimulationAttemptRecord.plan_id == plan_id,
+        )
+    )
+    attempt = db.execute(stmt_att).scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "SIMULATION_NOT_FOUND", "message": "Simulation attempt not found."})
+
+    if attempt.lifecycle_status != "SUBMITTED" and attempt.lifecycle_status != "PROVISIONALLY_ASSESSED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "ATTEMPT_NOT_SUBMITTED", "message": f"Only SUBMITTED simulation attempts can be assessed (current: {attempt.lifecycle_status})."},
+        )
+
+    # 4. Resolve Active Provider
+    registry = get_provider_registry()
+    active_profile = registry.get_active_profile(organization_id=getattr(actor, "org_id", getattr(actor, "organization_id", None)))
+    provider = registry.get_provider_instance(active_profile)
+
+    try:
+        res = await run_provisional_assessment_for_attempt(
+            db=db,
+            template=template_rec,
+            attempt=attempt,
+            provider=provider,
+        )
+        return res
+    except Exception as e:
+        logger.exception("Error running provisional assessment: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "ASSESSMENT_EXECUTION_ERROR", "message": str(e)},
+        )
+
 
 
 

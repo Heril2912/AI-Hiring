@@ -96,8 +96,8 @@ describe("Phase 3C.4 Recruiter Wording Assistance & Comparison Modal Tests", () 
       expect(screen.getByText("Explain your experience designing and tuning distributed caching mechanisms.")).toBeInTheDocument();
     });
 
-    // Check origin badge
-    expect(screen.getByText("Deterministic")).toBeInTheDocument();
+    // Check origin source caption
+    expect(screen.getByText(/Deterministic blueprint baseline/i)).toBeInTheDocument();
 
     // Check Improve wording button exists and is clickable
     const improveBtn = screen.getByRole("button", { name: /improve wording for question 1/i });
@@ -172,9 +172,9 @@ describe("Phase 3C.4 Recruiter Wording Assistance & Comparison Modal Tests", () 
       expect(screen.queryByText("Review Improved Question Wording")).not.toBeInTheDocument();
     });
 
-    // Check origin updated to AI-Assisted Draft
-    expect(screen.getByText("AI-Assisted Draft")).toBeInTheDocument();
-    // Check Restore original button appears
-    expect(screen.getByRole("button", { name: /restore original/i })).toBeInTheDocument();
+    // Check origin updated to AI wording suggestion
+    expect(screen.getByText(/Source: AI wording suggestion/i)).toBeInTheDocument();
+    // Check Restore button appears
+    expect(screen.getByRole("button", { name: /restore original deterministic baseline wording/i })).toBeInTheDocument();
   });
 });

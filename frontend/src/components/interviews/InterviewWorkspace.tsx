@@ -117,6 +117,9 @@ export function InterviewWorkspace({
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [batchStatusSummary, setBatchStatusSummary] = useState<GenerateTemplateAiWordingResponse | null>(null);
 
+  // View Tab: Current Questions vs AI Suggestions
+  const [activeViewTab, setActiveViewTab] = useState<"CURRENT" | "SUGGESTIONS">("CURRENT");
+
   // Single Wording Assistance State
   const [improvingQuestionId, setImprovingQuestionId] = useState<string | null>(null);
   const [activeWordingComparison, setActiveWordingComparison] = useState<{
@@ -776,6 +779,9 @@ export function InterviewWorkspace({
   const aiReadyCount = editableQuestions.filter((q) => q.authoring_origin === "AI_ASSISTED").length;
   const editedCount = editableQuestions.filter((q) => q.authoring_origin === "RECRUITER_EDITED").length;
   const deterministicCount = editableQuestions.length - aiReadyCount - editedCount;
+  const aiSuggestionsCount = editableQuestions.filter(
+    (q) => Boolean(q.ai_suggestion_text) || q.authoring_origin === "AI_ASSISTED" || Boolean(q.ai_provenance)
+  ).length;
 
   return (
     <div className="interview-workspace-container" role="region" aria-label="Recruiter Interview Workspace">
@@ -1097,275 +1103,294 @@ export function InterviewWorkspace({
         </div>
       ) : (
         <div className="interview-plan-section mb-6">
-          <div className="plan-section-header">
-            <div>
-              <h2>Standardized Common Core Questions</h2>
-              <p className="text-sm text-muted">
-                Uniform across all applicants for this requisition. Scores are anchored to objective rubrics.
-              </p>
+          <div className="editorial-metric-strip">
+            <div className="editorial-metric-text">
+              {editableQuestions.length} questions &middot; {template.target_duration_minutes || 45} minutes
             </div>
-            <div className="flex items-center gap-2">
-              <span className="badge badge-secondary">
-                Hash: <code>{template.content_hash ? template.content_hash.substring(0, 8) : "DRAFT"}</code>
-              </span>
+            <div className="editorial-view-tabs" role="tablist" aria-label="Question authoring views">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeViewTab === "CURRENT"}
+                className={`editorial-tab-btn ${activeViewTab === "CURRENT" ? "active" : ""}`}
+                onClick={() => setActiveViewTab("CURRENT")}
+              >
+                Current questions
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeViewTab === "SUGGESTIONS"}
+                className={`editorial-tab-btn ${activeViewTab === "SUGGESTIONS" ? "active" : ""}`}
+                onClick={() => setActiveViewTab("SUGGESTIONS")}
+              >
+                AI suggestions ({aiSuggestionsCount})
+              </button>
             </div>
           </div>
 
-          {/* Question List (Redesigned Question Cards) */}
-          <div className="questions-container">
-            {editableQuestions.map((q, idx) => {
-              const isImproving = improvingQuestionId === q.question_id;
-              const hasAiProvenance = !!q.ai_provenance || q.authoring_origin === "AI_ASSISTED";
-              const isAiExpanded = expandedProvenanceQuestionId === q.question_id;
-              const isAiOrigin = q.authoring_origin === "AI_ASSISTED";
-              const isEditedOrigin = q.authoring_origin === "RECRUITER_EDITED";
-              const canRestore = (q.can_restore !== undefined
-                ? q.can_restore
-                : (Boolean(q.deterministic_source_text) && q.deterministic_source_text !== q.question_text)) && isTemplateDraft;
-              const isRestoring = isRestoringQuestionId === q.question_id;
-              const isEditing = editingQuestionId === q.question_id;
-              const isComparing = comparingQuestionId === q.question_id;
+          {/* VIEW 1: Current Questions (Editorial list) */}
+          {activeViewTab === "CURRENT" && (
+            <div className="questions-container" role="tabpanel" aria-label="Current questions">
+              {editableQuestions.map((q, idx) => {
+                const isImproving = improvingQuestionId === q.question_id;
+                const hasAiProvenance = !!q.ai_provenance || q.authoring_origin === "AI_ASSISTED";
+                const isAiExpanded = expandedProvenanceQuestionId === q.question_id;
+                const isAiOrigin = q.authoring_origin === "AI_ASSISTED";
+                const isEditedOrigin = q.authoring_origin === "RECRUITER_EDITED";
+                const canRestore = (q.can_restore !== undefined
+                  ? q.can_restore
+                  : (Boolean(q.deterministic_source_text) && q.deterministic_source_text !== q.question_text)) && isTemplateDraft;
+                const isRestoring = isRestoringQuestionId === q.question_id;
+                const isEditing = editingQuestionId === q.question_id;
 
-              const cardClass = `question-card-redesigned ${
-                isAiOrigin ? "ai-assisted-card" : isEditedOrigin ? "recruiter-edited-card" : ""
-              }`;
+                return (
+                  <div key={q.question_id} className="editorial-question-item">
+                    <div className="editorial-question-header">
+                      <div className="editorial-question-meta">
+                        <span className="font-semibold text-slate-900">Question {idx + 1}</span>
+                        <span>&middot;</span>
+                        <span>{formatCompetencyName(q.competency_name || (q as any).competency_id || (q.rubric as any)?.competency_definition)}</span>
+                        <span>&middot;</span>
+                        <span className="text-slate-500">{q.estimated_time_minutes} min</span>
+                      </div>
 
-              return (
-                <div key={q.question_id} className={cardClass}>
-                  {/* Top Bar: Question Index, Competency Title & Origin Badge */}
-                  <div className="question-card-top-bar">
-                    <div className="question-identity-group">
-                      <span className="question-order-pill">Question {idx + 1}</span>
-                      <span className="competency-title">
-                        {formatCompetencyName(q.competency_name || (q as any).competency_id || (q.rubric as any)?.competency_definition)}
-                      </span>
-                      <span className="badge badge-outline text-xs">{q.question_type}</span>
+                      {/* Reorder Buttons */}
+                      {isTemplateDraft && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => handleMoveQuestion(idx, "UP")}
+                            disabled={idx === 0}
+                            title="Move Question Up"
+                            aria-label={`Move Question ${idx + 1} Up`}
+                          >
+                            <Icon name="chevron-up" size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => handleMoveQuestion(idx, "DOWN")}
+                            disabled={idx === editableQuestions.length - 1}
+                            title="Move Question Down"
+                            aria-label={`Move Question ${idx + 1} Down`}
+                          >
+                            <Icon name="chevron-down" size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
-                      {/* Manual Question Required Warning Badge */}
-                      {q.unresolved_manual_required && (
-                        <span
-                          className="badge badge-warning text-xs font-semibold"
-                          title="No deterministic question was available and AI generation could not resolve this slot. Please enter question wording manually."
-                        >
+                    {/* Question text: Text display by default; textarea ONLY in edit mode */}
+                    {isEditing && isTemplateDraft ? (
+                      <div className="mb-3">
+                        <textarea
+                          className="question-full-textarea"
+                          rows={3}
+                          value={q.question_text}
+                          onChange={(e) => handleQuestionTextChange(idx, e.target.value)}
+                          aria-label={`Edit question ${idx + 1}`}
+                          autoFocus
+                        />
+                        <div className="flex justify-end gap-2 mt-2">
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-xs"
+                            onClick={() => setEditingQuestionId(null)}
+                          >
+                            Done Editing
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="editorial-question-text">{q.question_text}</p>
+                    )}
+
+                    {/* Source Caption */}
+                    <div className="editorial-source-caption mb-3">
+                      {q.unresolved_manual_required ? (
+                        <span className="text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                           Manual Question Required
                         </span>
-                      )}
-
-                      {/* Origin Badge */}
-                      {isAiOrigin ? (
-                        <span className="origin-badge badge-ai" title="Validated AI Draft">
-                          <Icon name="sparkles" size={12} />
-                          <span>AI-Assisted Draft</span>
-                        </span>
+                      ) : isAiOrigin ? (
+                        <span>Source: AI wording suggestion ({q.ai_provenance?.model_name || "local model"})</span>
                       ) : isEditedOrigin ? (
-                        <span className="origin-badge badge-edited" title="Edited by Recruiter">
-                          <Icon name="edit" size={12} />
-                          <span>Recruiter Edited</span>
-                        </span>
-                      ) : isTemplateApproved ? (
-                        <span className="origin-badge badge-approved" title="Approved Baseline">
-                          <Icon name="check-circle" size={12} />
-                          <span>Approved</span>
-                        </span>
+                        <span>Source: Recruiter edited</span>
                       ) : (
-                        <span className="origin-badge badge-deterministic" title="Deterministic Blueprint">
-                          <Icon name="shield" size={12} />
-                          <span>Deterministic</span>
-                        </span>
+                        <span>Source: Deterministic blueprint baseline</span>
+                      )}
+                      {q.safe_fallback_reason && (
+                        <span className="text-amber-700 font-medium ml-2">({q.safe_fallback_reason})</span>
                       )}
                     </div>
 
-                    {/* Reorder Buttons */}
-                    {isTemplateDraft && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-xs"
-                          onClick={() => handleMoveQuestion(idx, "UP")}
-                          disabled={idx === 0}
-                          title="Move Question Up"
-                          aria-label={`Move Question ${idx + 1} Up`}
-                        >
-                          <Icon name="chevron-up" size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-xs"
-                          onClick={() => handleMoveQuestion(idx, "DOWN")}
-                          disabled={idx === editableQuestions.length - 1}
-                          title="Move Question Down"
-                          aria-label={`Move Question ${idx + 1} Down`}
-                        >
-                          <Icon name="chevron-down" size={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Question Content: Full-width responsive textarea in draft mode */}
-                  {isTemplateDraft ? (
-                    <div className="mb-3">
-                      <textarea
-                        className="question-full-textarea"
-                        rows={3}
-                        value={q.question_text}
-                        onChange={(e) => handleQuestionTextChange(idx, e.target.value)}
-                        aria-label={`Question ${idx + 1} text`}
-                      />
-                    </div>
-                  ) : (
-                    <div className="question-display-body">
-                      {q.question_text}
-                    </div>
-                  )}
-
-                  {/* Original vs Current AI Draft Comparison View (if toggled) */}
-                  {isComparing && q.deterministic_source_text && (
-                    <div className="comparison-box p-3 bg-slate-50 border rounded text-xs mb-3 space-y-2">
-                      <div className="font-semibold text-slate-800 flex items-center justify-between">
-                        <span>Baseline Comparison</span>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-xs"
-                          onClick={() => setComparingQuestionId(null)}
-                        >
-                          <Icon name="x" size={12} />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="p-2 bg-white rounded border">
-                          <strong className="text-muted block mb-1">Deterministic Blueprint Baseline:</strong>
-                          <p className="text-slate-700 m-0">{q.deterministic_source_text}</p>
-                        </div>
-                        <div className="p-2 bg-blue-50 rounded border border-blue-100">
-                          <strong className="text-blue-900 block mb-1">Current Active Draft:</strong>
-                          <p className="text-blue-950 m-0">{q.question_text}</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Bottom Meta & Actions Bar */}
-                  <div className="question-bottom-meta-bar">
-                    <div className="question-meta-tags">
-                      <span><strong>Duration:</strong> {q.estimated_time_minutes} min</span>
-                      {q.permitted_probes && q.permitted_probes.length > 0 && (
-                        <span><strong>Permitted Probes:</strong> {q.permitted_probes.length}</span>
-                      )}
-                    </div>
-
-                    <div className="question-actions-cluster">
-                      {/* Edit Button */}
+                    {/* Primary actions: Edit and View rubric; More context controls */}
+                    <div className="editorial-question-actions">
                       {isTemplateDraft && !isEditing && (
                         <button
                           type="button"
                           className="btn btn-ghost btn-xs"
                           onClick={() => setEditingQuestionId(q.question_id)}
-                          title="Edit question wording directly"
                         >
-                          <Icon name="edit" size={12} />
+                          <Icon name="edit" size={13} />
                           <span>Edit</span>
                         </button>
                       )}
 
-                      {/* Compare with Original */}
-                      {q.deterministic_source_text && q.deterministic_source_text !== q.question_text && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-xs text-muted"
-                          onClick={() => setComparingQuestionId(isComparing ? null : q.question_id)}
-                          title="Compare current draft with original deterministic wording"
-                        >
-                          <Icon name="eye" size={12} />
-                          <span>{isComparing ? "Hide comparison" : "Compare original"}</span>
-                        </button>
-                      )}
-
-                      {/* Restore Deterministic Action */}
-                      {canRestore && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-xs text-muted"
-                          onClick={() => handleRestoreDeterministic(q, "COMMON_CORE")}
-                          disabled={isRestoring}
-                          title="Restore original deterministic baseline wording"
-                        >
-                          <Icon name="history" size={12} />
-                          <span>{isRestoring ? "Restoring..." : "Restore original"}</span>
-                        </button>
-                      )}
-
-                      {/* Improve Wording Action (Single Question) */}
-                      {isTemplateDraft && (
-                        <button
-                          type="button"
-                          className="btn btn-outline btn-xs btn-ai-improve"
-                          onClick={() => handleImproveWording(q, "COMMON_CORE")}
-                          disabled={isImproving || !ai_capability.ai_enabled}
-                          title={
-                            ai_capability.ai_enabled
-                              ? "Regenerate wording suggestion with local AI"
-                              : ai_capability.message || "AI assistance currently unavailable"
-                          }
-                          aria-label={`Improve wording for question ${idx + 1}`}
-                        >
-                          <Icon name="sparkles" size={12} />
-                          <span>{isImproving ? "Improving wording…" : "Improve wording"}</span>
-                        </button>
-                      )}
-
-                      {/* View Anchored Rubric */}
                       {q.rubric && (
                         <button
                           type="button"
-                          className="btn btn-link btn-xs"
+                          className="btn btn-ghost btn-xs"
                           onClick={() => setSelectedRubricQuestion(q)}
                         >
-                          <Icon name="file-text" size={12} />
-                          <span>View Rubric</span>
+                          <Icon name="file-text" size={13} />
+                          <span>View rubric</span>
                         </button>
                       )}
 
-                      {/* AI Technical Provenance Toggle */}
+                      {isTemplateDraft && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => handleImproveWording(q, "COMMON_CORE")}
+                          disabled={isImproving || !ai_capability.ai_enabled}
+                          title={`Improve wording for question ${idx + 1}`}
+                          aria-label={`Improve wording for question ${idx + 1}`}
+                        >
+                          <Icon name="sparkles" size={13} />
+                          <span>{isImproving ? "Requesting suggestion..." : "Get AI wording suggestion"}</span>
+                        </button>
+                      )}
+
+                      {canRestore && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => handleRestoreDeterministic(q, "COMMON_CORE")}
+                          disabled={isRestoring}
+                          title="Restore original deterministic baseline wording"
+                          aria-label="Restore original deterministic baseline wording"
+                        >
+                          <Icon name="history" size={13} />
+                          <span>{isRestoring ? "Restoring..." : "Restore deterministic"}</span>
+                        </button>
+                      )}
+
                       {hasAiProvenance && (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-xs text-xs text-muted"
-                          onClick={() =>
-                            setExpandedProvenanceQuestionId(isAiExpanded ? null : q.question_id)
-                          }
+                          className="btn btn-ghost btn-xs text-muted"
+                          onClick={() => setExpandedProvenanceQuestionId(isAiExpanded ? null : q.question_id)}
                           aria-expanded={isAiExpanded}
-                          aria-label="Toggle Technical Details"
-                          title="View provenance and compliance hashes"
                         >
-                          <Icon name={isAiExpanded ? "chevron-up" : "info"} size={12} />
-                          <span>{isAiExpanded ? "Hide Technical" : "Technical Details"}</span>
+                          <Icon name={isAiExpanded ? "chevron-up" : "info"} size={13} />
+                          <span>Technical details</span>
                         </button>
                       )}
                     </div>
-                  </div>
 
-                  {/* Expandable Technical Details Drawer */}
-                  {hasAiProvenance && isAiExpanded && (
-                    <div className="ai-provenance-box mt-3 p-3 bg-slate-50 border rounded text-xs space-y-1">
-                      <div className="font-semibold text-slate-800 flex items-center gap-1 mb-1">
-                        <Icon name="shield-check" size={13} />
-                        <span>AI Governance &amp; Provenance Record</span>
+                    {hasAiProvenance && isAiExpanded && (
+                      <div className="ai-provenance-box mt-3 p-3 bg-slate-50 border rounded text-xs space-y-1">
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-600">
+                          <div><strong>Engine:</strong> {q.ai_provenance?.provider_class || "LOCAL_LM_STUDIO"}</div>
+                          <div><strong>Model:</strong> {q.ai_provenance?.model_name || "qwen3-4b-instruct"}</div>
+                          <div><strong>Origin:</strong> {q.authoring_origin}</div>
+                          <div><strong>Template Schema:</strong> {q.ai_provenance?.prompt_template_version || "1.0.0"}</div>
+                          <div><strong>Hash:</strong> <code>{(q.deterministic_source_hash || q.content_hash || "").substring(0, 10) || "N/A"}</code></div>
+                        </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-600">
-                        <div><strong>Engine:</strong> {q.ai_provenance?.provider_class || "LOCAL_LM_STUDIO"}</div>
-                        <div><strong>Model:</strong> {q.ai_provenance?.model_name || "qwen3-4b-instruct"}</div>
-                        <div><strong>Origin:</strong> {q.authoring_origin}</div>
-                        <div><strong>Template Schema:</strong> {q.ai_provenance?.prompt_template_version || "1.0.0"}</div>
-                        <div><strong>Validation Result:</strong> <span className="text-success font-medium">Verified Safe</span></div>
-                        <div><strong>Deterministic Hash:</strong> <code>{(q.deterministic_source_hash || "").substring(0, 10) || "N/A"}</code></div>
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* VIEW 2: AI Suggestions (Side-by-side comparison view) */}
+          {activeViewTab === "SUGGESTIONS" && (
+            <div className="ai-suggestions-container" role="tabpanel" aria-label="AI wording suggestions">
+              {editableQuestions.filter(q => Boolean(q.ai_suggestion_text || q.authoring_origin === "AI_ASSISTED" || q.ai_provenance)).length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 border rounded-md text-slate-600">
+                  <Icon name="sparkles" size={24} className="mx-auto mb-2 text-slate-400" />
+                  <p className="font-medium text-slate-800">No pending AI wording suggestions.</p>
+                  <p className="text-xs text-slate-500 mt-1">Use "Generate interview wording with AI" or click "Get AI wording suggestion" on any question to produce reviewable alternatives.</p>
                 </div>
-              );
-            })}
-          </div>
+              ) : (
+                editableQuestions
+                  .filter(q => Boolean(q.ai_suggestion_text || q.authoring_origin === "AI_ASSISTED" || q.ai_provenance))
+                  .map((q, idx) => {
+                    const currentText = q.question_text;
+                    const detText = q.deterministic_source_text || "AI fallback — no deterministic version available.";
+                    const sugText = q.ai_suggestion_text || (q.authoring_origin === "AI_ASSISTED" ? q.question_text : null);
+
+                    return (
+                      <div key={q.question_id} className="ai-suggestion-comparison-row">
+                        <div className="ai-suggestion-col">
+                          <span className="ai-suggestion-col-title">Current / Deterministic Baseline</span>
+                          <div className="ai-suggestion-col-content">
+                            {q.deterministic_source_available ? detText : (
+                              <span className="text-amber-800 italic">AI fallback — no deterministic version available.</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="ai-suggestion-col">
+                          <span className="ai-suggestion-col-title">AI Wording Suggestion</span>
+                          <div className="ai-suggestion-col-content">
+                            {sugText || <span className="text-slate-400 italic">No alternative suggestion available.</span>}
+                          </div>
+                        </div>
+
+                        <div className="ai-suggestion-actions">
+                          {sugText && isTemplateDraft && (
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-xs"
+                              onClick={() => {
+                                const qIdx = editableQuestions.findIndex(x => x.question_id === q.question_id);
+                                if (qIdx !== -1) {
+                                  handleQuestionTextChange(qIdx, sugText);
+                                  // mark authoring origin AI_ASSISTED
+                                  const updated = [...editableQuestions];
+                                  updated[qIdx] = { ...updated[qIdx], question_text: sugText, authoring_origin: "AI_ASSISTED" };
+                                  setEditableQuestions(updated);
+                                  setSuccessMessage("Applied AI wording suggestion.");
+                                }
+                              }}
+                            >
+                              <Icon name="check" size={12} />
+                              <span>Use AI wording</span>
+                            </button>
+                          )}
+
+                          {isTemplateDraft && (
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-xs"
+                              onClick={() => {
+                                if (q.deterministic_source_text) {
+                                  const qIdx = editableQuestions.findIndex(x => x.question_id === q.question_id);
+                                  if (qIdx !== -1) {
+                                    handleQuestionTextChange(qIdx, q.deterministic_source_text);
+                                    const updated = [...editableQuestions];
+                                    updated[qIdx] = { ...updated[qIdx], question_text: q.deterministic_source_text, authoring_origin: "DETERMINISTIC" };
+                                    setEditableQuestions(updated);
+                                    setSuccessMessage("Retained deterministic baseline wording.");
+                                  }
+                                }
+                              }}
+                            >
+                              <span>Keep current wording</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          )}
 
           {/* Sticky Action Bar for Draft & Validation */}
           <div className="sticky-action-bar flex justify-between items-center">
@@ -1425,6 +1450,7 @@ export function InterviewWorkspace({
           </div>
         </div>
       )}
+
 
       {/* Candidate Supplemental Section or Job Template Mode Notice */}
       {template && (resumeId ? (
