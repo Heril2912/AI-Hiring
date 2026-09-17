@@ -105,6 +105,21 @@ def _serialize_attempt_response(
         for ans in attempt.answers
     }
 
+    assessments_dict = {}
+    if hasattr(attempt, "assessments") and attempt.assessments:
+        for ass in attempt.assessments:
+            assessments_dict[str(ass.question_id)] = {
+                "question_id": str(ass.question_id),
+                "assessment_status": ass.assessment_status,
+                "provisional_level": ass.provisional_level,
+                "insufficient_evidence_reason": ass.insufficient_evidence_reason,
+                "criterion_observations": ass.criterion_observations or [],
+                "cited_segment_ids": ass.cited_segment_ids or [],
+                "uncertainty_codes": ass.uncertainty_codes or [],
+                "validation_report": ass.validation_report or {},
+                "model_invocation_metadata": ass.model_invocation_metadata or {},
+            }
+
     return SimulationAttemptResponse(
         attempt_id=attempt.attempt_id,
         organization_id=attempt.organization_id,
@@ -130,7 +145,9 @@ def _serialize_attempt_response(
         submitted_at=attempt.submitted_at.isoformat() if attempt.submitted_at else None,
         questions=questions_list,
         answers=answers_dict,
+        assessments=assessments_dict,
     )
+
 
 
 def _resolve_candidate_name(db: Session, candidate_id: Optional[UUID], profile: Optional[CandidateProfileRecord]) -> Optional[str]:
@@ -218,13 +235,17 @@ def start_or_resume_simulation_attempt(
     # 4. Check for existing active or submitted attempt
     stmt_existing = (
         select(SimulationAttemptRecord)
-        .options(selectinload(SimulationAttemptRecord.answers))
+        .options(
+            selectinload(SimulationAttemptRecord.answers),
+            selectinload(SimulationAttemptRecord.assessments),
+        )
         .where(
             SimulationAttemptRecord.plan_id == plan_id,
             SimulationAttemptRecord.recruiter_user_id == actor.user_id,
         )
         .order_by(SimulationAttemptRecord.created_at.desc())
     )
+
     existing_attempt = db.execute(stmt_existing).scalars().first()
     if existing_attempt:
         cand_name = _resolve_candidate_name(db, plan.candidate_id, plan.profile)
@@ -393,12 +414,16 @@ def get_simulation_attempt(
 
     stmt = (
         select(SimulationAttemptRecord)
-        .options(selectinload(SimulationAttemptRecord.answers))
+        .options(
+            selectinload(SimulationAttemptRecord.answers),
+            selectinload(SimulationAttemptRecord.assessments),
+        )
         .where(
             SimulationAttemptRecord.plan_id == plan_id,
             SimulationAttemptRecord.job_id == job_id,
         )
     )
+
     if attempt_id:
         stmt = stmt.where(SimulationAttemptRecord.attempt_id == attempt_id)
     stmt = stmt.order_by(SimulationAttemptRecord.created_at.desc())

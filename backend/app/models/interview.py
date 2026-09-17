@@ -1010,7 +1010,7 @@ class SimulationAttemptRecord(Base):
     __tablename__ = "simulation_attempts"
     __table_args__ = (
         CheckConstraint(
-            "lifecycle_status IN ('NOT_STARTED', 'IN_PROGRESS', 'SUBMITTED')",
+            "lifecycle_status IN ('NOT_STARTED', 'IN_PROGRESS', 'SUBMITTED', 'PROVISIONALLY_ASSESSED', 'HUMAN_REVIEWED', 'FINALIZED')",
             name="ck_simulation_attempts_lifecycle_status",
         ),
         Index("ix_simulation_attempts_org_id", "organization_id"),
@@ -1139,6 +1139,11 @@ class SimulationAttemptRecord(Base):
         cascade="all, delete-orphan",
         order_by="SimulationAnswerRecord.display_order",
     )
+    assessments: Mapped[List["SimulationQuestionAssessmentRecord"]] = relationship(
+        "SimulationQuestionAssessmentRecord",
+        back_populates="attempt",
+        cascade="all, delete-orphan",
+    )
 
 
 class SimulationAnswerRecord(Base):
@@ -1223,5 +1228,193 @@ class SimulationAnswerRecord(Base):
     attempt: Mapped["SimulationAttemptRecord"] = relationship(
         "SimulationAttemptRecord",
         back_populates="answers",
+    )
+    segments: Mapped[List["SimulationAnswerSegmentRecord"]] = relationship(
+        "SimulationAnswerSegmentRecord",
+        back_populates="answer",
+        cascade="all, delete-orphan",
+        order_by="SimulationAnswerSegmentRecord.sequence_order",
+    )
+    assessment: Mapped[Optional["SimulationQuestionAssessmentRecord"]] = relationship(
+        "SimulationQuestionAssessmentRecord",
+        back_populates="answer",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class SimulationAnswerSegmentRecord(Base):
+    """Deterministic, immutable text segment extracted from a submitted simulation answer."""
+
+    __tablename__ = "simulation_answer_segments"
+    __table_args__ = (
+        UniqueConstraint(
+            "answer_id",
+            "sequence_order",
+            name="uq_sim_segments_answer_seq",
+        ),
+        Index("ix_sim_segments_answer_id", "answer_id"),
+        Index("ix_sim_segments_attempt_id", "attempt_id"),
+        Index("ix_sim_segments_question_id", "question_id"),
+    )
+
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+    )
+    answer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_answers.answer_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    sequence_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    start_char: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    end_char: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    segment_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    segmentation_version: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="1.0.0",
+        server_default=text("'1.0.0'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    answer: Mapped["SimulationAnswerRecord"] = relationship(
+        "SimulationAnswerRecord",
+        back_populates="segments",
+    )
+
+
+class SimulationQuestionAssessmentRecord(Base):
+    """Authoritative persistent record for provisional AI assessment and validation result."""
+
+    __tablename__ = "simulation_question_assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id",
+            "question_id",
+            name="uq_sim_assessments_attempt_question",
+        ),
+        Index("ix_sim_assessments_attempt_id", "attempt_id"),
+        Index("ix_sim_assessments_answer_id", "answer_id"),
+        Index("ix_sim_assessments_question_id", "question_id"),
+        Index("ix_sim_assessments_status", "assessment_status"),
+    )
+
+    assessment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    answer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_answers.answer_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    rubric_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    rubric_version: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    assessment_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="PROVISIONAL",
+    )
+    provisional_level: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    insufficient_evidence_reason: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    criterion_observations: Mapped[List[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+    )
+    cited_segment_ids: Mapped[List[str]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+    )
+    uncertainty_codes: Mapped[List[str]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+    )
+    validation_report: Mapped[Dict[str, Any]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=dict,
+    )
+    model_invocation_metadata: Mapped[Dict[str, Any]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=dict,
+    )
+    guardrail_policy_version: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="1.0.0",
+        server_default=text("'1.0.0'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    attempt: Mapped["SimulationAttemptRecord"] = relationship(
+        "SimulationAttemptRecord",
+        back_populates="assessments",
+    )
+    answer: Mapped["SimulationAnswerRecord"] = relationship(
+        "SimulationAnswerRecord",
+        back_populates="assessment",
     )
 

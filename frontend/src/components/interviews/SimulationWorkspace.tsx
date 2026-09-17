@@ -47,6 +47,11 @@ export function SimulationWorkspace({
   // Paused session state
   const [isPaused, setIsPaused] = useState<boolean>(false);
 
+  // Phase 3D.2: Provisional AI Assessment State
+  const [isAssessing, setIsAssessing] = useState<boolean>(false);
+  const [assessmentError, setAssessmentError] = useState<string | null>(null);
+  const [assessmentSuccess, setAssessmentSuccess] = useState<string | null>(null);
+
   // Debounce ref for autosave
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dirtyQuestionIdRef = useRef<string | null>(null);
@@ -249,6 +254,49 @@ export function SimulationWorkspace({
     }
   };
 
+  // Phase 3D.2: Run Bounded Provisional Assessment
+  const handleRunProvisionalAssessment = async () => {
+    if (!attempt || !isSubmitted) return;
+
+    try {
+      setIsAssessing(true);
+      setAssessmentError(null);
+      setAssessmentSuccess(null);
+
+      const endpoint = attempt.template_id
+        ? `/api/v1/jobs/${jobId}/interview-templates/${attempt.template_id}/candidate-plans/${planId}/simulation/${attempt.attempt_id}/assess`
+        : `/api/v1/interviews/simulations/${attempt.attempt_id}/assess`;
+
+      const res = await apiFetch<any>(endpoint, {
+        method: "POST",
+      });
+
+      // Update attempt with new assessments and lifecycle status
+      setAttempt((prev) => {
+        if (!prev) return null;
+        const newAssessments: Record<string, any> = { ...(prev.assessments || {}) };
+        if (res.items && Array.isArray(res.items)) {
+          res.items.forEach((item: any) => {
+            newAssessments[item.question_id] = item;
+          });
+        }
+        return {
+          ...prev,
+          lifecycle_status: (res.lifecycle_status || "PROVISIONALLY_ASSESSED") as any,
+          assessments: newAssessments,
+        };
+      });
+
+      setAssessmentSuccess(
+        `Provisional AI assessment complete. ${res.successful_count || 0} evaluated, ${res.insufficient_evidence_count || 0} insufficient evidence, ${res.validation_failure_count || 0} manual review required.`
+      );
+    } catch (err: any) {
+      setAssessmentError(err?.message || "Failed to complete provisional AI assessment.");
+    } finally {
+      setIsAssessing(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="simulation-loading p-12 text-center" role="status" aria-live="polite">
@@ -332,7 +380,7 @@ export function SimulationWorkspace({
             </button>
           )}
 
-          {/* Submit Action */}
+          {/* Submit / Assess Action */}
           {!isSubmitted ? (
             <button
               type="button"
@@ -346,13 +394,38 @@ export function SimulationWorkspace({
               <span>Submit &amp; Lock Simulation</span>
             </button>
           ) : (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-800 rounded text-xs font-semibold border border-slate-300">
-              <Icon name="lock" size={14} />
-              <span>Simulation Submitted &amp; Locked</span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-800 rounded text-xs font-semibold border border-slate-300">
+                <Icon name="lock" size={14} />
+                <span>Simulation Submitted &amp; Locked</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm flex items-center gap-1.5"
+                onClick={handleRunProvisionalAssessment}
+                disabled={isAssessing}
+              >
+                <Icon name="sparkles" size={14} />
+                <span>{isAssessing ? "Evaluating with AI…" : "Assess submitted answers"}</span>
+              </button>
             </div>
           )}
         </div>
       </div>
+
+      {/* Assessment Feedback Alerts */}
+      {assessmentError && (
+        <div className="feedback-box error p-3 bg-slate-100 border border-slate-300 rounded text-xs text-slate-800 flex items-center gap-2" role="alert">
+          <Icon name="alert-triangle" size={16} />
+          <span>{assessmentError}</span>
+        </div>
+      )}
+      {assessmentSuccess && (
+        <div className="feedback-box success p-3 bg-slate-50 border border-slate-300 rounded text-xs text-slate-800 flex items-center gap-2" role="status">
+          <Icon name="check-circle" size={16} />
+          <span>{assessmentSuccess}</span>
+        </div>
+      )}
 
       {/* Paused Banner */}
       {isPaused && (
@@ -529,6 +602,100 @@ export function SimulationWorkspace({
               rows={8}
             />
           </div>
+
+          {/* Phase 3D.2: Provisional AI Assessment Block */}
+          {isSubmitted && (
+            <div className="provisional-assessment-container border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Icon name="sparkles" size={16} className="text-slate-700" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 m-0">
+                    Provisional AI Assessment
+                  </h3>
+                </div>
+                {attempt.assessments && attempt.assessments[activeQuestion.question_id] ? (
+                  <span
+                    className={`badge text-xs font-semibold ${
+                      attempt.assessments[activeQuestion.question_id].assessment_status === "PROVISIONAL"
+                        ? "badge-success"
+                        : attempt.assessments[activeQuestion.question_id].assessment_status === "INSUFFICIENT_EVIDENCE"
+                        ? "badge-warning"
+                        : "badge-outline text-slate-600"
+                    }`}
+                  >
+                    {attempt.assessments[activeQuestion.question_id].assessment_status === "PROVISIONAL"
+                      ? `Level: ${attempt.assessments[activeQuestion.question_id].provisional_level}`
+                      : attempt.assessments[activeQuestion.question_id].assessment_status === "INSUFFICIENT_EVIDENCE"
+                      ? "Insufficient Evidence"
+                      : "Manual Review Required"}
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-500">Not assessed yet</span>
+                )}
+              </div>
+
+              {attempt.assessments && attempt.assessments[activeQuestion.question_id] ? (
+                (() => {
+                  const qAssess = attempt.assessments[activeQuestion.question_id];
+                  return (
+                    <div className="space-y-3 pt-2 text-xs text-slate-700">
+                      {qAssess.assessment_status === "PROVISIONAL" && (
+                        <>
+                          {/* Criterion observations */}
+                          {qAssess.criterion_observations && qAssess.criterion_observations.length > 0 && (
+                            <div className="space-y-2">
+                              <span className="font-semibold text-slate-800 block">Criterion Observations:</span>
+                              <div className="space-y-1.5">
+                                {qAssess.criterion_observations.map((obs: any, oIdx: number) => (
+                                  <div key={oIdx} className="p-2.5 bg-white border border-slate-200 rounded text-slate-800">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="font-semibold text-slate-900">
+                                        {formatCompetencyName(obs.criterion_id)}
+                                      </span>
+                                      {obs.cited_segment_ids && obs.cited_segment_ids.length > 0 && (
+                                        <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded font-mono">
+                                          Citations: {obs.cited_segment_ids.length}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="m-0 leading-relaxed text-slate-700">{obs.observation_text}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Uncertainty codes */}
+                          {qAssess.uncertainty_codes && qAssess.uncertainty_codes.length > 0 && (
+                            <div className="flex items-center gap-1.5 text-slate-500">
+                              <span className="font-semibold">Uncertainty Codes:</span>
+                              <span className="font-mono">{qAssess.uncertainty_codes.join(", ")}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {qAssess.assessment_status === "INSUFFICIENT_EVIDENCE" && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded text-amber-900 leading-relaxed">
+                          <strong>Insufficient Evidence:</strong> {qAssess.failure_category || "Empty or unusable answer provided. Score not assigned."}
+                        </div>
+                      )}
+
+                      {qAssess.assessment_status === "VALIDATION_REJECTED" && (
+                        <div className="p-3 bg-slate-100 border border-slate-300 rounded text-slate-800 leading-relaxed">
+                          <strong>Manual Review Preserved:</strong> Model response did not satisfy safety bounds ({qAssess.failure_category || "Validation check failed"}).
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="text-xs text-slate-600 leading-relaxed pt-1">
+                  Click &ldquo;Assess submitted answers&rdquo; in the top bar to run bounded provisional assessment on submitted answers.
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Bottom Navigation Controls */}
           <div className="flex items-center justify-between pt-4 border-t border-slate-100">

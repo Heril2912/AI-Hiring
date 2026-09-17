@@ -57,8 +57,13 @@ class InterviewQuestionResponse(FrozenSchema):
     has_wording_drift: bool = False
     can_restore: bool = False
     restore_unavailable_reason: Optional[str] = None
+    ai_suggestion_text: Optional[str] = None
+    ai_suggestion_available: bool = False
+    ai_suggestion_review_state: Optional[str] = None
+    safe_fallback_reason: Optional[str] = None
     safe_metadata: Dict[str, Any] = Field(default_factory=dict)
     rubric: Optional[InterviewRubricResponse] = None
+
 
 
 class RequirementClassificationResponse(FrozenSchema):
@@ -516,6 +521,8 @@ class SimulationAttemptResponse(FrozenSchema):
     submitted_at: Optional[str] = None
     questions: List[SimulationQuestionSnapshotResponse]
     answers: Dict[str, SimulationAnswerItemResponse]  # keyed by question_id string
+    assessments: Dict[str, Any] = Field(default_factory=dict)  # keyed by question_id string (ProvisionalAssessmentItemResponse dicts)
+
 
 
 class SimulationAnswerSaveRequest(FrozenSchema):

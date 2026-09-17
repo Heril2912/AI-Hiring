@@ -107,8 +107,11 @@ describe("Phase 3B.4 Interview Workspace Lifecycle & Review Workflow", () => {
       expect(screen.getByText("Interview Plan: Jordan Lee")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Standardized Common Core Questions")).toBeInTheDocument();
     expect(screen.getByText("Distributed Systems")).toBeInTheDocument();
+
+    // Click Edit to enter inline edit mode
+    const editBtn = screen.getByRole("button", { name: /^Edit$/i });
+    fireEvent.click(editBtn);
 
     // Edit textarea
     const textarea = screen.getByDisplayValue("Describe how you design distributed state synchronization.");
