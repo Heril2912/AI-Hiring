@@ -34,6 +34,7 @@ export interface AnchoredRubric {
 
 export interface TemplateQuestion {
   question_id: string;
+  question_version?: number;
   layer: InterviewLayer;
   question_type: QuestionType;
   competency_name: string;
@@ -47,6 +48,17 @@ export interface TemplateQuestion {
   source_gap_ids?: string[];
   source_match_level?: string | null;
   included_in_common_score?: boolean;
+  content_hash?: string | null;
+  deterministic_source_text?: string | null;
+  deterministic_source_hash?: string | null;
+  safe_metadata?: Record<string, any>;
+  ai_provenance?: {
+    provider_class?: string;
+    model_name?: string;
+    applied_at?: string;
+    prompt_template_version?: string;
+    rationale_code?: string;
+  } | null;
 }
 
 export interface JobInterviewTemplateResponse {
@@ -128,3 +140,73 @@ export interface VersionDiffResponse {
   question_diffs: QuestionDiffItem[];
   summary: string;
 }
+
+// =========================================================================
+// Phase 3C: Wording Assistance & Provenance Types
+// =========================================================================
+
+export type WordingRationaleCode =
+  | "CLARITY_IMPROVEMENT"
+  | "CONCISENESS"
+  | "PROFESSIONAL_TONE"
+  | "STRUCTURE_POLISH"
+  | "NEUTRAL_PHRASING";
+
+export interface StructuredWordingVariant {
+  variant_text: string;
+  rationale_code?: WordingRationaleCode | null;
+  referenced_identifiers: string[];
+}
+
+export interface CandidateWordingResult {
+  source_question_id: string;
+  source_question_version: number;
+  operation: string;
+  request_schema_version: string;
+  prompt_template_version: string;
+  deterministic_question_text: string;
+  proposed_variants: StructuredWordingVariant[];
+  allowed_references_checked: boolean;
+  is_validated: boolean;
+  validation_codes: string[];
+  rejection_reasons: string[];
+  authoring_origin: AuthoringOrigin;
+  provider_fallback_used: boolean;
+  provider_error_code?: string | null;
+  safe_error_message?: string | null;
+}
+
+export interface QuestionActionResponse {
+  question_id: string;
+  question_version: number;
+  question_text: string;
+  authoring_origin: AuthoringOrigin;
+  validation_state: string;
+  deterministic_source_text?: string | null;
+  safe_metadata: Record<string, any>;
+}
+
+export interface QuestionBatchWordingResult {
+  question_id: string;
+  status: "AI_READY" | "DETERMINISTIC_FALLBACK" | "FAILED_RETRYABLE";
+  authoring_origin: AuthoringOrigin;
+  question_text: string;
+  deterministic_question_text: string;
+  safe_message?: string | null;
+}
+
+export interface GenerateTemplateAiWordingResponse {
+  template_id: string;
+  template_version: number;
+  lifecycle_status: InterviewLifecycleState;
+  total_questions: number;
+  ai_generated_count: number;
+  ai_ready_count?: number;
+  fallback_count: number;
+  failed_count: number;
+  status: "COMPLETED" | "PARTIALLY_COMPLETED" | "FAILED" | "CANCELLED" | string;
+  results: QuestionBatchWordingResult[];
+  safe_message?: string;
+  message?: string;
+}
+

@@ -21,6 +21,7 @@ Rules & Guarantees:
 - Emits a Phase3AuditEvent containing only safe operational hashes, sizes, latency, and codes (no prompts, secrets, or PII).
 """
 
+from datetime import datetime, timezone
 import hashlib
 import logging
 import time
@@ -52,6 +53,7 @@ from app.schemas.phase3_enums import (
     ProviderOperation,
     ProviderType,
     ValidationErrorCode,
+    ValidationState,
 )
 from app.schemas.provider_profile import ProviderProfile
 from app.schemas.safety_policy import (
@@ -243,6 +245,26 @@ async def request_question_wording_assistance(
     # 1. Authoritatively load question, verify relationships, and verify Recruiter access
     question, job, template, plan, siblings = _load_authoritative_question(question_id=question_id, db=db)
     _verify_recruiter_access(actor=actor, job=job)
+
+    # 1b. Validate optimistic concurrency if client passed version or source hash
+    if request_dto.expected_question_version is not None and request_dto.expected_question_version != question.question_version:
+        raise QuestionWordingError(
+            code="STALE_QUESTION_VERSION",
+            message=f"Question version conflict: expected version {request_dto.expected_question_version}, but current version is {question.question_version}.",
+            status_code=409,
+        )
+
+    metadata = question.safe_metadata or {}
+    expected_det_hash = metadata.get("deterministic_source_hash")
+    if not expected_det_hash and question.question_text:
+        expected_det_hash = hashlib.sha256(question.question_text.encode("utf-8")).hexdigest()
+
+    if request_dto.source_content_hash is not None and expected_det_hash and request_dto.source_content_hash != expected_det_hash:
+        raise QuestionWordingError(
+            code="STALE_SOURCE_HASH",
+            message="Deterministic source text hash mismatch. Question has changed since requested.",
+            status_code=409,
+        )
 
     # 2. Extract authoritative server-owned fields
     competency_label = None
@@ -457,3 +479,381 @@ async def request_question_wording_assistance(
             provider_error_code=e.error_code.value if hasattr(e.error_code, "value") else str(e.error_code),
             safe_error_message=e.safe_message,
         )
+
+
+def apply_wording_suggestion(
+    actor: UserRecord,
+    question_id: UUID,
+    request: "ApplyWordingSuggestionRequest",
+    db: Session,
+) -> "QuestionActionResponse":
+    """Applies a validated AI-assisted suggestion to a draft question.
+    
+    Invariants:
+    - Only authorized Recruiter for assigned job.
+    - Question must be in DRAFT template or candidate plan.
+    - Optimistic concurrency: expected_question_version must match current question_version.
+    - Preserves deterministic source text in safe_metadata.
+    - Marks authoring_origin as AI_ASSISTED.
+    - Invalidates previous validation (resets to PENDING, template to DRAFT).
+    - Preserves immutable approved versions.
+    """
+    from datetime import datetime, timezone
+    from app.schemas.interview_api import QuestionActionResponse
+
+    question, job, template, plan, _ = _load_authoritative_question(question_id=question_id, db=db)
+    _verify_recruiter_access(actor=actor, job=job)
+
+    # Optimistic concurrency check
+    if request.expected_question_version != question.question_version:
+        raise QuestionWordingError(
+            code="STALE_QUESTION_VERSION",
+            message=f"Question version mismatch: expected {request.expected_question_version}, but current version is {question.question_version}.",
+            status_code=409,
+        )
+
+    # Initialize metadata
+    metadata = dict(question.safe_metadata or {})
+    if "deterministic_source_text" not in metadata:
+        metadata["deterministic_source_text"] = question.question_text
+        metadata["deterministic_source_hash"] = hashlib.sha256(question.question_text.encode("utf-8")).hexdigest()
+
+    # Verify expected source hash if provided
+    if request.expected_source_hash and metadata.get("deterministic_source_hash") != request.expected_source_hash:
+        raise QuestionWordingError(
+            code="STALE_SOURCE_HASH",
+            message="Deterministic source text hash mismatch.",
+            status_code=409,
+        )
+
+    # Store provenance
+    metadata["ai_provenance"] = {
+        "applied_at": datetime.now(timezone.utc).isoformat(),
+        "applied_by_user_id": str(actor.user_id),
+        "rationale_code": request.rationale_code,
+    }
+
+    # Apply wording
+    question.question_text = request.suggested_text.strip()
+    question.authoring_origin = AuthoringOrigin.AI_ASSISTED
+    question.question_version += 1
+    question.validation_state = ValidationState.PENDING
+    question.safe_metadata = metadata
+
+    # Invalidate parent template/plan validation if needed
+    if template and template.lifecycle_status == PlanLifecycle.VALIDATED:
+        template.lifecycle_status = PlanLifecycle.DRAFT
+    if plan and plan.lifecycle_status == PlanLifecycle.VALIDATED:
+        plan.lifecycle_status = PlanLifecycle.DRAFT
+
+    org_id = template.organization_id if template else (plan.organization_id if plan else None)
+    Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=org_id,
+        event_type="QUESTION_WORDING_APPLIED",
+        resource_type="interview_question",
+        resource_id=str(question.question_id),
+        resource_version=question.question_version,
+        policy_version=SAFETY_POLICY_VERSION,
+        policy_hash=SAFETY_POLICY_HASH,
+        retention_class=AuditRetentionClass.MODEL_PROVENANCE,
+        result_code="SUCCESS",
+        safe_metadata={
+            "question_version": question.question_version,
+            "authoring_origin": AuthoringOrigin.AI_ASSISTED.value,
+            "rationale_code": request.rationale_code,
+        },
+    )
+    db.commit()
+
+    return QuestionActionResponse(
+        question_id=question.question_id,
+        question_version=question.question_version,
+        question_text=question.question_text,
+        authoring_origin=question.authoring_origin,
+        validation_state=question.validation_state,
+        deterministic_source_text=metadata.get("deterministic_source_text"),
+        safe_metadata=question.safe_metadata,
+    )
+
+
+def restore_deterministic_wording(
+    actor: UserRecord,
+    question_id: UUID,
+    request: "RestoreDeterministicWordingRequest",
+    db: Session,
+) -> "QuestionActionResponse":
+    """Restores the stored deterministic wording on a question.
+    
+    Invariants:
+    - Only authorized Recruiter for assigned job.
+    - Question must be in DRAFT template or candidate plan.
+    - Optimistic concurrency: expected_question_version must match current question_version.
+    - Sets authoring_origin back to DETERMINISTIC.
+    - Invalidates previous validation.
+    """
+    from app.schemas.interview_api import QuestionActionResponse
+
+    question, job, template, plan, _ = _load_authoritative_question(question_id=question_id, db=db)
+    _verify_recruiter_access(actor=actor, job=job)
+
+    # Optimistic concurrency check
+    if request.expected_question_version != question.question_version:
+        raise QuestionWordingError(
+            code="STALE_QUESTION_VERSION",
+            message=f"Question version mismatch: expected {request.expected_question_version}, but current version is {question.question_version}.",
+            status_code=409,
+        )
+
+    metadata = dict(question.safe_metadata or {})
+    det_text = metadata.get("deterministic_source_text") or question.question_text
+
+    question.question_text = det_text
+    question.authoring_origin = AuthoringOrigin.DETERMINISTIC
+    question.question_version += 1
+    question.validation_state = ValidationState.PENDING
+    question.safe_metadata = metadata
+
+    if template and template.lifecycle_status == PlanLifecycle.VALIDATED:
+        template.lifecycle_status = PlanLifecycle.DRAFT
+    if plan and plan.lifecycle_status == PlanLifecycle.VALIDATED:
+        plan.lifecycle_status = PlanLifecycle.DRAFT
+
+    org_id = template.organization_id if template else (plan.organization_id if plan else None)
+    Phase3AuditEvent(
+        event_id=uuid.uuid4(),
+        actor_user_id=actor.user_id,
+        organization_id=org_id,
+        event_type="QUESTION_WORDING_RESTORED",
+        resource_type="interview_question",
+        resource_id=str(question.question_id),
+        resource_version=question.question_version,
+        policy_version=SAFETY_POLICY_VERSION,
+        policy_hash=SAFETY_POLICY_HASH,
+        retention_class=AuditRetentionClass.OPERATIONAL_TRACE,
+        result_code="SUCCESS",
+        safe_metadata={
+            "question_version": question.question_version,
+            "authoring_origin": AuthoringOrigin.DETERMINISTIC.value,
+        },
+    )
+    db.commit()
+
+    return QuestionActionResponse(
+        question_id=question.question_id,
+        question_version=question.question_version,
+        question_text=question.question_text,
+        authoring_origin=question.authoring_origin,
+        validation_state=question.validation_state,
+        deterministic_source_text=metadata.get("deterministic_source_text"),
+        safe_metadata=question.safe_metadata,
+    )
+
+
+async def generate_template_ai_wording(
+    actor: UserRecord,
+    template_id: UUID,
+    request: "GenerateTemplateAiWordingRequest",
+    db: Session,
+    provider_registry: Optional[ProviderRegistry] = None,
+    custom_provider: Optional[BaseWordingProvider] = None,
+) -> "GenerateTemplateAiWordingResponse":
+    """Sequentially generates and validates AI wording for all eligible questions in a DRAFT template.
+    
+    Invariants & Guarantees:
+    - Only authorized Recruiter for assigned job.
+    - Template must be in DRAFT lifecycle state.
+    - Template version concurrency check.
+    - Sequentially processes each question (local concurrency 1).
+    - Validates each variant with Phase 3C.3 semantic validation.
+    - Persists valid AI draft on each question, retaining deterministic baseline and provenance.
+    - One question failure does not fail the entire batch.
+    - Emits safe Phase3AuditEvent records.
+    """
+    from app.schemas.interview_api import (
+        GenerateTemplateAiWordingRequest,
+        GenerateTemplateAiWordingResponse,
+        QuestionBatchWordingResult,
+    )
+
+    stmt = (
+        select(JobInterviewTemplateRecord)
+        .options(
+            selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(JobInterviewTemplateRecord.questions).selectinload(InterviewQuestionRecord.rubric),
+        )
+        .where(JobInterviewTemplateRecord.template_id == template_id)
+    )
+    template = db.execute(stmt).scalar_one_or_none()
+    if not template:
+        raise QuestionNotFoundError(f"Interview template '{template_id}' not found.")
+
+    if template.lifecycle_status != PlanLifecycle.DRAFT:
+        raise QuestionNotDraftError(
+            f"Template '{template_id}' is in status '{template.lifecycle_status.value}'. Only DRAFT templates can generate AI wording."
+        )
+
+    _verify_recruiter_access(actor=actor, job=template.requisition)
+
+    if request.expected_template_version != template.template_version:
+        raise QuestionWordingError(
+            code="STALE_TEMPLATE_VERSION",
+            message=f"Template version mismatch: expected {request.expected_template_version}, current is {template.template_version}.",
+            status_code=409,
+        )
+
+    questions = sorted(template.questions or [], key=lambda q: q.display_order)
+    results: List[QuestionBatchWordingResult] = []
+    ai_count = 0
+    fallback_count = 0
+    failed_count = 0
+
+    reg = provider_registry or get_provider_registry()
+
+    provider_wide_failure_detected = False
+    provider_wide_error_message: Optional[str] = None
+
+    for idx, q in enumerate(questions):
+        if provider_wide_failure_detected:
+            # Retain deterministic wording for remaining questions without calling provider
+            fallback_count += 1
+            results.append(
+                QuestionBatchWordingResult(
+                    question_id=q.question_id,
+                    display_order=q.display_order,
+                    status="DETERMINISTIC_FALLBACK",
+                    authoring_origin=q.authoring_origin,
+                    question_text=q.question_text,
+                    validation_state=q.validation_state,
+                    error_message=provider_wide_error_message or "Deterministic fallback retained due to provider incompatibility.",
+                )
+            )
+            continue
+
+        # Request wording assistance for this question
+        wording_req = RecruiterWordingAssistRequest(
+            expected_question_version=q.question_version,
+            source_content_hash=None,
+            max_variants=1,
+            target_tone="PROFESSIONAL",
+        )
+        try:
+            cand_result = await request_question_wording_assistance(
+                actor=actor,
+                question_id=q.question_id,
+                request_dto=wording_req,
+                db=db,
+                provider_registry=reg,
+                custom_provider=custom_provider,
+            )
+
+            if cand_result.is_validated and cand_result.proposed_variants:
+                chosen_variant = cand_result.proposed_variants[0]
+                # Apply suggested text
+                metadata = dict(q.safe_metadata or {})
+                if not metadata.get("deterministic_source_text"):
+                    metadata["deterministic_source_text"] = cand_result.deterministic_question_text or q.question_text
+                if not metadata.get("deterministic_source_hash"):
+                    metadata["deterministic_source_hash"] = hashlib.sha256(
+                        (metadata["deterministic_source_text"]).encode("utf-8")
+                    ).hexdigest()
+
+                metadata["ai_provenance"] = {
+                    "applied_at": datetime.now(timezone.utc).isoformat(),
+                    "applied_by_user_id": str(actor.user_id),
+                    "rationale_code": chosen_variant.rationale_code.value if hasattr(chosen_variant.rationale_code, "value") else str(chosen_variant.rationale_code),
+                    "prompt_template_version": cand_result.prompt_template_version,
+                }
+
+                q.question_text = chosen_variant.variant_text.strip()
+                q.authoring_origin = AuthoringOrigin.AI_ASSISTED
+                q.question_version += 1
+                q.validation_state = ValidationState.PENDING
+                q.safe_metadata = metadata
+
+                ai_count += 1
+                results.append(
+                    QuestionBatchWordingResult(
+                        question_id=q.question_id,
+                        display_order=q.display_order,
+                        status="AI_READY",
+                        authoring_origin=AuthoringOrigin.AI_ASSISTED,
+                        question_text=q.question_text,
+                        rationale_code=chosen_variant.rationale_code.value if hasattr(chosen_variant.rationale_code, "value") else str(chosen_variant.rationale_code),
+                        validation_state=q.validation_state,
+                    )
+                )
+            else:
+                # Check for provider-wide failure vs question-specific failure
+                p_code = cand_result.provider_error_code
+                is_provider_wide = p_code in [
+                    ProviderErrorCode.RESPONSE_CONTENT_EMPTY.value,
+                    ProviderErrorCode.RESPONSE_TRUNCATED.value,
+                    ProviderErrorCode.PROFILE_MODE_INCOMPATIBLE.value,
+                    ProviderErrorCode.PROVIDER_UNAVAILABLE.value,
+                    ProviderErrorCode.PROVIDER_DISABLED.value,
+                    ProviderErrorCode.AUTHENTICATION_FAILED.value,
+                    ProviderErrorCode.MODEL_NOT_AVAILABLE.value,
+                    "RESPONSE_CONTENT_EMPTY",
+                    "RESPONSE_TRUNCATED",
+                    "PROFILE_MODE_INCOMPATIBLE",
+                ]
+                if is_provider_wide:
+                    provider_wide_failure_detected = True
+                    provider_wide_error_message = cand_result.safe_error_message or "Provider mode incompatibility detected."
+
+                fallback_count += 1
+                results.append(
+                    QuestionBatchWordingResult(
+                        question_id=q.question_id,
+                        display_order=q.display_order,
+                        status="DETERMINISTIC_FALLBACK",
+                        authoring_origin=q.authoring_origin,
+                        question_text=q.question_text,
+                        validation_state=q.validation_state,
+                        error_message="; ".join(cand_result.rejection_reasons) if cand_result.rejection_reasons else (cand_result.safe_error_message or "Deterministic fallback retained."),
+                    )
+                )
+        except Exception as exc:
+            logger.warning("Batch wording failed for question %s: %s", q.question_id, exc)
+            failed_count += 1
+            results.append(
+                QuestionBatchWordingResult(
+                    question_id=q.question_id,
+                    display_order=q.display_order,
+                    status="FAILED_RETRYABLE",
+                    authoring_origin=q.authoring_origin,
+                    question_text=q.question_text,
+                    validation_state=q.validation_state,
+                    error_message=str(exc),
+                )
+            )
+
+    if template.lifecycle_status == PlanLifecycle.VALIDATED:
+        template.lifecycle_status = PlanLifecycle.DRAFT
+
+    db.commit()
+
+    overall_status = "COMPLETED" if failed_count == 0 and fallback_count == 0 else ("PARTIALLY_COMPLETED" if ai_count > 0 else "FAILED")
+
+    if provider_wide_failure_detected and ai_count == 0:
+        safe_msg = "The selected model used its response budget for reasoning and returned no final wording. Select a compatible Instruct model and retry. Your deterministic questions were retained."
+    else:
+        safe_msg = f"Generated AI wording for {ai_count} of {len(questions)} questions."
+        if fallback_count > 0 or failed_count > 0:
+            safe_msg += f" {fallback_count + failed_count} retained deterministic version."
+
+    return GenerateTemplateAiWordingResponse(
+        template_id=template.template_id,
+        template_version=template.template_version,
+        lifecycle_status=template.lifecycle_status,
+        total_questions=len(questions),
+        ai_generated_count=ai_count,
+        fallback_count=fallback_count,
+        failed_count=failed_count,
+        status=overall_status,
+        results=results,
+        safe_message=safe_msg,
+    )
+

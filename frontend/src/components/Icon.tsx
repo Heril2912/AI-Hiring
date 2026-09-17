@@ -44,6 +44,7 @@ export type IconName =
   | "printer"
   | "alert-circle"
   | "info"
+  | "message-square"
   | "bar-chart";
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
@@ -351,6 +352,10 @@ export function Icon({ name, size = 18, className = "", "aria-label": ariaLabel,
             <line x1="12" x2="12" y1="20" y2="4" />
             <line x1="6" x2="6" y1="20" y2="14" />
           </>
+        );
+      case "message-square":
+        return (
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         );
       case "info":
       default:

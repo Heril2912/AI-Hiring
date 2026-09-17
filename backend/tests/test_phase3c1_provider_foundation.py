@@ -495,6 +495,29 @@ def test_compatibility_service_full_success(mock_dns):
             elif request.url.path == "/v1/chat/completions":
                 body = json.loads(request.content.decode("utf-8"))
                 assert body["stream"] is False
+                # If this is Step C (system prompt includes 'wording assistant'), return structured JSON
+                messages = body.get("messages", [])
+                system_content = next((m["content"] for m in messages if m.get("role") == "system"), "")
+                if "wording assistant" in system_content:
+                    valid_wording_json = json.dumps({
+                        "operation": "REWORD_QUESTION",
+                        "response_schema_version": "1.0.0",
+                        "variants": [
+                            {
+                                "variant_text": "Could you provide an example of how you optimized a complex database query?",
+                                "rationale_code": "PROFESSIONAL_TONE",
+                                "referenced_identifiers": []
+                            }
+                        ]
+                    })
+                    return httpx.Response(
+                        status_code=200,
+                        json={
+                            "choices": [
+                                {"message": {"role": "assistant", "content": valid_wording_json}, "finish_reason": "stop"}
+                            ]
+                        },
+                    )
                 return httpx.Response(
                     status_code=200,
                     json={

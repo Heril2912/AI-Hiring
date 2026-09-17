@@ -37,6 +37,8 @@ class RecruiterWordingAssistRequest(FrozenSchema):
     All authoritative fields (intent, competency, layer, question_type, deterministic text,
     allowed evidence, permitted terminology) are loaded strictly by the server.
     """
+    expected_question_version: Optional[int] = Field(default=None, ge=1, description="Optimistic concurrency: expected question version.")
+    source_content_hash: Optional[str] = Field(default=None, max_length=64, description="Expected content hash of deterministic source text.")
     max_variants: int = Field(default=1, ge=1, le=3, description="Bounded number of variants requested (1-3).")
     target_tone: Optional[str] = Field(default="PROFESSIONAL", max_length=50)
 

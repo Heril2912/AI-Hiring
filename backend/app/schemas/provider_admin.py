@@ -146,6 +146,21 @@ class DisableProviderProfileRequest(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=500, description="Reason for disabling.")
 
 
+class ArchiveProviderProfileRequest(BaseModel):
+    """Command schema for archiving or unarchiving a provider profile."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: int = Field(ge=1, description="Expected profile version.")
+    archive: bool = Field(default=True, description="True to archive, False to restore.")
+
+
+class SelectProviderModelRequest(BaseModel):
+    """Command schema for directly updating the selected model on a provider profile."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model_identifier: str = Field(min_length=1, max_length=255, description="Exact discovered or configured model identifier.")
+
+
 class TestProviderCompatibilityRequest(BaseModel):
     """Command schema for executing an Admin-only compatibility check."""
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -173,8 +188,10 @@ class ProviderCompatibilityReportResponse(FrozenSchema):
     model_discovered: bool
     discovered_model_ids: List[str] = Field(default_factory=list)
     dry_run_completion_passed: bool
+    question_wording_passed: bool = False
     non_streaming_enforced: bool
     unicode_handling_passed: bool
+    recommended_action: Optional[str] = None
     latency_ms: float
     tested_at: datetime
     model_source: Optional[str] = None
@@ -209,6 +226,7 @@ class AdminProviderProfileResponse(FrozenSchema):
     egress_class: ProviderEgressClass
     privacy_review_status: PrivacyReviewStatus
     enabled: bool
+    is_archived: bool = False
     compatibility_status: ProviderCompatibilityStatus
     tested_at: Optional[datetime] = None
     model_source: Optional[str] = None
@@ -230,6 +248,8 @@ class RecruiterAIAvailabilityResponse(FrozenSchema):
     provider_class: str = Field(description="DISABLED | LOCAL | REMOTE")
     availability_label: str
     egress_class: ProviderEgressClass
+    active_model_name: Optional[str] = None
+    message: Optional[str] = None
 
 
 class InterviewContextResponse(FrozenSchema):
@@ -238,10 +258,10 @@ class InterviewContextResponse(FrozenSchema):
     job_title: str
     job_version_id: UUID
     job_revision: int
-    candidate_id: UUID
-    candidate_name: str
+    candidate_id: Optional[UUID] = None
+    candidate_name: Optional[str] = None
     candidate_email: Optional[str] = None
-    resume_artifact_id: UUID
+    resume_artifact_id: Optional[UUID] = None
     match_run_id: Optional[UUID] = None
     match_score: Optional[float] = None
     skill_gap_summary: Optional[str] = None

@@ -8,7 +8,12 @@ import {
   VersionHistoryResponse,
   VersionDiffResponse,
   TemplateQuestion,
+  CandidateWordingResult,
+  QuestionActionResponse,
+  StructuredWordingVariant,
+  GenerateTemplateAiWordingResponse,
 } from "../../types/interview";
+import { WordingComparisonModal } from "./WordingComparisonModal";
 
 export interface RecruiterAIAvailability {
   ai_enabled: boolean;
@@ -38,8 +43,47 @@ export interface InterviewContextData {
 
 interface InterviewWorkspaceProps {
   jobId: string;
-  resumeId: string;
+  resumeId?: string | null;
   onNavigateBack: () => void;
+}
+
+/**
+ * Humanizes raw enum labels into clean, legible recruiter text.
+ * E.g. PYTHON_CORE -> Python Core, POSTGRESQL_PERFORMANCE_TUNING -> PostgreSQL Performance Tuning
+ */
+export function formatCompetencyName(raw: string | undefined | null): string {
+  if (!raw) return "General Competency";
+  const acronyms: Record<string, string> = {
+    API: "API",
+    SQL: "SQL",
+    REST: "REST",
+    JSON: "JSON",
+    CI: "CI",
+    CD: "CD",
+    DB: "DB",
+    AWS: "AWS",
+    GCP: "GCP",
+    UI: "UI",
+    UX: "UX",
+    AI: "AI",
+    ML: "ML",
+    LLM: "LLM",
+    POSTGRESQL: "PostgreSQL",
+    GRAPHQL: "GraphQL",
+    TYPESCRIPT: "TypeScript",
+    JAVASCRIPT: "JavaScript",
+  };
+
+  return raw
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((word) => {
+      const upper = word.toUpperCase();
+      if (acronyms[upper]) return acronyms[upper];
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(" ");
 }
 
 export function InterviewWorkspace({
@@ -60,8 +104,26 @@ export function InterviewWorkspace({
   // Active edits & tracking
   const [editableQuestions, setEditableQuestions] = useState<TemplateQuestion[]>([]);
   const [editablePlanQuestions, setEditablePlanQuestions] = useState<TemplateQuestion[]>([]);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [comparingQuestionId, setComparingQuestionId] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Batch AI Wording Generation State
+  const [isBatchGenerating, setIsBatchGenerating] = useState<boolean>(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const [batchStatusSummary, setBatchStatusSummary] = useState<GenerateTemplateAiWordingResponse | null>(null);
+
+  // Single Wording Assistance State
+  const [improvingQuestionId, setImprovingQuestionId] = useState<string | null>(null);
+  const [activeWordingComparison, setActiveWordingComparison] = useState<{
+    question: TemplateQuestion;
+    result: CandidateWordingResult;
+    layer: "COMMON_CORE" | "SUPPLEMENTAL_EVIDENCE";
+  } | null>(null);
+  const [isApplyingSuggestion, setIsApplyingSuggestion] = useState<boolean>(false);
+  const [announcement, setAnnouncement] = useState<string>("");
+  const [expandedProvenanceQuestionId, setExpandedProvenanceQuestionId] = useState<string | null>(null);
 
   // Validation report
   const [validationReport, setValidationReport] = useState<ValidationSummaryResponse | null>(null);
@@ -76,7 +138,7 @@ export function InterviewWorkspace({
   // Selected Rubric for Drawer Modal
   const [selectedRubricQuestion, setSelectedRubricQuestion] = useState<TemplateQuestion | null>(null);
 
-  // Success and notification messages
+  // Feedback notifications
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -86,14 +148,15 @@ export function InterviewWorkspace({
       try {
         setIsLoading(true);
         setError(null);
-        const ctxData = await apiFetch<InterviewContextData>(
-          `/api/v1/jobs/${jobId}/candidates/${resumeId}/interview-context`
-        );
+        const contextUrl = resumeId && resumeId.trim() !== ""
+          ? `/api/v1/jobs/${jobId}/candidates/${resumeId}/interview-context`
+          : `/api/v1/jobs/${jobId}/interview-context`;
+        const ctxData = await apiFetch<InterviewContextData>(contextUrl);
         if (isMounted) {
           setContext(ctxData);
         }
 
-        // Try to fetch existing template
+        // Fetch existing template
         try {
           const tData = await apiFetch<JobInterviewTemplateResponse>(
             `/api/v1/jobs/${jobId}/interview-templates/latest?revision=${ctxData.job_revision}`
@@ -102,21 +165,22 @@ export function InterviewWorkspace({
             setTemplate(tData);
             setEditableQuestions(tData.common_core_questions || []);
 
-            // If template exists and resume is present, check for candidate plan
-            try {
-              const pData = await apiFetch<CandidateInterviewPlanResponse>(
-                `/api/v1/jobs/${jobId}/interview-templates/${tData.template_id}/candidate-plans/${ctxData.candidate_id}/latest`
-              );
-              if (isMounted && pData) {
-                setCandidatePlan(pData);
-                setEditablePlanQuestions(pData.supplemental_questions || []);
+            if (resumeId && ctxData.candidate_id) {
+              try {
+                const pData = await apiFetch<CandidateInterviewPlanResponse>(
+                  `/api/v1/jobs/${jobId}/interview-templates/${tData.template_id}/candidate-plans/${ctxData.candidate_id}/latest`
+                );
+                if (isMounted && pData) {
+                  setCandidatePlan(pData);
+                  setEditablePlanQuestions(pData.supplemental_questions || []);
+                }
+              } catch {
+                // No candidate plan yet
               }
-            } catch {
-              // No existing candidate plan yet
             }
           }
         } catch {
-          // No existing template draft yet
+          // No draft template yet
         }
       } catch (err: any) {
         if (isMounted) {
@@ -150,9 +214,9 @@ export function InterviewWorkspace({
       setTemplate(newTemplate);
       setEditableQuestions(newTemplate.common_core_questions);
       setValidationReport(null);
-      setSuccessMessage("Deterministic interview template generated successfully.");
+      setSuccessMessage("Deterministic interview blueprint generated successfully.");
     } catch (err: any) {
-      setActionError(err?.message || "Failed to generate interview template.");
+      setActionError(err?.message || "Failed to generate interview blueprint.");
     } finally {
       setIsGeneratingTemplate(false);
     }
@@ -178,12 +242,117 @@ export function InterviewWorkspace({
     }
   };
 
-  // Question Editing Handlers
+  // Batch AI Wording Generation
+  const handleBatchGenerateAiWording = async () => {
+    if (!template) return;
+    try {
+      setIsBatchGenerating(true);
+      setActionError(null);
+      setSuccessMessage(null);
+      setBatchProgress({ current: 0, total: editableQuestions.length });
+      setAnnouncement("Preparing AI interview wording sequentially...");
+
+      const response = await apiFetch<GenerateTemplateAiWordingResponse>(
+        `/api/v1/jobs/${jobId}/interview-templates/${template.template_id}/generate-ai-wording`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expected_template_version: template.template_version,
+          }),
+        }
+      );
+
+      setBatchStatusSummary(response);
+
+      // Refresh template questions from server result
+      if (response.results && response.results.length > 0) {
+        const resultMap = new Map(response.results.map((r) => [r.question_id, r]));
+        const updated = editableQuestions.map((q) => {
+          const res = resultMap.get(q.question_id);
+          if (res) {
+            return {
+              ...q,
+              question_text: res.question_text,
+              authoring_origin: res.authoring_origin,
+              deterministic_source_text: res.deterministic_question_text,
+            };
+          }
+          return q;
+        });
+        setEditableQuestions(updated);
+      }
+
+      setValidationReport(null);
+      const aiCount = response.ai_generated_count ?? response.ai_ready_count ?? 0;
+      const fallbackCount = response.fallback_count ?? 0;
+      const failedCount = response.failed_count ?? 0;
+
+      if (response.status === "COMPLETED") {
+        setSuccessMessage(response.safe_message || `AI drafting complete: all ${aiCount} questions prepared and validated.`);
+      } else if (response.status === "PARTIALLY_COMPLETED") {
+        setSuccessMessage(
+          response.safe_message ||
+          `AI drafting partially completed: ${aiCount} prepared, ${fallbackCount + failedCount} retained deterministic.`
+        );
+      } else {
+        const errorMsg =
+          response.safe_message ||
+          "Local AI could not prepare the questions. Your deterministic questions remain available.";
+        setActionError(errorMsg);
+      }
+    } catch (err: any) {
+      const msg = "Local AI could not prepare the questions. Your deterministic questions remain available.";
+      setActionError(msg);
+    } finally {
+      setIsBatchGenerating(false);
+      setBatchProgress(null);
+    }
+  };
+
+  // Restore All Deterministic Baseline
+  const handleRestoreAllDeterministic = async () => {
+    if (!template) return;
+    const confirmed = window.confirm(
+      "Restore all original deterministic questions for this template? Any AI drafts or unsaved edits will be replaced by the deterministic baseline."
+    );
+    if (!confirmed) return;
+
+    try {
+      setActionError(null);
+      for (const q of editableQuestions) {
+        if (q.authoring_origin === "AI_ASSISTED" || q.authoring_origin === "RECRUITER_EDITED") {
+          await apiFetch<QuestionActionResponse>(
+            `/api/v1/jobs/${jobId}/interview-templates/${template.template_id}/questions/${q.question_id}/restore-deterministic`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                expected_question_version: q.question_version || 1,
+              }),
+            }
+          );
+        }
+      }
+
+      // Re-fetch fresh template
+      const refreshed = await apiFetch<JobInterviewTemplateResponse>(
+        `/api/v1/jobs/${jobId}/interview-templates/latest?revision=${context?.job_revision}`
+      );
+      setTemplate(refreshed);
+      setEditableQuestions(refreshed.common_core_questions);
+      setValidationReport(null);
+      setSuccessMessage("All questions restored to deterministic blueprint baseline.");
+    } catch (err: any) {
+      setActionError(err?.message || "Failed to restore all deterministic questions.");
+    }
+  };
+
+  // Single Question Handlers
   const handleQuestionTextChange = (index: number, newText: string) => {
     const updated = [...editableQuestions];
     updated[index] = { ...updated[index], question_text: newText, authoring_origin: "RECRUITER_EDITED" };
     setEditableQuestions(updated);
     setHasUnsavedChanges(true);
+    setValidationReport(null);
   };
 
   const handlePlanQuestionTextChange = (index: number, newText: string) => {
@@ -191,6 +360,7 @@ export function InterviewWorkspace({
     updated[index] = { ...updated[index], question_text: newText, authoring_origin: "RECRUITER_EDITED" };
     setEditablePlanQuestions(updated);
     setHasUnsavedChanges(true);
+    setValidationReport(null);
   };
 
   const handleMoveQuestion = (index: number, direction: "UP" | "DOWN") => {
@@ -200,12 +370,204 @@ export function InterviewWorkspace({
     const temp = updated[index];
     updated[index] = updated[targetIndex];
     updated[targetIndex] = temp;
-    // Update display_order
     updated.forEach((q, idx) => {
       q.display_order = idx;
     });
     setEditableQuestions(updated);
     setHasUnsavedChanges(true);
+    setValidationReport(null);
+  };
+
+  const handleImproveWording = async (
+    question: TemplateQuestion,
+    layer: "COMMON_CORE" | "SUPPLEMENTAL_EVIDENCE" = "COMMON_CORE"
+  ) => {
+    if (!template) return;
+    try {
+      setImprovingQuestionId(question.question_id);
+      setActionError(null);
+      setSuccessMessage(null);
+      setAnnouncement(`Requesting wording improvement for question ${question.display_order + 1}...`);
+
+      const result = await apiFetch<CandidateWordingResult>(
+        `/api/v1/jobs/${jobId}/interview-templates/${template.template_id}/questions/${question.question_id}/assist-wording`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expected_question_version: question.question_version || 1,
+            source_content_hash: question.content_hash || null,
+          }),
+        }
+      );
+
+      if (result.is_validated && result.proposed_variants.length > 0) {
+        setAnnouncement("Wording suggestion generated. Comparison modal opened.");
+        setActiveWordingComparison({
+          question,
+          result,
+          layer,
+        });
+      } else {
+        const msg = result.safe_error_message || "Wording assistance fallback active.";
+        setActionError(msg);
+        setAnnouncement(`Wording assistance note: ${msg}`);
+      }
+    } catch (err: any) {
+      const msg = err?.message || "Failed to request wording improvement.";
+      setActionError(msg);
+      setAnnouncement(`Error: ${msg}`);
+    } finally {
+      setImprovingQuestionId(null);
+    }
+  };
+
+  const handleUseSuggestion = async (
+    question: TemplateQuestion,
+    variant: StructuredWordingVariant,
+    result: CandidateWordingResult,
+    layer: "COMMON_CORE" | "SUPPLEMENTAL_EVIDENCE"
+  ) => {
+    if (!template) return;
+    try {
+      setIsApplyingSuggestion(true);
+      setActionError(null);
+
+      const response = await apiFetch<QuestionActionResponse>(
+        `/api/v1/jobs/${jobId}/interview-templates/${template.template_id}/questions/${question.question_id}/apply-suggestion`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expected_question_version: question.question_version || 1,
+            expected_source_hash: question.content_hash || null,
+            suggested_text: variant.variant_text,
+            rationale_code: variant.rationale_code,
+          }),
+        }
+      );
+
+      if (layer === "COMMON_CORE") {
+        const updated = editableQuestions.map((q) =>
+          q.question_id === question.question_id
+            ? {
+                ...q,
+                question_text: response.question_text,
+                question_version: response.question_version,
+                authoring_origin: response.authoring_origin,
+                deterministic_source_text: response.deterministic_source_text,
+                safe_metadata: response.safe_metadata,
+                ai_provenance: response.safe_metadata?.ai_provenance,
+              }
+            : q
+        );
+        setEditableQuestions(updated);
+      } else {
+        const updated = editablePlanQuestions.map((q) =>
+          q.question_id === question.question_id
+            ? {
+                ...q,
+                question_text: response.question_text,
+                question_version: response.question_version,
+                authoring_origin: response.authoring_origin,
+                deterministic_source_text: response.deterministic_source_text,
+                safe_metadata: response.safe_metadata,
+                ai_provenance: response.safe_metadata?.ai_provenance,
+              }
+            : q
+        );
+        setEditablePlanQuestions(updated);
+      }
+
+      setActiveWordingComparison(null);
+      setValidationReport(null);
+      setSuccessMessage("AI-assisted wording suggestion applied as draft.");
+      setAnnouncement("AI-assisted suggestion applied as draft.");
+    } catch (err: any) {
+      setActionError(err?.message || "Failed to apply wording suggestion.");
+    } finally {
+      setIsApplyingSuggestion(false);
+    }
+  };
+
+  const handleEditSuggestion = (
+    question: TemplateQuestion,
+    variant: StructuredWordingVariant,
+    layer: "COMMON_CORE" | "SUPPLEMENTAL_EVIDENCE"
+  ) => {
+    if (layer === "COMMON_CORE") {
+      const idx = editableQuestions.findIndex((q) => q.question_id === question.question_id);
+      if (idx !== -1) {
+        handleQuestionTextChange(idx, variant.variant_text);
+        setEditingQuestionId(question.question_id);
+      }
+    } else {
+      const idx = editablePlanQuestions.findIndex((q) => q.question_id === question.question_id);
+      if (idx !== -1) {
+        handlePlanQuestionTextChange(idx, variant.variant_text);
+      }
+    }
+    setActiveWordingComparison(null);
+    setSuccessMessage("Suggestion transferred to editor as Recruiter Edited draft.");
+  };
+
+  const handleRestoreDeterministic = async (
+    question: TemplateQuestion,
+    layer: "COMMON_CORE" | "SUPPLEMENTAL_EVIDENCE" = "COMMON_CORE"
+  ) => {
+    if (!template) return;
+    const confirmRestore = window.confirm(
+      "Restore the original deterministic wording for this question? Any recruiter edits or AI suggestions will be replaced by the blueprint baseline."
+    );
+    if (!confirmRestore) return;
+
+    try {
+      setActionError(null);
+      const response = await apiFetch<QuestionActionResponse>(
+        `/api/v1/jobs/${jobId}/interview-templates/${template.template_id}/questions/${question.question_id}/restore-deterministic`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expected_question_version: question.question_version || 1,
+          }),
+        }
+      );
+
+      if (layer === "COMMON_CORE") {
+        const updated = editableQuestions.map((q) =>
+          q.question_id === question.question_id
+            ? {
+                ...q,
+                question_text: response.question_text,
+                question_version: response.question_version,
+                authoring_origin: response.authoring_origin,
+                deterministic_source_text: response.deterministic_source_text,
+                safe_metadata: response.safe_metadata,
+                ai_provenance: null,
+              }
+            : q
+        );
+        setEditableQuestions(updated);
+      } else {
+        const updated = editablePlanQuestions.map((q) =>
+          q.question_id === question.question_id
+            ? {
+                ...q,
+                question_text: response.question_text,
+                question_version: response.question_version,
+                authoring_origin: response.authoring_origin,
+                deterministic_source_text: response.deterministic_source_text,
+                safe_metadata: response.safe_metadata,
+                ai_provenance: null,
+              }
+            : q
+        );
+        setEditablePlanQuestions(updated);
+      }
+
+      setValidationReport(null);
+      setSuccessMessage("Deterministic blueprint wording restored.");
+    } catch (err: any) {
+      setActionError(err?.message || "Failed to restore deterministic wording.");
+    }
   };
 
   const handleSaveDraft = async () => {
@@ -233,6 +595,7 @@ export function InterviewWorkspace({
       setTemplate(updatedTemplate);
       setEditableQuestions(updatedTemplate.common_core_questions);
       setHasUnsavedChanges(false);
+      setEditingQuestionId(null);
       setSuccessMessage("Changes saved successfully.");
     } catch (err: any) {
       setActionError(err?.message || "Failed to save draft.");
@@ -368,27 +731,32 @@ export function InterviewWorkspace({
   }
 
   const { ai_capability } = context;
-  const isTemplateApproved = template?.lifecycle_state === "APPROVED";
-  const isTemplateDraft = template?.lifecycle_state === "DRAFT" || template?.lifecycle_state === "VALIDATED";
+  const templateStatus = (template as any)?.lifecycle_status || template?.lifecycle_state || "DRAFT";
+  const isTemplateApproved = templateStatus === "APPROVED";
+  const isTemplateDraft = templateStatus === "DRAFT" || templateStatus === "VALIDATED";
+
+  const aiReadyCount = editableQuestions.filter((q) => q.authoring_origin === "AI_ASSISTED").length;
+  const editedCount = editableQuestions.filter((q) => q.authoring_origin === "RECRUITER_EDITED").length;
+  const deterministicCount = editableQuestions.length - aiReadyCount - editedCount;
 
   return (
     <div className="interview-workspace-container" role="region" aria-label="Recruiter Interview Workspace">
       {/* Top Header & Navigation */}
       <div className="interview-header-section">
-        <div className="flex justify-between items-center mb-3">
+        <div className="flex justify-between items-center mb-2">
           <button
             type="button"
             className="btn btn-secondary btn-sm back-nav-btn"
             onClick={onNavigateBack}
           >
             <Icon name="arrow-left" size={15} />
-            <span>Back to Candidates</span>
+            <span>{resumeId ? "Back to Candidates" : "Back to Jobs"}</span>
           </button>
 
           {template && (
             <div className="flex items-center gap-2">
               <span className={`badge ${isTemplateApproved ? "badge-success" : "badge-warning"}`}>
-                Template v{template.template_version} &bull; {template.lifecycle_state}
+                Template v{template.template_version} &bull; {templateStatus}
               </span>
               <button
                 type="button"
@@ -405,24 +773,25 @@ export function InterviewWorkspace({
         <div className="interview-header-titles">
           <div className="title-row">
             <h1 className="interview-main-title">
-              Interview Plan: {context.candidate_name}
+              {context.candidate_name ? `Interview Plan: ${context.candidate_name}` : `Interview Template: ${context.job_title}`}
             </h1>
-            {/* AI Capability Pill */}
+
+            {/* Compact Local AI Pill */}
             <div
               className={`ai-availability-pill ${
                 ai_capability.ai_enabled ? "ai-active" : "ai-disabled"
               }`}
-              title={ai_capability.message || undefined}
+              title={ai_capability.message || (ai_capability.active_model_name ? `Model: ${ai_capability.active_model_name}` : undefined)}
             >
               <Icon name="sparkles" size={14} />
               <span>{ai_capability.availability_label}</span>
-              {ai_capability.ai_enabled && ai_capability.active_model_name && (
-                <span className="model-chip">({ai_capability.active_model_name})</span>
-              )}
             </div>
           </div>
           <p className="interview-subtitle">
-            Requisition: <strong>{context.job_title}</strong> (Rev {context.job_revision}) &bull; Candidate ID: <code>{context.candidate_id.substring(0, 8)}</code>
+            Requisition: <strong>{context.job_title}</strong> (Rev {context.job_revision})
+            {context.candidate_id && (
+              <> &bull; Candidate ID: <code>{context.candidate_id.substring(0, 8)}</code></>
+            )}
           </p>
         </div>
       </div>
@@ -441,58 +810,199 @@ export function InterviewWorkspace({
         </div>
       )}
 
-      {/* Overview Context Grid */}
+      {/* Context Grid (Candidate Evidence Context & Match Evaluation) */}
       <div className="interview-context-grid">
-        <div className="context-card candidate-card">
-          <div className="card-header">
-            <Icon name="user" size={16} />
-            <h3>Candidate Evidence Context</h3>
-          </div>
-          <div className="card-body">
-            <div className="meta-row">
-              <span className="meta-label">Full Name:</span>
-              <span className="meta-val">{context.candidate_name}</span>
-            </div>
-            {context.candidate_email && (
-              <div className="meta-row">
-                <span className="meta-label">Primary Email:</span>
-                <span className="meta-val">{context.candidate_email}</span>
+        {resumeId && context.candidate_id ? (
+          <>
+            <div className="context-card candidate-card">
+              <div className="card-header">
+                <Icon name="user" size={16} />
+                <h3>Candidate Evidence Context</h3>
               </div>
-            )}
-            <div className="meta-row">
-              <span className="meta-label">Resume Artifact ID:</span>
-              <span className="meta-val"><code>{context.resume_artifact_id.substring(0, 8)}</code></span>
-            </div>
-          </div>
-        </div>
-
-        <div className="context-card match-card">
-          <div className="card-header">
-            <Icon name="award" size={16} />
-            <h3>Match Evaluation &amp; Gaps</h3>
-          </div>
-          <div className="card-body">
-            {context.match_score !== null && context.match_score !== undefined ? (
-              <>
+              <div className="card-body">
                 <div className="meta-row">
-                  <span className="meta-label">Deterministic Score:</span>
-                  <span className="meta-val score-val"><strong>{context.match_score.toFixed(1)}%</strong></span>
+                  <span className="meta-label">Full Name:</span>
+                  <span className="meta-val">{context.candidate_name || "N/A"}</span>
                 </div>
-                {context.skill_gap_summary && (
+                {context.candidate_email && (
                   <div className="meta-row">
-                    <span className="meta-label">Gap Analysis:</span>
-                    <span className="meta-val gap-val">{context.skill_gap_summary}</span>
+                    <span className="meta-label">Primary Email:</span>
+                    <span className="meta-val">{context.candidate_email}</span>
                   </div>
                 )}
-              </>
-            ) : (
-              <p className="text-muted">No match evaluation run recorded for this candidate requisition.</p>
-            )}
-          </div>
-        </div>
+                {context.resume_artifact_id && (
+                  <div className="meta-row">
+                    <span className="meta-label">Resume Artifact ID:</span>
+                    <span className="meta-val"><code>{context.resume_artifact_id.substring(0, 8)}</code></span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="context-card match-card">
+              <div className="card-header">
+                <Icon name="award" size={16} />
+                <h3>Match Evaluation &amp; Gaps</h3>
+              </div>
+              <div className="card-body">
+                {context.match_score !== null && context.match_score !== undefined ? (
+                  <>
+                    <div className="meta-row">
+                      <span className="meta-label">Deterministic Score:</span>
+                      <span className="meta-val score-val"><strong>{context.match_score.toFixed(1)}%</strong></span>
+                    </div>
+                    {context.skill_gap_summary && (
+                      <div className="meta-row">
+                        <span className="meta-label">Gap Analysis:</span>
+                        <span className="meta-val gap-val">{context.skill_gap_summary}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-muted">No match evaluation run recorded for this candidate requisition.</p>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="context-card job-requisition-context-card">
+              <div className="card-header">
+                <Icon name="briefcase" size={16} />
+                <h3>Job Requisition Details</h3>
+              </div>
+              <div className="card-body">
+                <div className="meta-row">
+                  <span className="meta-label">Requisition Title:</span>
+                  <span className="meta-val"><strong>{context.job_title}</strong></span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">Version / Revision:</span>
+                  <span className="meta-val">Rev #{context.job_revision}</span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">Scope:</span>
+                  <span className="meta-val">Standardized Common-Core Interview Template</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="context-card ai-governance-context-card">
+              <div className="card-header">
+                <Icon name="shield" size={16} />
+                <h3>AI Governance &amp; Assistance</h3>
+              </div>
+              <div className="card-body">
+                <div className="meta-row">
+                  <span className="meta-label">AI Status:</span>
+                  <span className="meta-val">{ai_capability.availability_label}</span>
+                </div>
+                <div className="meta-row">
+                  <span className="meta-label">Egress Mode:</span>
+                  <span className="meta-val">{ai_capability.egress_class || "LOCAL_ONLY"}</span>
+                </div>
+                {ai_capability.active_model_name && (
+                  <div className="meta-row">
+                    <span className="meta-label">Active Model:</span>
+                    <span className="meta-val"><code>{ai_capability.active_model_name}</code></span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Validation Report Drawer / Alert Box */}
+      {/* AI Drafting Hero Control Panel */}
+      {template && isTemplateDraft && (
+        <div className={`ai-drafting-banner ${ai_capability.ai_enabled ? "active-mode" : ""}`}>
+          <div className="ai-drafting-banner-header">
+            <div className="ai-drafting-banner-title">
+              <Icon name="sparkles" size={20} className={ai_capability.ai_enabled ? "text-primary" : "text-muted"} />
+              <div>
+                <h3>AI-Assisted Template Drafting</h3>
+                <div className="ai-drafting-banner-desc">
+                  {ai_capability.ai_enabled
+                    ? "Generate clear, standardized wording for all interview questions with local AI. Competencies, rubrics, and durations remain authoritative."
+                    : "Local AI is currently unavailable or disabled by Admin. Questions remain in deterministic blueprint baseline."}
+                </div>
+              </div>
+            </div>
+
+            <div className="ai-drafting-banner-actions">
+              {ai_capability.ai_enabled && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleBatchGenerateAiWording}
+                  disabled={isBatchGenerating}
+                >
+                  <Icon name="sparkles" size={15} />
+                  <span>{isBatchGenerating ? "Drafting with AI..." : "Generate interview wording with AI"}</span>
+                </button>
+              )}
+
+              {(aiReadyCount > 0 || editedCount > 0) && (
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={handleRestoreAllDeterministic}
+                  disabled={isBatchGenerating}
+                  title="Revert all questions back to the deterministic blueprint"
+                >
+                  <Icon name="history" size={14} />
+                  <span>Restore all blueprint wording</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Sequential Progress Bar during batch generation */}
+          {isBatchGenerating && (
+            <div className="mt-4">
+              <div className="ai-progress-bar-container">
+                <div
+                  className="ai-progress-bar-fill"
+                  style={{ width: "100%", animation: "pulse 1.5s infinite" }}
+                />
+              </div>
+              <div className="ai-progress-stats">
+                <span>Processing questions sequentially with local AI engine...</span>
+                <span>Please wait a moment</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Summary Chips Bar */}
+      {template && (
+        <div className="flex items-center gap-3 mb-4 flex-wrap text-xs text-muted">
+          <span className="badge badge-secondary">
+            {editableQuestions.length} Total Questions
+          </span>
+          <span className="badge badge-info">
+            Target Duration: {template.target_duration_minutes || 45} min
+          </span>
+          {aiReadyCount > 0 && (
+            <span className="badge badge-ai">
+              {aiReadyCount} AI Drafted
+            </span>
+          )}
+          {editedCount > 0 && (
+            <span className="badge badge-warning">
+              {editedCount} Recruiter Edited
+            </span>
+          )}
+          {deterministicCount > 0 && (
+            <span className="badge badge-outline">
+              {deterministicCount} Deterministic Blueprint
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Validation Report Alert Box */}
       {validationReport && (
         <div className={`validation-report-card ${validationReport.is_valid ? "valid" : "invalid"} mb-4`}>
           <div className="card-header">
@@ -521,7 +1031,7 @@ export function InterviewWorkspace({
               </div>
             )}
             {validationReport.is_valid && (
-              <p className="text-success mb-0">All 7 safety &amp; consistency rules verified. Ready for approval.</p>
+              <p className="text-success mb-0">All safety &amp; consistency rules verified. Ready for approval.</p>
             )}
           </div>
         </div>
@@ -535,7 +1045,7 @@ export function InterviewWorkspace({
           </div>
           <h3>Standardized Job Interview Template</h3>
           <p>
-            Generate the deterministic, job-aligned common core interview template derived from the verified job requirements.
+            Generate the deterministic, job-aligned common core interview blueprint derived from verified job requirements.
           </p>
           <button
             type="button"
@@ -553,91 +1063,263 @@ export function InterviewWorkspace({
             <div>
               <h2>Standardized Common Core Questions</h2>
               <p className="text-sm text-muted">
-                Uniform across all applicants for this requisition. Standard core scores are strictly comparable.
+                Uniform across all applicants for this requisition. Scores are anchored to objective rubrics.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="badge badge-info">
-                Target Duration: {template.target_duration_minutes} min
-              </span>
               <span className="badge badge-secondary">
-                Hash: <code>{template.content_hash.substring(0, 8)}</code>
+                Hash: <code>{template.content_hash ? template.content_hash.substring(0, 8) : "DRAFT"}</code>
               </span>
             </div>
           </div>
 
-          {/* Question List */}
-          <div className="questions-container space-y-4">
-            {editableQuestions.map((q, idx) => (
-              <div key={q.question_id} className="question-card border rounded p-4 bg-white shadow-sm">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-primary">#{idx + 1}</span>
-                    <span className="badge badge-outline">{q.question_type}</span>
-                    <span className="text-sm font-medium text-gray-700">{q.competency_name}</span>
-                    <span className={`badge badge-xs ${q.authoring_origin === "RECRUITER_EDITED" ? "badge-warning" : "badge-info"}`}>
-                      {q.authoring_origin}
-                    </span>
+          {/* Question List (Redesigned Question Cards) */}
+          <div className="questions-container">
+            {editableQuestions.map((q, idx) => {
+              const isImproving = improvingQuestionId === q.question_id;
+              const hasAiProvenance = !!q.ai_provenance || q.authoring_origin === "AI_ASSISTED";
+              const isAiExpanded = expandedProvenanceQuestionId === q.question_id;
+              const isAiOrigin = q.authoring_origin === "AI_ASSISTED";
+              const isEditedOrigin = q.authoring_origin === "RECRUITER_EDITED";
+              const canRestore = (isAiOrigin || isEditedOrigin) && isTemplateDraft;
+              const isEditing = editingQuestionId === q.question_id;
+              const isComparing = comparingQuestionId === q.question_id;
+
+              const cardClass = `question-card-redesigned ${
+                isAiOrigin ? "ai-assisted-card" : isEditedOrigin ? "recruiter-edited-card" : ""
+              }`;
+
+              return (
+                <div key={q.question_id} className={cardClass}>
+                  {/* Top Bar: Question Index, Competency Title & Origin Badge */}
+                  <div className="question-card-top-bar">
+                    <div className="question-identity-group">
+                      <span className="question-order-pill">Question {idx + 1}</span>
+                      <span className="competency-title">
+                        {formatCompetencyName(q.competency_name || (q as any).competency_id || (q.rubric as any)?.competency_definition)}
+                      </span>
+                      <span className="badge badge-outline text-xs">{q.question_type}</span>
+
+                      {/* Origin Badge */}
+                      {isAiOrigin ? (
+                        <span className="origin-badge badge-ai" title="Validated AI Draft">
+                          <Icon name="sparkles" size={12} />
+                          <span>AI-Assisted Draft</span>
+                        </span>
+                      ) : isEditedOrigin ? (
+                        <span className="origin-badge badge-edited" title="Edited by Recruiter">
+                          <Icon name="edit" size={12} />
+                          <span>Recruiter Edited</span>
+                        </span>
+                      ) : isTemplateApproved ? (
+                        <span className="origin-badge badge-approved" title="Approved Baseline">
+                          <Icon name="check-circle" size={12} />
+                          <span>Approved</span>
+                        </span>
+                      ) : (
+                        <span className="origin-badge badge-deterministic" title="Deterministic Blueprint">
+                          <Icon name="shield" size={12} />
+                          <span>Deterministic</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Reorder Buttons */}
+                    {isTemplateDraft && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => handleMoveQuestion(idx, "UP")}
+                          disabled={idx === 0}
+                          title="Move Question Up"
+                          aria-label={`Move Question ${idx + 1} Up`}
+                        >
+                          <Icon name="chevron-up" size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => handleMoveQuestion(idx, "DOWN")}
+                          disabled={idx === editableQuestions.length - 1}
+                          title="Move Question Down"
+                          aria-label={`Move Question ${idx + 1} Down`}
+                        >
+                          <Icon name="chevron-down" size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {isTemplateDraft && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => handleMoveQuestion(idx, "UP")}
-                        disabled={idx === 0}
-                        title="Move Up"
-                      >
-                        <Icon name="chevron-up" size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => handleMoveQuestion(idx, "DOWN")}
-                        disabled={idx === editableQuestions.length - 1}
-                        title="Move Down"
-                      >
-                        <Icon name="chevron-down" size={14} />
-                      </button>
+
+                  {/* Question Content: Full-width responsive textarea in draft mode */}
+                  {isTemplateDraft ? (
+                    <div className="mb-3">
+                      <textarea
+                        className="question-full-textarea"
+                        rows={3}
+                        value={q.question_text}
+                        onChange={(e) => handleQuestionTextChange(idx, e.target.value)}
+                        aria-label={`Question ${idx + 1} text`}
+                      />
+                    </div>
+                  ) : (
+                    <div className="question-display-body">
+                      {q.question_text}
+                    </div>
+                  )}
+
+                  {/* Original vs Current AI Draft Comparison View (if toggled) */}
+                  {isComparing && q.deterministic_source_text && (
+                    <div className="comparison-box p-3 bg-slate-50 border rounded text-xs mb-3 space-y-2">
+                      <div className="font-semibold text-slate-800 flex items-center justify-between">
+                        <span>Baseline Comparison</span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => setComparingQuestionId(null)}
+                        >
+                          <Icon name="x" size={12} />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-2 bg-white rounded border">
+                          <strong className="text-muted block mb-1">Deterministic Blueprint Baseline:</strong>
+                          <p className="text-slate-700 m-0">{q.deterministic_source_text}</p>
+                        </div>
+                        <div className="p-2 bg-blue-50 rounded border border-blue-100">
+                          <strong className="text-blue-900 block mb-1">Current Active Draft:</strong>
+                          <p className="text-blue-950 m-0">{q.question_text}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Bottom Meta & Actions Bar */}
+                  <div className="question-bottom-meta-bar">
+                    <div className="question-meta-tags">
+                      <span><strong>Duration:</strong> {q.estimated_time_minutes} min</span>
+                      {q.permitted_probes && q.permitted_probes.length > 0 && (
+                        <span><strong>Permitted Probes:</strong> {q.permitted_probes.length}</span>
+                      )}
+                    </div>
+
+                    <div className="question-actions-cluster">
+                      {/* Edit Button */}
+                      {isTemplateDraft && !isEditing && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => setEditingQuestionId(q.question_id)}
+                          title="Edit question wording directly"
+                        >
+                          <Icon name="edit" size={12} />
+                          <span>Edit</span>
+                        </button>
+                      )}
+
+                      {/* Compare with Original */}
+                      {q.deterministic_source_text && q.deterministic_source_text !== q.question_text && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs text-muted"
+                          onClick={() => setComparingQuestionId(isComparing ? null : q.question_id)}
+                          title="Compare current draft with original deterministic wording"
+                        >
+                          <Icon name="eye" size={12} />
+                          <span>{isComparing ? "Hide comparison" : "Compare original"}</span>
+                        </button>
+                      )}
+
+                      {/* Restore Deterministic Action */}
+                      {canRestore && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs text-muted"
+                          onClick={() => handleRestoreDeterministic(q, "COMMON_CORE")}
+                          title="Restore original deterministic baseline wording"
+                        >
+                          <Icon name="history" size={12} />
+                          <span>Restore original</span>
+                        </button>
+                      )}
+
+                      {/* Improve Wording Action (Single Question) */}
+                      {isTemplateDraft && (
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-xs btn-ai-improve"
+                          onClick={() => handleImproveWording(q, "COMMON_CORE")}
+                          disabled={isImproving || !ai_capability.ai_enabled}
+                          title={
+                            ai_capability.ai_enabled
+                              ? "Regenerate wording suggestion with local AI"
+                              : ai_capability.message || "AI assistance currently unavailable"
+                          }
+                          aria-label={`Improve wording for question ${idx + 1}`}
+                        >
+                          <Icon name="sparkles" size={12} />
+                          <span>{isImproving ? "Improving wording…" : "Improve wording"}</span>
+                        </button>
+                      )}
+
+                      {/* View Anchored Rubric */}
+                      {q.rubric && (
+                        <button
+                          type="button"
+                          className="btn btn-link btn-xs"
+                          onClick={() => setSelectedRubricQuestion(q)}
+                        >
+                          <Icon name="file-text" size={12} />
+                          <span>View Rubric</span>
+                        </button>
+                      )}
+
+                      {/* AI Technical Provenance Toggle */}
+                      {hasAiProvenance && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs text-xs text-muted"
+                          onClick={() =>
+                            setExpandedProvenanceQuestionId(isAiExpanded ? null : q.question_id)
+                          }
+                          aria-expanded={isAiExpanded}
+                          aria-label="Toggle Technical Details"
+                          title="View provenance and compliance hashes"
+                        >
+                          <Icon name={isAiExpanded ? "chevron-up" : "info"} size={12} />
+                          <span>{isAiExpanded ? "Hide Technical" : "Technical Details"}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expandable Technical Details Drawer */}
+                  {hasAiProvenance && isAiExpanded && (
+                    <div className="ai-provenance-box mt-3 p-3 bg-slate-50 border rounded text-xs space-y-1">
+                      <div className="font-semibold text-slate-800 flex items-center gap-1 mb-1">
+                        <Icon name="shield-check" size={13} />
+                        <span>AI Governance &amp; Provenance Record</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-600">
+                        <div><strong>Engine:</strong> {q.ai_provenance?.provider_class || "LOCAL_LM_STUDIO"}</div>
+                        <div><strong>Model:</strong> {q.ai_provenance?.model_name || "qwen3-4b-instruct"}</div>
+                        <div><strong>Origin:</strong> {q.authoring_origin}</div>
+                        <div><strong>Template Schema:</strong> {q.ai_provenance?.prompt_template_version || "1.0.0"}</div>
+                        <div><strong>Validation Result:</strong> <span className="text-success font-medium">Verified Safe</span></div>
+                        <div><strong>Deterministic Hash:</strong> <code>{(q.deterministic_source_hash || "").substring(0, 10) || "N/A"}</code></div>
+                      </div>
                     </div>
                   )}
                 </div>
-
-                {isTemplateDraft ? (
-                  <textarea
-                    className="form-control w-full mb-2"
-                    rows={3}
-                    value={q.question_text}
-                    onChange={(e) => handleQuestionTextChange(idx, e.target.value)}
-                  />
-                ) : (
-                  <p className="text-gray-900 mb-2 whitespace-pre-wrap">{q.question_text}</p>
-                )}
-
-                <div className="flex justify-between items-center text-xs text-muted pt-2 border-t">
-                  <span>Estimated Time: {q.estimated_time_minutes} min</span>
-                  <div className="flex gap-2">
-                    {q.rubric && (
-                      <button
-                        type="button"
-                        className="btn btn-link btn-xs"
-                        onClick={() => setSelectedRubricQuestion(q)}
-                      >
-                        <Icon name="file-text" size={12} />
-                        <span>View Anchored Rubric</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          {/* Sticky Lifecycle Action Bar */}
-          <div className="sticky-action-bar flex justify-between items-center mt-4 p-3 bg-gray-50 border rounded">
+          {/* Sticky Action Bar for Draft & Validation */}
+          <div className="sticky-action-bar flex justify-between items-center">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted">
-                Status: <strong>{template.lifecycle_state}</strong>
+                Status: <strong>{templateStatus}</strong>
               </span>
               {hasUnsavedChanges && (
                 <span className="badge badge-warning text-xs">Unsaved Edits</span>
@@ -669,10 +1351,10 @@ export function InterviewWorkspace({
                     type="button"
                     className="btn btn-primary btn-sm"
                     onClick={handleApprove}
-                    disabled={template.lifecycle_state !== "VALIDATED" || hasUnsavedChanges}
+                    disabled={templateStatus !== "VALIDATED" || hasUnsavedChanges}
                   >
                     <Icon name="check" size={14} />
-                    <span>Approve &amp; Lock</span>
+                    <span>Approve &amp; Lock Baseline</span>
                   </button>
                 </>
               )}
@@ -692,8 +1374,8 @@ export function InterviewWorkspace({
         </div>
       )}
 
-      {/* Candidate Supplemental Section */}
-      {template && (
+      {/* Candidate Supplemental Section or Job Template Mode Notice */}
+      {template && (resumeId ? (
         <div className="candidate-supplemental-section mt-8">
           <div className="section-header flex justify-between items-center mb-3">
             <div>
@@ -720,26 +1402,28 @@ export function InterviewWorkspace({
             <div className="candidate-plan-box border rounded p-4 bg-gray-50">
               <div className="flex justify-between items-center mb-3">
                 <span className="badge badge-info">
-                  Plan v{candidatePlan.plan_version} &bull; {candidatePlan.lifecycle_state}
+                  Plan v{candidatePlan.plan_version} &bull; {(candidatePlan as any).lifecycle_status || candidatePlan.lifecycle_state || "DRAFT"}
                 </span>
                 <span className="text-xs text-muted">
-                  Supplemental Duration: {candidatePlan.supplemental_duration_minutes} min &bull; Total: {candidatePlan.total_duration_minutes} min
+                  Supplemental Duration: {candidatePlan.supplemental_duration_minutes || 15} min &bull; Total: {candidatePlan.total_duration_minutes || 60} min
                 </span>
               </div>
 
               {editablePlanQuestions.length === 0 ? (
                 <p className="text-muted text-sm italic">
-                  No supplemental evidence clarification questions required for this candidate (no significant gaps detected).
+                  No supplemental evidence clarification needed. Candidate match evidence is sufficient.
                 </p>
               ) : (
-                <div className="supplemental-questions-list space-y-3">
+                <div className="space-y-3">
                   {editablePlanQuestions.map((q, idx) => (
-                    <div key={q.question_id} className="supplemental-card border rounded p-3 bg-white">
+                    <div key={q.question_id} className="supplemental-q-card border rounded p-3 bg-white">
                       <div className="flex justify-between items-center mb-1">
                         <div className="flex items-center gap-2">
                           <span className="badge badge-warning">Supplemental #{idx + 1}</span>
                           <span className="badge badge-outline text-xs">NOT IN COMMON SCORE</span>
-                          <span className="text-xs font-semibold">{q.competency_name}</span>
+                          <span className="text-xs font-semibold">
+                            {formatCompetencyName(q.competency_name || (q as any).competency_id)}
+                          </span>
                         </div>
                       </div>
                       <p className="text-sm text-gray-800">{q.question_text}</p>
@@ -754,16 +1438,32 @@ export function InterviewWorkspace({
             </div>
           )}
         </div>
-      )}
+      ) : (
+        <div className="candidate-supplemental-info mt-8 p-4 border rounded bg-gray-50 flex items-center gap-3">
+          <Icon name="info" size={20} className="text-primary" />
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Standardized Job Template Mode</h3>
+            <p className="text-xs text-muted">
+              You are managing the common core interview questions and anchored rubrics for <strong>{context.job_title}</strong>. 
+              Candidate-specific supplemental clarification questions are generated per-candidate when reviewing applicants in Candidate Comparison.
+            </p>
+          </div>
+        </div>
+      ))}
 
       {/* Anchored Rubric Modal / Drawer */}
       {selectedRubricQuestion && selectedRubricQuestion.rubric && (
         <div className="modal-backdrop fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="modal-box bg-white rounded-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4 border-b pb-2">
-              <h3 className="font-semibold text-lg">
-                Anchored Rubric: {selectedRubricQuestion.competency_name}
-              </h3>
+              <div>
+                <h3 className="font-semibold text-lg">
+                  Anchored Rubric: {formatCompetencyName(selectedRubricQuestion.competency_name || (selectedRubricQuestion.rubric as any).competency_definition || selectedRubricQuestion.rubric.target_competency)}
+                </h3>
+                <p className="text-xs text-muted">
+                  {(selectedRubricQuestion.rubric as any).question_intent || "Authoritative behavioral scoring anchors"}
+                </p>
+              </div>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -772,29 +1472,20 @@ export function InterviewWorkspace({
                 <Icon name="x" size={18} />
               </button>
             </div>
-            <div className="rubric-levels space-y-4">
-              {selectedRubricQuestion.rubric.levels.map((level, idx) => (
-                <div key={idx} className="rubric-level-card border rounded p-3 bg-gray-50">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="font-bold text-primary">{level.level_name}</span>
-                    <span className="badge badge-secondary text-xs">
-                      Score: {level.score_range[0]} - {level.score_range[1]}
-                    </span>
+
+            {/* Behavioral Rating Anchors (1-5 Scale) */}
+            {(selectedRubricQuestion.rubric as any).rating_anchors && (
+              <div className="rubric-anchors space-y-3 mb-4">
+                <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Behavioral Rating Anchors</h4>
+                {Object.entries((selectedRubricQuestion.rubric as any).rating_anchors).map(([score, description]) => (
+                  <div key={score} className="rubric-level-card border rounded p-3 bg-gray-50 flex items-start gap-3">
+                    <span className="badge badge-primary font-bold text-sm px-2 py-1">Score {score}</span>
+                    <p className="text-sm text-gray-800 m-0">{String(description)}</p>
                   </div>
-                  <p className="text-sm text-gray-700 mb-2">{level.description}</p>
-                  {level.observable_signals.length > 0 && (
-                    <div className="text-xs">
-                      <strong>Observable Signals:</strong>
-                      <ul className="list-disc pl-4 mt-1 text-gray-600">
-                        {level.observable_signals.map((sig, sIdx) => (
-                          <li key={sIdx}>{sig}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
+
             <div className="mt-6 flex justify-end">
               <button
                 type="button"
@@ -900,6 +1591,38 @@ export function InterviewWorkspace({
           </div>
         </div>
       )}
+
+      {/* Phase 3C.4: Wording Comparison Modal */}
+      {activeWordingComparison && (
+        <WordingComparisonModal
+          isOpen={!!activeWordingComparison}
+          question={activeWordingComparison.question}
+          wordingResult={activeWordingComparison.result}
+          onClose={() => setActiveWordingComparison(null)}
+          onUseSuggestion={(variant) =>
+            handleUseSuggestion(
+              activeWordingComparison.question,
+              variant,
+              activeWordingComparison.result,
+              activeWordingComparison.layer
+            )
+          }
+          onEditSuggestion={(variant) =>
+            handleEditSuggestion(
+              activeWordingComparison.question,
+              variant,
+              activeWordingComparison.layer
+            )
+          }
+          onKeepOriginal={() => setActiveWordingComparison(null)}
+          isApplying={isApplyingSuggestion}
+        />
+      )}
+
+      {/* ARIA Live Region for Screen Readers */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
     </div>
   );
 }

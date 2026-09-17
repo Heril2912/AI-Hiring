@@ -515,17 +515,38 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
                 safe_message="OpenAI-compatible response missing 'choices' array.",
             )
 
-        message = choices[0].get("message", {})
-        raw_content = message.get("content", "").strip()
+        choice = choices[0]
+        finish_reason = choice.get("finish_reason")
+        message = choice.get("message", {})
+        raw_content = message.get("content")
+        raw_reasoning = message.get("reasoning_content")
 
-        if not raw_content:
+        # Normalize content
+        content_str = (raw_content or "").strip()
+
+        # Reject reasoning-only output or empty content
+        if not content_str:
+            if raw_reasoning or finish_reason == "length":
+                raise ProviderTransportError(
+                    error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                    safe_message="The selected model used its response budget for reasoning and returned no final wording. Select a compatible Instruct model and retry. Your deterministic questions were retained.",
+                )
             raise ProviderTransportError(
-                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
-                safe_message="OpenAI-compatible response contained empty message content.",
+                error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                safe_message="OpenAI-compatible response contained null, empty, or whitespace message content.",
+            )
+
+        # Check for truncation before completing structured output
+        if finish_reason == "length":
+            # If the response was truncated at length boundary, it cannot be guaranteed valid
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_TRUNCATED,
+                safe_message="Model response was truncated before completing structured output (finish_reason: length).",
             )
 
         # Parse JSON from content (stripping markdown fences if present)
-        clean_json_str = raw_content
+        # NEVER parse reasoning_content as final answer; only parse message.content
+        clean_json_str = content_str
         if clean_json_str.startswith("```json"):
             clean_json_str = clean_json_str[7:]
         elif clean_json_str.startswith("```"):
@@ -539,8 +560,14 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
         except Exception as e:
             logger.warning("Failed to parse JSON from provider wording response: %s", e)
             raise ProviderTransportError(
-                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
-                safe_message="Provider response could not be parsed into valid JSON structure.",
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                safe_message="Provider response content could not be parsed into valid JSON structure.",
+            )
+
+        if not isinstance(parsed_data, dict):
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                safe_message="Provider response root is not a JSON object.",
             )
 
         try:
@@ -549,7 +576,7 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
         except Exception as e:
             logger.warning("Provider wording response failed schema validation: %s", e)
             raise ProviderTransportError(
-                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
                 safe_message=f"Provider response schema validation failed: {str(e)}",
             )
 
@@ -605,13 +632,27 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
                     safe_message="OpenAI-compatible response missing 'choices' array.",
                 )
 
-            message = choices[0].get("message", {})
-            content = message.get("content", "").strip()
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason")
+            message = choice.get("message", {})
+            content = (message.get("content") or "").strip()
+            raw_reasoning = message.get("reasoning_content")
 
             if not content:
+                if raw_reasoning or finish_reason == "length":
+                    raise ProviderTransportError(
+                        error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                        safe_message="The selected model used its response budget for reasoning and returned no final wording. Select a compatible Instruct model and retry. Your deterministic questions were retained.",
+                    )
                 raise ProviderTransportError(
-                    error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                    error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
                     safe_message="OpenAI-compatible response contained empty message content.",
+                )
+
+            if finish_reason == "length":
+                raise ProviderTransportError(
+                    error_code=ProviderErrorCode.RESPONSE_TRUNCATED,
+                    safe_message="Model response was truncated before completion.",
                 )
 
             return ProviderCapabilityResponse(

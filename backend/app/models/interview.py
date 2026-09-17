@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -26,6 +27,11 @@ from app.schemas.phase3_enums import (
     AuthoringOrigin,
     InterviewLayer,
     PlanLifecycle,
+    PrivacyReviewStatus,
+    ProviderCompatibilityStatus,
+    ProviderEgressClass,
+    ProviderOperation,
+    ProviderType,
     QuestionType,
     ValidationState,
 )
@@ -806,3 +812,189 @@ class SupplementalQuestionProvenanceRecord(Base):
     source_requirement: Mapped["JobRequirement"] = relationship("JobRequirement")
     source_match_result: Mapped[Optional["MatchResultRecord"]] = relationship("MatchResultRecord")
     source_gap_report: Mapped[Optional["GapReportRecord"]] = relationship("GapReportRecord")
+
+
+class ProviderProfileRecord(Base):
+    """Authoritative persistent record for an Admin-configured AI provider profile."""
+
+    __tablename__ = "provider_profiles"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_provider_profiles_version_positive"),
+        Index("ix_provider_profiles_organization_id", "organization_id"),
+        Index("ix_provider_profiles_enabled", "enabled"),
+    )
+
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    display_name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+    provider_type: Mapped[ProviderType] = mapped_column(
+        Enum(
+            ProviderType,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_provider_profiles_provider_type_enum",
+        ),
+        nullable=False,
+    )
+    api_mode: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="CHAT_COMPLETIONS",
+    )
+    base_url: Mapped[Optional[str]] = mapped_column(
+        String(1000),
+        nullable=True,
+    )
+    model_identifier: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    secret_ref: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    supported_operations: Mapped[List[str]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    connect_timeout_seconds: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=5.0,
+    )
+    request_timeout_seconds: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=30.0,
+    )
+    max_input_tokens: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=4096,
+    )
+    max_output_tokens: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=600,
+    )
+    max_response_bytes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=262144,
+    )
+    max_concurrency: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+    retry_limit: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    egress_class: Mapped[ProviderEgressClass] = mapped_column(
+        Enum(
+            ProviderEgressClass,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_provider_profiles_egress_class_enum",
+        ),
+        nullable=False,
+        default=ProviderEgressClass.LOCAL_ONLY,
+    )
+    privacy_review_status: Mapped[PrivacyReviewStatus] = mapped_column(
+        Enum(
+            PrivacyReviewStatus,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_provider_profiles_privacy_review_status_enum",
+        ),
+        nullable=False,
+        default=PrivacyReviewStatus.PENDING_REVIEW,
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    compatibility_status: Mapped[ProviderCompatibilityStatus] = mapped_column(
+        Enum(
+            ProviderCompatibilityStatus,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_provider_profiles_compatibility_status_enum",
+        ),
+        nullable=False,
+        default=ProviderCompatibilityStatus.NOT_TESTED,
+    )
+    tested_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    model_source: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    model_licence: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    model_checksum: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+    )
+    last_compatibility_report: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=True,
+    )
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    activated_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    activated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    deactivated_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    deactivated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

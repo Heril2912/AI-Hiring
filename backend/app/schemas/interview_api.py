@@ -36,6 +36,7 @@ class InterviewRubricResponse(FrozenSchema):
 
 class InterviewQuestionResponse(FrozenSchema):
     question_id: uuid.UUID
+    question_version: int = 1
     layer: InterviewLayer
     question_type: QuestionType
     competency_id: Optional[str] = None
@@ -50,6 +51,9 @@ class InterviewQuestionResponse(FrozenSchema):
     permitted_probes: List[str]
     validation_state: ValidationState
     included_in_common_score: bool
+    content_hash: Optional[str] = None
+    deterministic_source_text: Optional[str] = None
+    safe_metadata: Dict[str, Any] = Field(default_factory=dict)
     rubric: Optional[InterviewRubricResponse] = None
 
 
@@ -380,5 +384,65 @@ class VersionDiffResponse(FrozenSchema):
     total_duration_minutes_to: int
     changed_questions_count: int
     question_diffs: List[QuestionDiffItem]
+
+
+# =========================================================================
+# Phase 3C.4: Recruiter AI Wording Application & Restoration Schemas
+# =========================================================================
+
+class ApplyWordingSuggestionRequest(FrozenSchema):
+    """Request payload to apply a validated AI-assisted wording suggestion to a draft question."""
+    expected_question_version: int = Field(ge=1, description="Optimistic concurrency: expected question version.")
+    expected_source_hash: Optional[str] = Field(default=None, max_length=64, description="Expected content hash of deterministic source text.")
+    suggested_text: str = Field(min_length=5, max_length=2000, description="The validated suggestion text to apply.")
+    rationale_code: Optional[str] = Field(default=None, max_length=100)
+
+
+class RestoreDeterministicWordingRequest(FrozenSchema):
+    """Request payload to restore the original deterministic wording on a question."""
+    expected_question_version: int = Field(ge=1, description="Optimistic concurrency: expected question version.")
+
+
+class QuestionActionResponse(FrozenSchema):
+    """Response payload returned when a question is updated or restored."""
+    question_id: uuid.UUID
+    question_version: int
+    question_text: str
+    authoring_origin: AuthoringOrigin
+    validation_state: ValidationState
+    deterministic_source_text: Optional[str] = None
+    safe_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class GenerateTemplateAiWordingRequest(FrozenSchema):
+    """Request payload to initiate AI wording generation for an entire draft template."""
+    expected_template_version: int = Field(ge=1, description="Expected template version.")
+    expected_content_hash: Optional[str] = Field(default=None, max_length=64)
+
+
+class QuestionBatchWordingResult(FrozenSchema):
+    """Result status for an individual question in a batch generation operation."""
+    question_id: uuid.UUID
+    display_order: int
+    status: str  # "AI_READY", "DETERMINISTIC_FALLBACK", "FAILED_RETRYABLE"
+    authoring_origin: AuthoringOrigin
+    question_text: str
+    rationale_code: Optional[str] = None
+    validation_state: ValidationState
+    error_message: Optional[str] = None
+
+
+class GenerateTemplateAiWordingResponse(FrozenSchema):
+    """Response payload returned after batch AI wording generation completes."""
+    template_id: uuid.UUID
+    template_version: int
+    lifecycle_status: PlanLifecycle
+    total_questions: int
+    ai_generated_count: int
+    fallback_count: int
+    failed_count: int
+    status: str  # "COMPLETED", "PARTIALLY_COMPLETED", "FAILED"
+    results: List[QuestionBatchWordingResult]
+    safe_message: str
 
 

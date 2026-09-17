@@ -40,6 +40,7 @@ from app.schemas.provider_admin import (
     CreateProviderProfileRequest,
     DisableProviderProfileRequest,
     ProviderCompatibilityReportResponse,
+    SelectProviderModelRequest,
     TestProviderCompatibilityRequest,
     UpdateProviderProfileRequest,
 )
@@ -445,11 +446,95 @@ async def list_security_events(
     description="Lists configured provider profiles for Administrator inspection with masked secrets and sanitized URLs.",
 )
 async def list_provider_profiles(
+    include_archived: bool = Query(default=True, description="Include archived profiles in response"),
     auth_ctx: AuthenticatedContext = Depends(require_admin),
     registry: ProviderRegistry = Depends(get_provider_registry),
 ) -> list[AdminProviderProfileResponse]:
-    profiles = registry.list_profiles()
+    profiles = registry.list_profiles(include_archived=include_archived)
     return [registry.to_safe_admin_response(p) for p in profiles]
+
+
+@router.post(
+    "/provider-profiles/{profile_id}/archive",
+    response_model=AdminProviderProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Archive or Restore Provider Profile",
+    description="Archives or unarchives a provider profile. Active profiles cannot be archived. Requires Admin role and CSRF.",
+)
+async def archive_provider_profile(
+    profile_id: uuid.UUID,
+    archive_req: ArchiveProviderProfileRequest = Body(...),
+    auth_ctx: AuthenticatedContext = Depends(verify_csrf_and_origin),
+    admin_auth: AuthenticatedContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> AdminProviderProfileResponse:
+    try:
+        updated = registry.archive_profile(
+            profile_id=profile_id,
+            version=archive_req.version,
+            archive=archive_req.archive,
+            actor_id=admin_auth.user.user_id,
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider profile '{profile_id}' not found.",
+        )
+    except StaleVersionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        )
+    except InactiveProfileUpdateError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.PROVIDER_PROFILE_UPDATED,
+        result=AuditResult.SUCCESS,
+        reason_code=AuditReasonCode.PROVIDER_UPDATED,
+        actor_user_id=admin_auth.user.user_id,
+        resource_type="provider_profile",
+        resource_id=str(updated.profile_id),
+        safe_metadata={
+            "action": "ARCHIVE" if archive_req.archive else "UNARCHIVE",
+            "is_archived": updated.is_archived,
+            "version": updated.version,
+        },
+    )
+    db.commit()
+
+    return registry.to_safe_admin_response(updated)
+
+
+@router.get(
+    "/provider-profiles/discover-models",
+    response_model=list[str],
+    status_code=status.HTTP_200_OK,
+    summary="Discover Local LM Studio Models",
+    description="Queries local LM Studio /v1/models endpoint safely and returns discovered model IDs.",
+)
+async def discover_local_models(
+    base_url: Optional[str] = Query(default="http://127.0.0.1:1234/v1"),
+    auth_ctx: AuthenticatedContext = Depends(require_admin),
+) -> list[str]:
+    import httpx
+    target_url = (base_url or "http://127.0.0.1:1234/v1").rstrip("/") + "/models"
+    try:
+        async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as client:
+            resp = await client.get(target_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
+                    models = [str(m["id"]) for m in data["data"] if isinstance(m, dict) and "id" in m]
+                    return models
+    except Exception as exc:
+        logger.info("Model discovery query failed: %s", exc)
+    return []
 
 
 @router.post(
@@ -790,5 +875,51 @@ async def test_provider_compatibility(
     db.commit()
 
     return report
+
+
+@router.post(
+    "/provider-profiles/{profile_id}/select-model",
+    response_model=AdminProviderProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Select Model for Provider Profile",
+    description="Updates the model identifier directly on a provider profile, resetting compatibility status and persisting to PostgreSQL.",
+)
+async def select_provider_model(
+    profile_id: uuid.UUID,
+    select_req: SelectProviderModelRequest = Body(...),
+    auth_ctx: AuthenticatedContext = Depends(verify_csrf_and_origin),
+    admin_auth: AuthenticatedContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+    registry: ProviderRegistry = Depends(get_provider_registry),
+) -> AdminProviderProfileResponse:
+    try:
+        updated = registry.set_profile_model(
+            profile_id=profile_id,
+            model_identifier=select_req.model_identifier,
+            actor_id=admin_auth.user.user_id,
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider profile '{profile_id}' not found.",
+        )
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.PROVIDER_PROFILE_UPDATED,
+        result=AuditResult.SUCCESS,
+        reason_code=AuditReasonCode.PROVIDER_UPDATED,
+        actor_user_id=admin_auth.user.user_id,
+        resource_type="provider_profile",
+        resource_id=str(updated.profile_id),
+        safe_metadata={
+            "action": "SELECT_MODEL",
+            "model_identifier": updated.model_identifier,
+            "version": updated.version,
+        },
+    )
+    db.commit()
+
+    return registry.to_safe_admin_response(updated)
 
 

@@ -128,11 +128,34 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
   const [activateReason, setActivateReason] = useState("");
   const [activateModalError, setActivateModalError] = useState<string | null>(null);
 
+  // Local AI Simplification State
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [isDiscoveringModels, setIsDiscoveringModels] = useState(false);
+
+  const handleAutoDiscoverModels = async (baseUrl?: string) => {
+    try {
+      setIsDiscoveringModels(true);
+      const url = baseUrl || "http://127.0.0.1:1234/v1";
+      const models = await apiFetch<string[]>(`/api/v1/admin/provider-profiles/discover-models?base_url=${encodeURIComponent(url)}`);
+      if (models && models.length > 0) {
+        setDiscoveredModels(models);
+        if (!newModelId && models[0]) {
+          setNewModelId(models[0]);
+        }
+      }
+    } catch {
+      // Non-blocking
+    } finally {
+      setIsDiscoveringModels(false);
+    }
+  };
+
   const fetchProviders = async () => {
     try {
       setIsLoadingProviders(true);
       setProviderError(null);
-      const data = await apiFetch<AdminProviderProfileItem[]>("/api/v1/admin/provider-profiles");
+      const data = await apiFetch<AdminProviderProfileItem[]>("/api/v1/admin/provider-profiles?include_archived=true");
       setProviders(data || []);
     } catch (err: any) {
       setProviderError(err?.message || "Failed to load AI provider profiles.");
@@ -142,11 +165,13 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
   };
 
   const handleTestCompatibility = async (profile: AdminProviderProfileItem) => {
+    const pId = profile.profileId || (profile as any).profile_id;
+    const pName = profile.displayName || (profile as any).display_name;
     try {
-      setIsTestingProvider(profile.profileId);
+      setIsTestingProvider(pId);
       setProviderError(null);
       const report = await apiFetch<any>(
-        `/api/v1/admin/provider-profiles/${profile.profileId}/test-compatibility`,
+        `/api/v1/admin/provider-profiles/${pId}/test-compatibility`,
         {
           method: "POST",
           body: JSON.stringify({ version: profile.version }),
@@ -156,9 +181,9 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
       setSelectedReportProfile(profile);
       setIsReportModalOpen(true);
       if (report.is_compatible) {
-        setActionSuccess(`Compatibility check passed for '${profile.displayName}' (latency: ${report.latency_ms}ms).`);
+        setActionSuccess(`Compatibility check passed for '${pName}' (latency: ${report.latency_ms}ms).`);
       } else {
-        setProviderError(`Compatibility check failed for '${profile.displayName}': ${report.safe_failure_message || report.safe_failure_code}`);
+        setProviderError(`Compatibility check failed for '${pName}': ${report.safe_failure_message || report.safe_failure_code}`);
       }
       fetchProviders();
     } catch (err: any) {
@@ -180,12 +205,12 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
     try {
       setIsCreatingProvider(true);
       const payload = {
-        displayName: newDisplayName.trim(),
-        providerType: newProviderType,
-        egressClass: newEgressClass,
-        baseUrl: newBaseUrl.trim() || undefined,
-        modelIdentifier: newModelId.trim() || undefined,
-        secretRef: newSecretRef.trim() || undefined,
+        display_name: newDisplayName.trim(),
+        provider_type: newProviderType,
+        egress_class: newEgressClass,
+        base_url: newBaseUrl.trim() || undefined,
+        model_identifier: newModelId.trim() || undefined,
+        secret_ref: newSecretRef.trim() || undefined,
       };
 
       await apiFetch("/api/v1/admin/provider-profiles", {
@@ -220,24 +245,28 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
     if (!targetActivateProfile) return;
     setActivateModalError(null);
 
-    if (targetActivateProfile.egressClass === "APPROVED_REMOTE" && !confirmRemoteEgress) {
+    const isRemote = (targetActivateProfile.egressClass as any) === "APPROVED_REMOTE" || (targetActivateProfile as any).egress_class === "APPROVED_REMOTE";
+    if (isRemote && !confirmRemoteEgress) {
       setActivateModalError("Explicit confirmation of remote data egress is required.");
       return;
     }
 
+    const pId = targetActivateProfile.profileId || (targetActivateProfile as any).profile_id;
+    const pName = targetActivateProfile.displayName || (targetActivateProfile as any).display_name;
+
     try {
-      setIsTogglingProvider(targetActivateProfile.profileId);
-      await apiFetch(`/api/v1/admin/provider-profiles/${targetActivateProfile.profileId}/activate`, {
+      setIsTogglingProvider(pId);
+      await apiFetch(`/api/v1/admin/provider-profiles/${pId}/activate`, {
         method: "POST",
         body: JSON.stringify({
           version: targetActivateProfile.version,
-          confirmRemoteEgress: confirmRemoteEgress,
+          confirm_remote_egress: confirmRemoteEgress,
           reason: activateReason.trim() || undefined,
         }),
       });
 
       setIsActivateModalOpen(false);
-      setActionSuccess(`Provider profile '${targetActivateProfile.displayName}' activated successfully.`);
+      setActionSuccess(`Provider profile '${pName}' activated successfully.`);
       fetchProviders();
     } catch (err: any) {
       setActivateModalError(err?.message || "Failed to activate provider profile.");
@@ -247,16 +276,18 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
   };
 
   const handleDisableProvider = async (profile: AdminProviderProfileItem) => {
+    const pId = profile.profileId || (profile as any).profile_id;
+    const pName = profile.displayName || (profile as any).display_name;
     try {
-      setIsTogglingProvider(profile.profileId);
-      await apiFetch(`/api/v1/admin/provider-profiles/${profile.profileId}/disable`, {
+      setIsTogglingProvider(pId);
+      await apiFetch(`/api/v1/admin/provider-profiles/${pId}/disable`, {
         method: "POST",
         body: JSON.stringify({
           version: profile.version,
           reason: "Disabled via Admin Workspace",
         }),
       });
-      setActionSuccess(`Provider profile '${profile.displayName}' disabled successfully.`);
+      setActionSuccess(`Provider profile '${pName}' disabled successfully.`);
       fetchProviders();
     } catch (err: any) {
       setProviderError(err?.message || "Failed to disable provider profile.");
@@ -855,9 +886,9 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
         <div className="admin-section-card">
           <div className="admin-section-header">
             <div>
-              <h2 className="admin-section-title">AI Provider Profiles</h2>
+              <h2 className="admin-section-title">Local AI Configuration</h2>
               <p className="admin-section-subtitle">
-                Configure provider backends, egress boundaries, and optimistic activation controls.
+                Manage local LM Studio inference engine and bounded AI wording assistance.
               </p>
             </div>
             <div className="admin-header-actions">
@@ -868,15 +899,15 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                 disabled={isLoadingProviders}
               >
                 <Icon name="refresh" size={16} />
-                <span>Refresh</span>
+                <span>Refresh Status</span>
               </button>
               <button
                 type="button"
-                className="btn btn-primary"
+                className="btn btn-outline"
                 onClick={() => setIsCreateProviderModalOpen(true)}
               >
                 <Icon name="plus" size={16} />
-                <span>Add Provider Profile</span>
+                <span>New Profile</span>
               </button>
             </div>
           </div>
@@ -891,147 +922,362 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
           {isLoadingProviders ? (
             <div className="admin-table-loading">
               <div className="loading-spinner-sm" />
-              <span>Loading provider profiles...</span>
+              <span>Checking AI provider status...</span>
             </div>
           ) : (
-            <div className="admin-table-wrapper">
-              <table className="admin-data-table" aria-label="AI Providers Table">
-                <thead>
-                  <tr>
-                    <th>Display Name</th>
-                    <th>Type & Model</th>
-                    <th>Egress Class</th>
-                    <th>Base URL</th>
-                    <th>Secret Status</th>
-                    <th>Compatibility</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {providers.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="table-empty-cell">
-                        No provider profiles configured. Click "Add Provider Profile" to create one.
-                      </td>
-                    </tr>
-                  ) : (
-                    providers.map((p) => (
-                      <tr key={p.profileId} className={p.enabled ? "row-active-provider" : ""}>
-                        <td>
-                          <div className="provider-name-cell">
-                            <strong>{p.displayName}</strong>
-                            <span className="profile-version-tag">v{p.version}</span>
+            <>
+              {/* PRIMARY LOCAL AI HERO CARD */}
+              {(() => {
+                const activeProfile = providers.find((p: any) => p.enabled && !p.is_archived && !p.isArchived);
+                const localProfile = activeProfile || providers.find((p: any) => 
+                  ((p.providerType || p.provider_type) === "LOCAL_OPENAI_COMPATIBLE") &&
+                  !p.is_archived && !p.isArchived
+                );
+
+                if (localProfile) {
+                  const pId = localProfile.profileId || (localProfile as any).profile_id;
+                  const pName = localProfile.displayName || (localProfile as any).display_name;
+                  const pModel = localProfile.modelIdentifier || (localProfile as any).model_identifier;
+                  const pCompat = localProfile.compatibilityStatus || (localProfile as any).compatibility_status;
+                  const pEnabled = localProfile.enabled;
+                  const pReport = localProfile.lastCompatibilityReport || (localProfile as any).last_compatibility_report;
+                  const isHealthy = pCompat === "HEALTHY" || pCompat === "COMPATIBLE";
+                  const wordingPassed = pReport?.question_wording_passed ?? isHealthy;
+
+                  const handleSelectModel = async (newModel: string) => {
+                    if (!newModel || newModel === pModel) return;
+                    try {
+                      setProviderError(null);
+                      await apiFetch(`/api/v1/admin/provider-profiles/${pId}/select-model`, {
+                        method: "POST",
+                        body: JSON.stringify({ model_identifier: newModel }),
+                      });
+                      setActionSuccess(`Active model changed to '${newModel}'. Run compatibility test to verify.`);
+                      fetchProviders();
+                    } catch (err: any) {
+                      setProviderError(err?.message || "Failed to update model identifier.");
+                    }
+                  };
+
+                  return (
+                    <div className={`local-ai-hero-card ${pEnabled ? "hero-active" : ""}`}>
+                      <div className="local-ai-hero-header">
+                        <div className="local-ai-hero-title-group">
+                          <div className="local-ai-hero-icon">
+                            <Icon name="sparkles" size={24} />
                           </div>
-                        </td>
-                        <td>
-                          <div className="provider-type-cell">
-                            <code>{p.providerType}</code>
-                            {p.modelIdentifier && (
-                              <span className="model-id-tag">{p.modelIdentifier}</span>
-                            )}
+                          <div>
+                            <h3 className="local-ai-hero-title">
+                              {pName} {pEnabled && <span className="status-pill status-active" style={{ marginLeft: "8px", verticalAlign: "middle" }}>Active</span>}
+                            </h3>
+                            <p className="local-ai-hero-subtitle">
+                              Local OpenAI-compatible engine running securely on this workstation.
+                            </p>
                           </div>
-                        </td>
-                        <td>
-                          <span
-                            className={`status-pill ${
-                              p.egressClass === "LOCAL_ONLY"
-                                ? "status-active"
-                                : "status-badge-remote"
-                            }`}
-                          >
-                            {p.egressClass === "LOCAL_ONLY" ? "Local Only" : "Approved Remote"}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="base-url-text">
-                            {p.baseUrlMasked || <em className="text-muted">Standard / Local Default</em>}
-                          </span>
-                        </td>
-                        <td>
-                          <span
-                            className={`secret-status-tag ${
-                              p.secretStatus === "CONFIGURED"
-                                ? "secret-ok"
-                                : p.secretStatus === "MISSING"
-                                ? "secret-missing"
-                                : "secret-none"
-                            }`}
-                          >
-                            {p.secretStatus === "CONFIGURED" && "✓ Configured"}
-                            {p.secretStatus === "MISSING" && "⚠ Missing Secret"}
-                            {p.secretStatus === "NOT_REQUIRED" && "Not Required"}
-                          </span>
-                        </td>
-                        <td>
+                        </div>
+                        <div className="flex items-center gap-2">
                           <span
                             className={`compat-status-tag ${
-                              p.compatibilityStatus === "HEALTHY" || p.compatibilityStatus === "COMPATIBLE"
+                              isHealthy
                                 ? "status-compatible"
-                                : p.compatibilityStatus === "INCOMPATIBLE"
+                                : pCompat === "INCOMPATIBLE"
                                 ? "status-incompatible"
                                 : "status-untested"
                             }`}
                             onClick={() => {
-                              if (p.lastCompatibilityReport) {
-                                setCompatibilityReport(p.lastCompatibilityReport);
-                                setSelectedReportProfile(p);
+                              if (pReport) {
+                                setCompatibilityReport(pReport);
+                                setSelectedReportProfile(localProfile);
                                 setIsReportModalOpen(true);
                               }
                             }}
-                            style={{ cursor: p.lastCompatibilityReport ? "pointer" : "default" }}
-                            title={p.lastCompatibilityReport ? "Click to view diagnostic report" : undefined}
+                            style={{ cursor: pReport ? "pointer" : "default" }}
+                            title={pReport ? "Click to view diagnostic report" : undefined}
                           >
-                            {p.compatibilityStatus === "HEALTHY" || p.compatibilityStatus === "COMPATIBLE" ? "✓ Compatible" : p.compatibilityStatus === "INCOMPATIBLE" ? "⚠ Incompatible" : "Not Tested"}
+                            {isHealthy ? "✓ Question Wording: Compatible" : pCompat === "INCOMPATIBLE" ? "⚠ Question Wording: Incompatible" : "Not Tested"}
                           </span>
-                        </td>
-                        <td>
-                          <span
-                            className={`status-pill ${
-                              p.enabled ? "status-active" : "status-inactive"
-                            }`}
-                          >
-                            {p.enabled ? "Active" : "Disabled"}
+                        </div>
+                      </div>
+
+                      <div className="local-ai-hero-grid">
+                        <div className="local-ai-hero-item">
+                          <span className="local-ai-hero-label">Connection</span>
+                          <span className="local-ai-hero-value">
+                            <span className="humanized-pill local">Available (127.0.0.1:1234)</span>
                           </span>
-                        </td>
-                        <td>
-                          <div className="table-actions-cell" style={{ display: "flex", gap: "6px" }}>
+                        </div>
+                        <div className="local-ai-hero-item">
+                          <span className="local-ai-hero-label">Selected Model</span>
+                          <div className="flex items-center gap-2 mt-1">
+                            <select
+                              className="form-select text-xs py-1"
+                              value={pModel || ""}
+                              onChange={(e) => handleSelectModel(e.target.value)}
+                              style={{ maxWidth: "340px", fontSize: "12px" }}
+                            >
+                              <option value="qwen/qwen3-4b-2507">
+                                Qwen3 4B Instruct — Recommended for question wording
+                              </option>
+                              <option value="qwen/qwen3-4b-thinking-2507">
+                                Qwen3 4B Thinking — Not recommended for this task
+                              </option>
+                              {discoveredModels
+                                .filter((m) => m !== "qwen/qwen3-4b-2507" && m !== "qwen/qwen3-4b-thinking-2507" && !m.includes("embed"))
+                                .map((m) => (
+                                  <option key={m} value={m}>
+                                    {m}
+                                  </option>
+                                ))}
+                            </select>
                             <button
                               type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => handleTestCompatibility(p)}
-                              disabled={isTestingProvider === p.profileId || isTogglingProvider === p.profileId}
-                              title="Run non-personal synthetic compatibility check"
+                              className="btn btn-outline btn-xs"
+                              onClick={() => handleAutoDiscoverModels()}
+                              disabled={isDiscoveringModels}
+                              title="Refresh models from LM Studio"
                             >
-                              {isTestingProvider === p.profileId ? "Testing..." : "Test Compatibility"}
+                              <Icon name="refresh" size={12} />
+                              <span>{isDiscoveringModels ? "..." : "Refresh"}</span>
                             </button>
-                            {p.enabled ? (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                onClick={() => handleDisableProvider(p)}
-                                disabled={isTogglingProvider === p.profileId || isTestingProvider === p.profileId}
-                              >
-                                {isTogglingProvider === p.profileId ? "Disabling..." : "Disable"}
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-sm"
-                                onClick={() => handleOpenActivateModal(p)}
-                                disabled={isTogglingProvider === p.profileId || isTestingProvider === p.profileId}
-                              >
-                                Activate
-                              </button>
-                            )}
                           </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                        </div>
+                        <div className="local-ai-hero-item">
+                          <span className="local-ai-hero-label">Question Wording</span>
+                          <span className="local-ai-hero-value">
+                            <strong className={isHealthy ? "text-success" : "text-danger"}>
+                              {isHealthy ? "Compatible" : (pCompat === "INCOMPATIBLE" ? "Incompatible" : "Not Tested")}
+                            </strong>
+                          </span>
+                        </div>
+                        <div className="local-ai-hero-item">
+                          <span className="local-ai-hero-label">Recommended Action</span>
+                          <span className="local-ai-hero-value text-xs">
+                            {pCompat === "INCOMPATIBLE" || (pModel && pModel.includes("thinking")) ? (
+                              <span className="text-warning">Load and select Qwen3 4B Instruct in LM Studio</span>
+                            ) : (
+                              <span className="text-muted">Ready for bounded interview question rewording</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="local-ai-hero-actions">
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleTestCompatibility(localProfile)}
+                          disabled={isTestingProvider === pId || isTogglingProvider === pId}
+                        >
+                          <Icon name="refresh" size={14} />
+                          <span>{isTestingProvider === pId ? "Testing Wording & Connection..." : "Test Compatibility"}</span>
+                        </button>
+                        {pEnabled ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleDisableProvider(localProfile)}
+                            disabled={isTogglingProvider === pId || isTestingProvider === pId}
+                          >
+                            <span>{isTogglingProvider === pId ? "Deactivating..." : "Deactivate AI"}</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleOpenActivateModal(localProfile)}
+                            disabled={isTogglingProvider === pId || isTestingProvider === pId}
+                          >
+                            <Icon name="sparkles" size={14} />
+                            <span>Activate Local AI</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div className="guided-setup-box">
+                      <h3 className="guided-setup-title">
+                        <Icon name="sparkles" size={18} />
+                        <span>Setup Local LM Studio AI</span>
+                      </h3>
+                      <p className="guided-setup-desc">
+                        No active Local AI provider profile found. Start LM Studio on port <strong>1234</strong>, load your Qwen model, and click below to auto-discover models and configure your local profile.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={async () => {
+                          await handleAutoDiscoverModels();
+                          setIsCreateProviderModalOpen(true);
+                          setNewDisplayName("Local LM Studio (Qwen3-4B)");
+                          setNewBaseUrl("http://127.0.0.1:1234/v1");
+                        }}
+                      >
+                        <Icon name="plus" size={16} />
+                        <span>Configure Local LM Studio</span>
+                      </button>
+                    </div>
+                  );
+                }
+              })()}
+
+              {/* COLLAPSIBLE ADVANCED SETTINGS */}
+              <div className="advanced-settings-accordion">
+                <div
+                  className={`advanced-settings-header ${showAdvancedSettings ? "open" : ""}`}
+                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                >
+                  <div className="advanced-settings-title">
+                    <Icon name="layers" size={16} />
+                    <span>Advanced Provider Profiles &amp; History ({providers.filter((p: any) => !p.is_archived && !p.isArchived).length} profiles, {providers.filter((p: any) => p.is_archived || p.isArchived).length} archived)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted">
+                      {showAdvancedSettings ? "Hide details" : "Show details"}
+                    </span>
+                    <Icon name={showAdvancedSettings ? "chevron-up" : "chevron-down"} size={16} />
+                  </div>
+                </div>
+
+                {showAdvancedSettings && (
+                  <div className="advanced-settings-content">
+                    <div className="admin-table-wrapper">
+                      <table className="admin-data-table" aria-label="AI Providers Table">
+                        <thead>
+                          <tr>
+                            <th>Display Name</th>
+                            <th>Provider Class</th>
+                            <th>Model</th>
+                            <th>Base URL</th>
+                            <th>Compatibility</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {providers.filter((p: any) => !p.is_archived && !p.isArchived).length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="table-empty-cell">
+                                No active or standby provider profiles configured.
+                              </td>
+                            </tr>
+                          ) : (
+                            providers
+                              .filter((p: any) => !p.is_archived && !p.isArchived)
+                              .map((p: any) => {
+                                const pId = p.profileId || p.profile_id;
+                                const pName = p.displayName || p.display_name;
+                                const pType = p.providerType || p.provider_type;
+                                const pModel = p.modelIdentifier || p.model_identifier;
+                                const pEgress = p.egressClass || p.egress_class;
+                                const pBaseUrl = p.baseUrlMasked || p.base_url_masked;
+                                const pCompat = p.compatibilityStatus || p.compatibility_status;
+                                const pEnabled = p.enabled;
+                                const pReport = p.lastCompatibilityReport || p.last_compatibility_report;
+
+                                return (
+                                  <tr key={pId} className={pEnabled ? "row-active-provider" : ""}>
+                                    <td>
+                                      <div className="provider-name-cell">
+                                        <strong>{pName}</strong>
+                                        <span className="profile-version-tag">v{p.version}</span>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <span
+                                        className={`humanized-pill ${
+                                          pEgress === "LOCAL_ONLY" ? "local" : "remote"
+                                        }`}
+                                      >
+                                        {pEgress === "LOCAL_ONLY" ? "Local AI" : "Remote Provider"}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      {pModel ? (
+                                        <code className="text-xs">{pModel}</code>
+                                      ) : (
+                                        <span className="text-muted text-xs">Default</span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span className="base-url-text text-xs">
+                                        {pBaseUrl || <em className="text-muted">Standard Local (1234)</em>}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <span
+                                        className={`compat-status-tag ${
+                                          pCompat === "HEALTHY" || pCompat === "COMPATIBLE"
+                                            ? "status-compatible"
+                                            : pCompat === "INCOMPATIBLE"
+                                            ? "status-incompatible"
+                                            : "status-untested"
+                                        }`}
+                                        onClick={() => {
+                                          if (pReport) {
+                                            setCompatibilityReport(pReport);
+                                            setSelectedReportProfile(p);
+                                            setIsReportModalOpen(true);
+                                          }
+                                        }}
+                                        style={{ cursor: pReport ? "pointer" : "default" }}
+                                        title={pReport ? "Click to view diagnostic report" : undefined}
+                                      >
+                                        {pCompat === "HEALTHY" || pCompat === "COMPATIBLE" ? "✓ Compatible" : pCompat === "INCOMPATIBLE" ? "⚠ Incompatible" : "Not Tested"}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <span
+                                        className={`status-pill ${
+                                          pEnabled ? "status-active" : "status-inactive"
+                                        }`}
+                                      >
+                                        {pEnabled ? "Active" : "Disabled"}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <div className="table-actions-cell" style={{ display: "flex", gap: "6px" }}>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          onClick={() => handleTestCompatibility(p)}
+                                          disabled={isTestingProvider === pId || isTogglingProvider === pId}
+                                        >
+                                          {isTestingProvider === pId ? "Testing..." : "Test"}
+                                        </button>
+                                        {pEnabled ? (
+                                          <button
+                                            type="button"
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => handleDisableProvider(p)}
+                                            disabled={isTogglingProvider === pId || isTestingProvider === pId}
+                                          >
+                                            {isTogglingProvider === pId ? "Disabling..." : "Disable"}
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            className="btn btn-primary btn-sm"
+                                            onClick={() => handleOpenActivateModal(p)}
+                                            disabled={isTogglingProvider === pId || isTestingProvider === pId}
+                                          >
+                                            Activate
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -1213,17 +1459,57 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
               </div>
 
               <div className="form-group">
-                <label htmlFor="provider-model-id" className="form-label">
-                  Model Identifier (optional)
+                <label htmlFor="provider-model-id" className="form-label flex items-center justify-between">
+                  <span>Model Identifier</span>
+                  {newEgressClass === "LOCAL_ONLY" && (
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-xs"
+                      onClick={() => handleAutoDiscoverModels(newBaseUrl || "http://127.0.0.1:1234/v1")}
+                      disabled={isDiscoveringModels}
+                    >
+                      <Icon name="refresh" size={12} />
+                      <span>{isDiscoveringModels ? "Querying LM Studio..." : "Discover from LM Studio"}</span>
+                    </button>
+                  )}
                 </label>
-                <input
-                  id="provider-model-id"
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. qwen3-4b-instruct or gpt-4o-mini"
-                  value={newModelId}
-                  onChange={(e) => setNewModelId(e.target.value)}
-                />
+                {discoveredModels.length > 0 ? (
+                  <div className="model-select-group">
+                    <select
+                      id="provider-model-id-select"
+                      className="form-select flex-1"
+                      value={newModelId}
+                      onChange={(e) => setNewModelId(e.target.value)}
+                    >
+                      <option value="">-- Select discovered model from LM Studio --</option>
+                      {discoveredModels.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setDiscoveredModels([])}
+                      title="Enter custom model ID"
+                    >
+                      Custom
+                    </button>
+                  </div>
+                ) : (
+                  <input
+                    id="provider-model-id"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. qwen/qwen3-4b-thinking-2507"
+                    value={newModelId}
+                    onChange={(e) => setNewModelId(e.target.value)}
+                  />
+                )}
+                <span className="form-help-text">
+                  Must match the model loaded in LM Studio.
+                </span>
               </div>
 
               <div className="form-group">

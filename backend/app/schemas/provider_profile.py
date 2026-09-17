@@ -46,6 +46,7 @@ class ProviderProfile(FrozenSchema):
     egress_class: ProviderEgressClass = ProviderEgressClass.LOCAL_ONLY
     privacy_review_status: PrivacyReviewStatus = PrivacyReviewStatus.PENDING_REVIEW
     enabled: bool = False
+    is_archived: bool = False
     compatibility_status: ProviderCompatibilityStatus = ProviderCompatibilityStatus.NOT_TESTED
     tested_at: Optional[datetime] = None
     model_source: Optional[str] = Field(default=None, max_length=255, description="Owner-supplied model origin (e.g. HuggingFace repo/file)")
