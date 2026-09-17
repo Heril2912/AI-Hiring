@@ -57,8 +57,8 @@ class InterviewSnapshotError(Exception):
 
 
 class InterviewUnauthorizedError(InterviewSnapshotError):
-    def __init__(self, message: str = "Unauthorized to access interview input data."):
-        super().__init__(code="INTERVIEW_SOURCE_UNAUTHORIZED", message=message, status_code=403)
+    def __init__(self, message: str = "Unauthorized to access interview input data.", code: str = "INTERVIEW_SOURCE_UNAUTHORIZED"):
+        super().__init__(code=code, message=message, status_code=403)
 
 
 class InterviewJobNotReadyError(InterviewSnapshotError):

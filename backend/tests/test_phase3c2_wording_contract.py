@@ -589,3 +589,49 @@ def test_api_endpoint_rejects_admin_role(seeded_env, test_db, test_client):
         headers={"Cookie": f"ai_hiring_session={admin_token}"},
     )
     assert response.status_code == 403
+
+
+def test_api_endpoint_wording_assistance_after_draft_creation_e2e(seeded_env, test_db, test_client):
+    """Verifies that questions returned by POST /draft can immediately be targeted by /assist-wording without 404."""
+    env = seeded_env
+    token = create_session(test_db, env["recruiter"])
+
+    # Configure fake provider
+    reg = get_provider_registry()
+    profile = ProviderProfile(
+        profile_id=uuid.uuid4(),
+        organization_id=env["org_id"],
+        display_name="Local Fake Adapter",
+        provider_type=ProviderType.LOCAL_OPENAI_COMPATIBLE,
+        base_url="http://127.0.0.1:1234/v1",
+        model_identifier="qwen3-4b",
+        enabled=True,
+        compatibility_status=ProviderCompatibilityStatus.COMPATIBLE,
+    )
+    reg._profiles[profile.profile_id] = profile
+    fake_prov = FakeWordingProvider(simulated_mode="SUCCESS", reworded_text_override="Can you detail your experience optimizing PostgreSQL queries?")
+    reg.get_provider_instance = lambda p: fake_prov
+
+    # Call POST /draft
+    draft_res = test_client.post(
+        f"/api/v1/jobs/{env['job'].job_id}/interview-templates/draft",
+        headers={"Cookie": f"ai_hiring_session={token}"},
+    )
+    assert draft_res.status_code == 201
+    draft_data = draft_res.json()
+    template_id = draft_data["template_id"]
+    assert len(draft_data["common_core_questions"]) > 0
+
+    # Call /assist-wording on each question returned by the draft endpoint
+    for q in draft_data["common_core_questions"]:
+        q_id = q["question_id"]
+        assist_url = f"/api/v1/jobs/{env['job'].job_id}/interview-templates/{template_id}/questions/{q_id}/assist-wording"
+        wording_res = test_client.post(
+            assist_url,
+            json={"max_variants": 1, "target_tone": "PROFESSIONAL"},
+            headers={"Cookie": f"ai_hiring_session={token}"},
+        )
+        assert wording_res.status_code == 200, f"Failed for question_id {q_id}: {wording_res.text}"
+        wording_data = wording_res.json()
+        assert len(wording_data["proposed_variants"]) >= 1
+

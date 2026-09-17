@@ -567,14 +567,59 @@ def apply_wording_suggestion(
     )
     db.commit()
 
+    return _build_question_action_response(
+        question=question,
+        metadata=metadata,
+        template=template,
+        plan=plan,
+        message="AI wording applied successfully.",
+    )
+
+
+def _build_question_action_response(
+    question: "InterviewQuestionRecord",
+    metadata: Dict[str, Any],
+    template: Optional["JobInterviewTemplateRecord"] = None,
+    plan: Optional["CandidateInterviewPlanRecord"] = None,
+    message: Optional[str] = None,
+) -> "QuestionActionResponse":
+    """Builds a typed QuestionActionResponse with authoritative restore eligibility fields."""
+    from app.schemas.interview_api import QuestionActionResponse
+
+    det_text = metadata.get("deterministic_source_text")
+    deterministic_source_available = bool(det_text and len(det_text.strip()) > 0)
+    has_wording_drift = bool(
+        deterministic_source_available
+        and question.question_text.strip() != (det_text or "").strip()
+    )
+    is_template_draft = (template is None or template.lifecycle_status == PlanLifecycle.DRAFT)
+    is_plan_draft = (plan is None or plan.lifecycle_status == PlanLifecycle.DRAFT)
+    can_restore = bool(deterministic_source_available and has_wording_drift and is_template_draft and is_plan_draft)
+
+    restore_unavailable_reason = None
+    if not is_template_draft or not is_plan_draft:
+        restore_unavailable_reason = "TEMPLATE_IMMUTABLE"
+    elif not deterministic_source_available:
+        restore_unavailable_reason = "NO_DETERMINISTIC_SOURCE"
+    elif not has_wording_drift:
+        restore_unavailable_reason = "ALREADY_RESTORED"
+
+    content_hash = hashlib.sha256(question.question_text.encode("utf-8")).hexdigest()
+
     return QuestionActionResponse(
         question_id=question.question_id,
         question_version=question.question_version,
         question_text=question.question_text,
         authoring_origin=question.authoring_origin,
         validation_state=question.validation_state,
-        deterministic_source_text=metadata.get("deterministic_source_text"),
-        safe_metadata=question.safe_metadata,
+        deterministic_source_text=det_text,
+        deterministic_source_available=deterministic_source_available,
+        has_wording_drift=has_wording_drift,
+        can_restore=can_restore,
+        restore_unavailable_reason=restore_unavailable_reason,
+        content_hash=content_hash,
+        safe_metadata=question.safe_metadata or {},
+        message=message,
     )
 
 
@@ -589,6 +634,8 @@ def restore_deterministic_wording(
     Invariants:
     - Only authorized Recruiter for assigned job.
     - Question must be in DRAFT template or candidate plan.
+    - Deterministic source must exist (AI fallback without source is rejected).
+    - Already-restored requests are idempotent: return existing state without creating duplicate versions.
     - Optimistic concurrency: expected_question_version must match current question_version.
     - Sets authoring_origin back to DETERMINISTIC.
     - Invalidates previous validation.
@@ -598,6 +645,39 @@ def restore_deterministic_wording(
     question, job, template, plan, _ = _load_authoritative_question(question_id=question_id, db=db)
     _verify_recruiter_access(actor=actor, job=job)
 
+    # Immutability check
+    if template and template.lifecycle_status != PlanLifecycle.DRAFT:
+        raise QuestionWordingError(
+            code="TEMPLATE_IMMUTABLE",
+            message=f"Cannot restore question in {template.lifecycle_status.value} template. Approved records are immutable.",
+            status_code=409,
+        )
+    if plan and plan.lifecycle_status != PlanLifecycle.DRAFT:
+        raise QuestionWordingError(
+            code="TEMPLATE_IMMUTABLE",
+            message=f"Cannot restore question in {plan.lifecycle_status.value} plan. Approved records are immutable.",
+            status_code=409,
+        )
+
+    metadata = dict(question.safe_metadata or {})
+    det_text = metadata.get("deterministic_source_text")
+    if not det_text or not det_text.strip():
+        raise QuestionWordingError(
+            code="NO_DETERMINISTIC_SOURCE",
+            message="This question has no deterministic original.",
+            status_code=400,
+        )
+
+    # Idempotency check: if already restored, return current state without error
+    if question.authoring_origin == AuthoringOrigin.DETERMINISTIC and question.question_text.strip() == det_text.strip():
+        return _build_question_action_response(
+            question=question,
+            metadata=metadata,
+            template=template,
+            plan=plan,
+            message="Question is already in original deterministic wording.",
+        )
+
     # Optimistic concurrency check
     if request.expected_question_version != question.question_version:
         raise QuestionWordingError(
@@ -606,10 +686,7 @@ def restore_deterministic_wording(
             status_code=409,
         )
 
-    metadata = dict(question.safe_metadata or {})
-    det_text = metadata.get("deterministic_source_text") or question.question_text
-
-    question.question_text = det_text
+    question.question_text = det_text.strip()
     question.authoring_origin = AuthoringOrigin.DETERMINISTIC
     question.question_version += 1
     question.validation_state = ValidationState.PENDING
@@ -640,14 +717,12 @@ def restore_deterministic_wording(
     )
     db.commit()
 
-    return QuestionActionResponse(
-        question_id=question.question_id,
-        question_version=question.question_version,
-        question_text=question.question_text,
-        authoring_origin=question.authoring_origin,
-        validation_state=question.validation_state,
-        deterministic_source_text=metadata.get("deterministic_source_text"),
-        safe_metadata=question.safe_metadata,
+    return _build_question_action_response(
+        question=question,
+        metadata=metadata,
+        template=template,
+        plan=plan,
+        message="Original wording restored.",
     )
 
 
@@ -780,6 +855,8 @@ async def generate_template_ai_wording(
                         status="AI_READY",
                         authoring_origin=AuthoringOrigin.AI_ASSISTED,
                         question_text=q.question_text,
+                        question_version=q.question_version,
+                        deterministic_question_text=metadata.get("deterministic_source_text"),
                         rationale_code=chosen_variant.rationale_code.value if hasattr(chosen_variant.rationale_code, "value") else str(chosen_variant.rationale_code),
                         validation_state=q.validation_state,
                     )
@@ -804,6 +881,7 @@ async def generate_template_ai_wording(
                     provider_wide_error_message = cand_result.safe_error_message or "Provider mode incompatibility detected."
 
                 fallback_count += 1
+                det_txt = q.safe_metadata.get("deterministic_source_text") if q.safe_metadata else None
                 results.append(
                     QuestionBatchWordingResult(
                         question_id=q.question_id,
@@ -811,6 +889,8 @@ async def generate_template_ai_wording(
                         status="DETERMINISTIC_FALLBACK",
                         authoring_origin=q.authoring_origin,
                         question_text=q.question_text,
+                        question_version=q.question_version,
+                        deterministic_question_text=det_txt,
                         validation_state=q.validation_state,
                         error_message="; ".join(cand_result.rejection_reasons) if cand_result.rejection_reasons else (cand_result.safe_error_message or "Deterministic fallback retained."),
                     )
@@ -818,6 +898,7 @@ async def generate_template_ai_wording(
         except Exception as exc:
             logger.warning("Batch wording failed for question %s: %s", q.question_id, exc)
             failed_count += 1
+            det_txt = q.safe_metadata.get("deterministic_source_text") if q.safe_metadata else None
             results.append(
                 QuestionBatchWordingResult(
                     question_id=q.question_id,
@@ -825,6 +906,8 @@ async def generate_template_ai_wording(
                     status="FAILED_RETRYABLE",
                     authoring_origin=q.authoring_origin,
                     question_text=q.question_text,
+                    question_version=q.question_version,
+                    deterministic_question_text=det_txt,
                     validation_state=q.validation_state,
                     error_message=str(exc),
                 )

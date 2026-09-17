@@ -710,6 +710,10 @@ class CandidateInterviewPlanRecord(Base):
         passive_deletes=True,
     )
 
+    @property
+    def supplemental_questions(self) -> List["InterviewQuestionRecord"]:
+        return [p.question for p in (self.provenances or []) if getattr(p, "question", None) is not None]
+
 
 class SupplementalQuestionProvenanceRecord(Base):
     """Authoritative provenance record binding supplemental clarification questions to exact requirement and evidence gaps."""
@@ -998,3 +1002,226 @@ class ProviderProfileRecord(Base):
         server_default=func.now(),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+class SimulationAttemptRecord(Base):
+    """Authoritative persistent record for a recruiter-controlled simulation attempt."""
+
+    __tablename__ = "simulation_attempts"
+    __table_args__ = (
+        CheckConstraint(
+            "lifecycle_status IN ('NOT_STARTED', 'IN_PROGRESS', 'SUBMITTED')",
+            name="ck_simulation_attempts_lifecycle_status",
+        ),
+        Index("ix_simulation_attempts_org_id", "organization_id"),
+        Index("ix_simulation_attempts_plan_id", "plan_id"),
+        Index("ix_simulation_attempts_template_id", "template_id"),
+        Index("ix_simulation_attempts_candidate_id", "candidate_id"),
+        Index("ix_simulation_attempts_job_id", "job_id"),
+        Index("ix_simulation_attempts_recruiter_id", "recruiter_user_id"),
+    )
+
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    recruiter_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id"),
+        nullable=False,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("candidate_interview_plans.plan_id"),
+        nullable=False,
+    )
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_interview_templates.template_id"),
+        nullable=False,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_requisitions.job_id"),
+        nullable=False,
+    )
+    job_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_versions.job_version_id"),
+        nullable=False,
+    )
+    job_revision: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    candidate_profile_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    match_result_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    plan_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    authoritative_content_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="IN_PROGRESS",
+    )
+    guardrail_policy_version: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )
+    guardrail_policy_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    question_snapshots: Mapped[List[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+    )
+    total_questions_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    answered_questions_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    record_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    answers: Mapped[List["SimulationAnswerRecord"]] = relationship(
+        "SimulationAnswerRecord",
+        back_populates="attempt",
+        cascade="all, delete-orphan",
+        order_by="SimulationAnswerRecord.display_order",
+    )
+
+
+class SimulationAnswerRecord(Base):
+    """Authoritative answer record for a single question within a simulation attempt."""
+
+    __tablename__ = "simulation_answers"
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id",
+            "question_id",
+            name="uq_simulation_answers_attempt_id_question_id",
+        ),
+        Index("ix_simulation_answers_attempt_id", "attempt_id"),
+        Index("ix_simulation_answers_question_id", "question_id"),
+    )
+
+    answer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    question_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+    display_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    layer: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="COMMON_CORE",
+    )
+    answer_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+    )
+    answer_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+    is_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    content_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="",
+    )
+    safe_metadata: Mapped[Dict[str, Any]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=dict,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    attempt: Mapped["SimulationAttemptRecord"] = relationship(
+        "SimulationAttemptRecord",
+        back_populates="answers",
+    )
+

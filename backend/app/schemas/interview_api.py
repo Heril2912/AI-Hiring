@@ -53,6 +53,10 @@ class InterviewQuestionResponse(FrozenSchema):
     included_in_common_score: bool
     content_hash: Optional[str] = None
     deterministic_source_text: Optional[str] = None
+    deterministic_source_available: bool = False
+    has_wording_drift: bool = False
+    can_restore: bool = False
+    restore_unavailable_reason: Optional[str] = None
     safe_metadata: Dict[str, Any] = Field(default_factory=dict)
     rubric: Optional[InterviewRubricResponse] = None
 
@@ -411,7 +415,13 @@ class QuestionActionResponse(FrozenSchema):
     authoring_origin: AuthoringOrigin
     validation_state: ValidationState
     deterministic_source_text: Optional[str] = None
+    deterministic_source_available: bool = False
+    has_wording_drift: bool = False
+    can_restore: bool = False
+    restore_unavailable_reason: Optional[str] = None
+    content_hash: Optional[str] = None
     safe_metadata: Dict[str, Any] = Field(default_factory=dict)
+    message: Optional[str] = None
 
 
 class GenerateTemplateAiWordingRequest(FrozenSchema):
@@ -427,6 +437,8 @@ class QuestionBatchWordingResult(FrozenSchema):
     status: str  # "AI_READY", "DETERMINISTIC_FALLBACK", "FAILED_RETRYABLE"
     authoring_origin: AuthoringOrigin
     question_text: str
+    question_version: Optional[int] = None
+    deterministic_question_text: Optional[str] = None
     rationale_code: Optional[str] = None
     validation_state: ValidationState
     error_message: Optional[str] = None
@@ -444,5 +456,96 @@ class GenerateTemplateAiWordingResponse(FrozenSchema):
     status: str  # "COMPLETED", "PARTIALLY_COMPLETED", "FAILED"
     results: List[QuestionBatchWordingResult]
     safe_message: str
+
+
+# =========================================================================
+# Phase 3D.1: Recruiter Text Simulation Schemas
+# =========================================================================
+
+class SimulationAnswerItemResponse(FrozenSchema):
+    """Authoritative answer schema for a single simulated question."""
+    answer_id: uuid.UUID
+    question_id: uuid.UUID
+    question_version: int
+    display_order: int
+    layer: str
+    answer_text: str
+    answer_version: int
+    is_submitted: bool
+    content_hash: str
+    updated_at: str
+
+
+class SimulationQuestionSnapshotResponse(FrozenSchema):
+    """Frozen snapshot of an interview question during a simulation attempt."""
+    question_id: uuid.UUID
+    question_version: int
+    display_order: int
+    layer: InterviewLayer
+    question_type: QuestionType
+    competency_name: str
+    question_text: str
+    estimated_time_minutes: int
+    permitted_probes: List[str]
+    rubric: Optional[Dict[str, Any]] = None
+
+
+class SimulationAttemptResponse(FrozenSchema):
+    """Full representation of a simulation attempt including snapshots and answers."""
+    attempt_id: uuid.UUID
+    organization_id: uuid.UUID
+    recruiter_user_id: uuid.UUID
+    candidate_id: uuid.UUID
+    candidate_name: Optional[str] = None
+    job_id: uuid.UUID
+    job_title: Optional[str] = None
+    job_version_id: uuid.UUID
+    job_revision: int
+    candidate_profile_version: int
+    match_result_id: Optional[uuid.UUID] = None
+    plan_id: uuid.UUID
+    template_id: uuid.UUID
+    plan_version: int
+    record_version: int = 1
+    authoritative_content_hash: str
+    lifecycle_status: str  # "NOT_STARTED", "IN_PROGRESS", "SUBMITTED"
+    guardrail_policy_version: str
+    total_questions_count: int
+    answered_questions_count: int
+    started_at: str
+    submitted_at: Optional[str] = None
+    questions: List[SimulationQuestionSnapshotResponse]
+    answers: Dict[str, SimulationAnswerItemResponse]  # keyed by question_id string
+
+
+class SimulationAnswerSaveRequest(FrozenSchema):
+    """Payload to save or update one draft simulation answer."""
+    expected_answer_version: int = Field(ge=1, description="Optimistic concurrency: expected answer version.")
+    answer_text: str = Field(description="Recruiter simulated answer text.")
+
+
+class SimulationAnswerSaveResponse(FrozenSchema):
+    """Response returned after saving a draft simulation answer."""
+    answer: SimulationAnswerItemResponse
+    answered_questions_count: int
+    total_questions_count: int
+    attempt_status: str
+
+
+class SimulationSubmitRequest(FrozenSchema):
+    """Payload to finalize and submit a simulation attempt."""
+    expected_record_version: Optional[int] = Field(default=None, ge=1)
+
+
+class SimulationSubmitResponse(FrozenSchema):
+    """Response returned upon successful submission of a simulation attempt."""
+    attempt_id: uuid.UUID
+    lifecycle_status: str
+    submitted_at: str
+    total_questions_count: int
+    answered_questions_count: int
+    authoritative_content_hash: str
+    message: str
+
 
 

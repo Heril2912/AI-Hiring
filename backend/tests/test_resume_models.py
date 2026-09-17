@@ -51,6 +51,8 @@ def test_models_exported_and_tables_registered():
         "candidate_interview_plans",
         "supplemental_question_provenances",
         "provider_profiles",
+        "simulation_attempts",
+        "simulation_answers",
     }
 
 

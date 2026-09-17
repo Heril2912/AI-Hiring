@@ -366,6 +366,52 @@ def allocate_common_core_questions(
     for comp in selected_competencies:
         cat_questions = get_catalogue_questions_for_competency(comp.competency_key)
         if not cat_questions:
+            # Missing deterministic question in catalogue: attempt AI fallback or create manual-required slot
+            ai_text = None
+            ai_prov = None
+            try:
+                from app.services.provider_registry import ProviderRegistry
+                reg = ProviderRegistry()
+                profile = reg.get_active_profile(organization_id=snapshot.organization_id)
+                if profile and profile.enabled:
+                    from app.services.provider_adapter import BoundedWordingRequest
+                    from app.schemas.phase3_enums import ProviderOperation
+                    provider = reg.get_provider_instance(profile)
+                    req = BoundedWordingRequest(
+                        request_id=uuid.uuid4(),
+                        organization_id=snapshot.organization_id,
+                        operation=ProviderOperation.REWORD_QUESTION,
+                        source_question_id=uuid.uuid4(),
+                        target_competency=comp.competency_label,
+                        deterministic_question_text=f"How do you demonstrate proficiency in {comp.competency_label} in your work?",
+                        allowed_reference_ids=[str(r) for r in comp.covered_requirement_ids],
+                        max_variants=1,
+                    )
+                    import anyio
+                    resp = anyio.from_thread.run(provider.request_wording_assistance, req)
+                    if resp and resp.variants:
+                        var = resp.variants[0]
+                        if not check_prohibited_topics(var.variant_text):
+                            ai_text = var.variant_text.strip()
+                            ai_prov = {
+                                "provider_class": profile.provider_type.value,
+                                "model_name": profile.model_identifier,
+                                "applied_at": datetime.now(timezone.utc).isoformat(),
+                                "rationale_code": "AI_FALLBACK_MISSING_DETERMINISTIC_QUESTION",
+                            }
+            except Exception as exc:
+                logger.info("AI fallback generation not possible for competency %s: %s", comp.competency_key, exc)
+
+            fallback_q = _build_fallback_question_for_missing_competency(
+                competency=comp,
+                display_order=curr_order,
+                blueprint_id=blueprint_id,
+                snapshot=snapshot,
+                ai_generated_text=ai_text,
+                ai_provenance=ai_prov,
+            )
+            allocated_questions.append(fallback_q)
+            curr_order += 1
             continue
 
         primary_q_entry = cat_questions[0]
@@ -478,6 +524,95 @@ def _build_interview_question_from_catalogue(
     )
 
 
+def _build_fallback_question_for_missing_competency(
+    competency: CompetencySelectionResult,
+    display_order: int,
+    blueprint_id: UUID,
+    snapshot: JobBlueprintInputSnapshot,
+    ai_generated_text: Optional[str] = None,
+    ai_provenance: Optional[Dict[str, Any]] = None,
+) -> InterviewQuestion:
+    """Constructs a question slot when no catalogue question exists.
+    
+    If AI wording was successfully produced, origin is AI_ASSISTED.
+    Otherwise, marks as unresolved manual-required with validation_state=PENDING.
+    """
+    q_id = uuid.uuid4()
+    rubric_id = uuid.uuid4()
+
+    is_ai = bool(ai_generated_text and len(ai_generated_text.strip()) > 0)
+    q_text = ai_generated_text.strip() if is_ai else "[Manual question required]"
+    origin = AuthoringOrigin.AI_ASSISTED if is_ai else AuthoringOrigin.DETERMINISTIC
+    val_state = ValidationState.PASSED if is_ai else ValidationState.PENDING
+
+    rubric = InterviewRubric(
+        rubric_id=rubric_id,
+        rubric_version=1,
+        competency_definition=f"Demonstrated proficiency in {competency.competency_label}.",
+        question_intent=f"Assess practical experience and competence in {competency.competency_label}.",
+        observable_indicators=[
+            f"Articulates core principles of {competency.competency_label}",
+            f"Applies {competency.competency_label} to solve real-world problems",
+            f"Demonstrates sound judgement and depth in {competency.competency_label}",
+        ],
+        rating_anchors={
+            1: f"Fails to demonstrate foundational understanding of {competency.competency_label}.",
+            3: f"Demonstrates competent standard working knowledge of {competency.competency_label}.",
+            5: f"Demonstrates expert advanced mastery and nuanced knowledge of {competency.competency_label}.",
+        },
+        sufficient_evidence_guidance=f"Candidate provides concrete examples of applying {competency.competency_label}.",
+        insufficient_evidence_guidance=f"Candidate provides vague or unsubstantiated claims regarding {competency.competency_label}.",
+        permitted_probes=[
+            f"Can you walk me through a specific project where you applied {competency.competency_label}?",
+            f"What challenges did you face and how did you resolve them?",
+        ],
+        prohibited_inferences=[],
+        validation_state=val_state,
+        policy_reference=snapshot.policy_reference,
+        schema_version=BLUEPRINT_SCHEMA_VERSION,
+    )
+
+    metadata: Dict[str, Any] = {}
+    if is_ai:
+        metadata = {
+            "ai_fallback": True,
+            "ai_provenance": ai_provenance or {},
+            "reason": "AI_FALLBACK_MISSING_DETERMINISTIC_QUESTION",
+        }
+    else:
+        metadata = {
+            "unresolved_manual_required": True,
+            "reason": "NO_DETERMINISTIC_QUESTION_AND_AI_UNAVAILABLE",
+        }
+
+    return InterviewQuestion(
+        question_id=q_id,
+        blueprint_id=blueprint_id,
+        layer=InterviewLayer.COMMON_CORE,
+        question_type=QuestionType.TECHNICAL if "engineering" in competency.competency_key.lower() or "tech" in competency.competency_key.lower() or "python" in competency.competency_key.lower() else QuestionType.BEHAVIORAL,
+        competency_id=competency.competency_key,
+        requirement_references=list(competency.covered_requirement_ids),
+        source_match_result_id=None,
+        source_gap_report_id=None,
+        deterministic_template_id=None,
+        deterministic_template_version=None,
+        question_text=q_text,
+        question_intent=f"Evaluate candidate depth in {competency.competency_label}",
+        authoring_origin=origin,
+        display_order=display_order,
+        estimated_time_minutes=6,
+        permitted_probes=[
+            f"Can you walk me through a specific project where you applied {competency.competency_label}?",
+            f"What challenges did you face and how did you resolve them?",
+        ],
+        validation_state=val_state,
+        included_in_common_score=True,
+        rubric=rubric,
+        policy_reference=snapshot.policy_reference,
+        schema_version=BLUEPRINT_SCHEMA_VERSION,
+    )
+
+
 # =========================================================================
 # Step 7: Calculate Coverage and Duration
 # =========================================================================
@@ -552,10 +687,19 @@ class InterviewPolicyValidator:
         for q in questions:
             if q.layer != InterviewLayer.COMMON_CORE:
                 blocking_errors.append(f"Question '{q.question_id}' has invalid layer '{q.layer}'; must be COMMON_CORE.")
-            if q.authoring_origin not in {AuthoringOrigin.DETERMINISTIC, AuthoringOrigin.RECRUITER_EDITED}:
-                blocking_errors.append(f"Question '{q.question_id}' has invalid origin '{q.authoring_origin}'; must be DETERMINISTIC or RECRUITER_EDITED.")
+            if q.authoring_origin not in {AuthoringOrigin.DETERMINISTIC, AuthoringOrigin.RECRUITER_EDITED, AuthoringOrigin.AI_ASSISTED}:
+                blocking_errors.append(f"Question '{q.question_id}' has invalid origin '{q.authoring_origin}'; must be DETERMINISTIC, RECRUITER_EDITED, or AI_ASSISTED.")
             if not q.included_in_common_score:
                 blocking_errors.append(f"Common core question '{q.question_id}' must have included_in_common_score=True.")
+            q_meta = getattr(q, "safe_metadata", {}) or {}
+            if (
+                q_meta.get("unresolved_manual_required")
+                or not q.question_text
+                or q.question_text.strip() == "[Manual question required]"
+            ):
+                blocking_errors.append(
+                    f"Question {q.display_order} ({q.competency_id}) requires manual recruiter entry before validation."
+                )
 
         # Rule 2: Rubrics and Rating Anchors
         rule_checks += 1
