@@ -106,6 +106,18 @@ function AuthenticatedApp() {
         });
         setActiveView("compare_candidates");
         setActiveNavTab("jobs");
+      } else if (
+        viewParam === "interview_template" ||
+        viewParam === "interview_workspace" ||
+        window.location.pathname.startsWith("/interview-templates") ||
+        window.location.pathname.startsWith("/interviews")
+      ) {
+        // Safe redirection from old deterministic routes to AI Questions
+        setActiveView("ai_interviews");
+        setActiveNavTab("ai_interviews");
+        if (typeof window !== "undefined" && window.history?.replaceState) {
+          window.history.replaceState(null, "", "/ai-interviews");
+        }
       } else if (window.location.pathname.startsWith("/ai-interviews")) {
         const parts = window.location.pathname.split("/").filter(Boolean);
         if (parts.length > 1 && parts[1]) {
@@ -303,25 +315,6 @@ function AuthenticatedApp() {
                 onSelectJob={handleSelectJob}
                 onCreateJob={handleCreateJob}
                 onRefresh={loadJobsList}
-                onOpenInterviewTemplate={(jobId) => {
-                  setSelectedJobId(jobId);
-                  setInterviewRoute({ jobId, resumeId: "" });
-                  setActiveView("interview_workspace");
-                }}
-              />
-            ) : activeView === "interview_workspace" && interviewRoute ? (
-              <InterviewWorkspace
-                jobId={interviewRoute.jobId}
-                resumeId={interviewRoute.resumeId}
-                onNavigateToAiInterview={handleOpenAiQuestionSet}
-                onNavigateBack={() => {
-                  if (selectedJobId) {
-                    setActiveView("edit_job");
-                  } else {
-                    setActiveView("jobs");
-                  }
-                  loadJobsList();
-                }}
               />
             ) : (
               <JobEditor
@@ -331,10 +324,6 @@ function AuthenticatedApp() {
                   loadJobsList();
                 }}
                 onJobCreated={handleJobCreated}
-                onOpenInterviewTemplate={(jobId) => {
-                  setInterviewRoute({ jobId, resumeId: "" });
-                  setActiveView("interview_workspace");
-                }}
               />
             )
           ) : (
@@ -384,11 +373,6 @@ function AuthenticatedApp() {
                   onSelectJob={handleSelectJob}
                   onCreateJob={handleCreateJob}
                   onRefresh={loadJobsList}
-                  onOpenInterviewTemplate={(jobId) => {
-                    setSelectedJobId(jobId);
-                    setInterviewRoute({ jobId, resumeId: "" });
-                    setActiveView("interview_workspace");
-                  }}
                 />
               )}
 
@@ -413,10 +397,6 @@ function AuthenticatedApp() {
                   onCompareCandidates={(params) => {
                     setComparisonParams(params);
                     setActiveView("compare_candidates");
-                  }}
-                  onOpenInterviewTemplate={(jobId) => {
-                    setInterviewRoute({ jobId, resumeId: "" });
-                    setActiveView("interview_workspace");
                   }}
                 />
               )}

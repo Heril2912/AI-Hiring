@@ -590,12 +590,26 @@ export function CandidateProfileReview({
   };
 
   const openEvidenceInspector = (label: string, value: string | null | undefined, evidenceIds: string[]) => {
+    setIsReviewDrawerOpen(false);
+    setIsHistoryDrawerOpen(false);
     setEvidenceDrawerState({
       isOpen: true,
       fieldLabel: label,
       fieldValue: value || null,
       evidenceIds: evidenceIds || [],
     });
+  };
+
+  const openReviewDrawer = () => {
+    setIsHistoryDrawerOpen(false);
+    setEvidenceDrawerState((prev) => ({ ...prev, isOpen: false }));
+    setIsReviewDrawerOpen(true);
+  };
+
+  const openHistoryDrawer = () => {
+    setIsReviewDrawerOpen(false);
+    setEvidenceDrawerState((prev) => ({ ...prev, isOpen: false }));
+    setIsHistoryDrawerOpen(true);
   };
 
   const handleNavigateToSection = (sectionKey: string) => {
@@ -710,7 +724,7 @@ export function CandidateProfileReview({
           {warningCount > 0 && !isCorrectionMode && (
             <button
               type="button"
-              onClick={() => setIsReviewDrawerOpen(true)}
+              onClick={openReviewDrawer}
               className="btn btn-warning-action btn-sm"
               aria-label={`Open ${warningCount} profile review items`}
             >
@@ -732,7 +746,7 @@ export function CandidateProfileReview({
 
           <button
             type="button"
-            onClick={() => setIsHistoryDrawerOpen(true)}
+            onClick={openHistoryDrawer}
             className="btn btn-secondary btn-sm"
           >
             <Icon name="history" size={14} /> History ({historyList.length})

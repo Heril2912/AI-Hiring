@@ -61,10 +61,23 @@ export function AiInterviewsDirectory({
     loadData();
   }, []);
 
-  const selectedJob = eligibleJobs.find((j) => j.job_id === selectedJobId);
+  // Phase 3E.2 deduplication: Exclude jobs that already have an AI question set in existing work
+  const existingJobIds = new Set(recentDirectory?.sets?.map((s) => s.job_id) || []);
+  const selectableJobs = eligibleJobs.filter(
+    (job) => !existingJobIds.has(job.job_id) && !job.current_ai_set_id
+  );
 
-  const handleGenerate = async () => {
-    if (!selectedJobId || isGenerating) return;
+  // Clear selection if it becomes ineligible
+  useEffect(() => {
+    if (selectedJobId && !selectableJobs.some((j) => j.job_id === selectedJobId)) {
+      setSelectedJobId(null);
+    }
+  }, [selectableJobs, selectedJobId]);
+
+  const selectedJob = selectableJobs.find((j) => j.job_id === selectedJobId);
+
+  const handleAction = async () => {
+    if (!selectedJob || isGenerating) return;
 
     setIsGenerating(true);
     setGenerationError(null);
@@ -73,11 +86,13 @@ export function AiInterviewsDirectory({
     try {
       const res = await apiFetch<AiQuestionSetDetail>("/api/v1/ai-interviews/generate", {
         method: "POST",
-        body: JSON.stringify({ job_id: selectedJobId }),
+        body: JSON.stringify({ job_id: selectedJob.job_id }),
       });
 
-      if (res && (res.template_id || res.ai_set_id)) {
-        onSelectTemplate(res.template_id || res.ai_set_id);
+      if (res && (res.ai_set_id || res.template_id)) {
+        // Refresh local data so state remains perfectly in sync
+        loadData();
+        onSelectTemplate(res.ai_set_id || res.template_id || "");
       }
     } catch (err: any) {
       const msg = err?.message || "";
@@ -91,12 +106,12 @@ export function AiInterviewsDirectory({
         setIsLocalAiError(true);
         setGenerationError("Local AI is unavailable. Start the configured local model and try again.");
       } else if (
+        msg.toLowerCase().includes("requirements") ||
         msg.toLowerCase().includes("not ready") ||
-        msg.toLowerCase().includes("revision") ||
         msg.toLowerCase().includes("400") ||
         msg.toLowerCase().includes("404")
       ) {
-        setGenerationError("This job is not ready for interview generation.");
+        setGenerationError("This job needs approved requirements before questions can be generated.");
       } else {
         setGenerationError("Local AI is unavailable. Start the configured local model and try again.");
         setIsLocalAiError(true);
@@ -106,7 +121,7 @@ export function AiInterviewsDirectory({
     }
   };
 
-  const filteredJobs = eligibleJobs.filter((job) =>
+  const filteredJobs = selectableJobs.filter((job) =>
     job.job_title.toLowerCase().includes(searchQuery.toLowerCase().trim())
   );
 
@@ -115,6 +130,13 @@ export function AiInterviewsDirectory({
     if (status === "APPROVED") return "Approved";
     if (status === "VALIDATED") return "Ready for Review";
     return "Draft";
+  };
+
+  const formatLifecycleAction = (status: string, isStale?: boolean) => {
+    if (isStale || status === "STALE") return "Update questions";
+    if (status === "APPROVED") return "View questions";
+    if (status === "VALIDATED") return "Review and approve";
+    return "Continue review";
   };
 
   const formatDate = (dateStr?: string) => {
@@ -130,14 +152,12 @@ export function AiInterviewsDirectory({
     }
   };
 
-  // Button text calculation
-  const generateButtonLabel = () => {
+  const actionButtonLabel = () => {
     if (isGenerating) return "Generating questions…";
-    if (selectedJob && selectedJob.requirement_count > 0) {
-      return `Generate ${selectedJob.requirement_count} questions`;
-    }
-    return "Generate AI Questions";
+    return "Generate AI questions";
   };
+
+  const hasRecentSets = Boolean(recentDirectory?.sets && recentDirectory.sets.length > 0);
 
   return (
     <div className="aiq-page">
@@ -154,14 +174,14 @@ export function AiInterviewsDirectory({
         {isGenerating ? "Generating questions for selected job..." : ""}
       </div>
 
-      {/* Empty State when no jobs are available */}
-      {!isLoadingJobs && eligibleJobs.length === 0 && (
+      {/* Global Empty State when no jobs and no existing sets exist */}
+      {!isLoadingJobs && selectableJobs.length === 0 && !hasRecentSets && (
         <div className="aiq-panel" style={{ textAlign: "center", padding: "48px 24px" }}>
           <h2 className="aiq-panel-title" style={{ marginBottom: "8px" }}>
             No jobs are ready yet
           </h2>
           <p className="aiq-panel-desc" style={{ marginBottom: "20px" }}>
-            Create or complete a job before generating AI interview questions.
+            Complete a job and add approved requirements before generating interview questions.
           </p>
           {onNavigateToJobs && (
             <button
@@ -183,8 +203,42 @@ export function AiInterviewsDirectory({
         </div>
       )}
 
+      {/* Compact Notice when all ready jobs already have question sets */}
+      {!isLoadingJobs && selectableJobs.length === 0 && hasRecentSets && (
+        <div
+          className="aiq-panel"
+          style={{
+            padding: "20px 24px",
+            marginBottom: "32px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "16px",
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <h2 className="aiq-panel-title" style={{ fontSize: "17px", marginBottom: "4px" }}>
+              All ready jobs have AI question sets
+            </h2>
+            <p className="aiq-panel-desc" style={{ fontSize: "14px", margin: 0 }}>
+              To generate questions for another role, create a job requisition and approve its requirements.
+            </p>
+          </div>
+          {onNavigateToJobs && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={onNavigateToJobs}
+            >
+              Go to Jobs
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Two-Column Creation Workspace */}
-      {!isLoadingJobs && eligibleJobs.length > 0 && (
+      {!isLoadingJobs && selectableJobs.length > 0 && (
         <div className="aiq-create-layout">
           {/* Left Column: Job Panel */}
           <section className="aiq-job-panel aiq-panel" aria-labelledby="choose-job-heading">
@@ -194,7 +248,7 @@ export function AiInterviewsDirectory({
                   Choose a job
                 </h2>
                 <span className="aiq-panel-count">
-                  {eligibleJobs.length} {eligibleJobs.length === 1 ? "job" : "jobs"} available
+                  {selectableJobs.length} {selectableJobs.length === 1 ? "job" : "jobs"} available
                 </span>
               </div>
               <p className="aiq-panel-desc">
@@ -203,7 +257,7 @@ export function AiInterviewsDirectory({
             </div>
 
             {/* Filter Input if > 8 jobs */}
-            {eligibleJobs.length > 8 && (
+            {selectableJobs.length > 8 && (
               <div className="aiq-search-box">
                 <label htmlFor="aiq-job-search" className="aiq-search-label">
                   Search jobs
@@ -272,7 +326,7 @@ export function AiInterviewsDirectory({
           <aside className="aiq-generation-panel aiq-panel" aria-labelledby="generate-panel-heading">
             <div className="aiq-panel-header">
               <h2 id="generate-panel-heading" className="aiq-panel-title">
-                Generate interview
+                Generate AI questions
               </h2>
               <p className="aiq-panel-desc">
                 The approved requirements will guide the local AI.
@@ -303,14 +357,27 @@ export function AiInterviewsDirectory({
                   <span>{generationError}</span>
                 </div>
                 {isLocalAiError && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-xs"
-                    onClick={handleGenerate}
-                    disabled={isGenerating}
-                  >
-                    Try Again
-                  </button>
+                  <div style={{ display: "flex", gap: "6px", marginLeft: "auto" }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-xs"
+                      onClick={handleAction}
+                      disabled={isGenerating}
+                    >
+                      Try again
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-xs"
+                      onClick={() => {
+                        setGenerationError(null);
+                        setIsLocalAiError(false);
+                      }}
+                      disabled={isGenerating}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -321,7 +388,7 @@ export function AiInterviewsDirectory({
                 type="button"
                 className="aiq-generate-btn"
                 disabled={!selectedJobId || isGenerating}
-                onClick={handleGenerate}
+                onClick={handleAction}
               >
                 {isGenerating ? (
                   <>
@@ -329,7 +396,7 @@ export function AiInterviewsDirectory({
                     <span>Generating questions…</span>
                   </>
                 ) : (
-                  <span>{generateButtonLabel()}</span>
+                  <span>{actionButtonLabel()}</span>
                 )}
               </button>
 
@@ -342,7 +409,7 @@ export function AiInterviewsDirectory({
       )}
 
       {/* Recent Sets: "Continue Reviewing" Section */}
-      {!isLoadingJobs && recentDirectory && recentDirectory.sets && recentDirectory.sets.length > 0 && (
+      {!isLoadingJobs && hasRecentSets && recentDirectory && (
         <section className="aiq-recent-section" aria-labelledby="continue-reviewing-heading">
           <h2 id="continue-reviewing-heading" className="aiq-recent-heading">
             Continue reviewing
@@ -351,6 +418,7 @@ export function AiInterviewsDirectory({
           <div className="aiq-recent-list">
             {recentDirectory.sets.map((set) => {
               const status = formatStatus(set.lifecycle_status, set.is_source_stale);
+              const actionLabel = formatLifecycleAction(set.lifecycle_status, set.is_source_stale);
               const badgeClass =
                 status === "Approved"
                   ? "approved"
@@ -379,10 +447,10 @@ export function AiInterviewsDirectory({
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    onClick={() => onSelectTemplate(set.template_id)}
-                    aria-label={`Continue review for ${set.job_title}`}
+                    onClick={() => onSelectTemplate(set.ai_set_id || set.template_id || "")}
+                    aria-label={`${actionLabel} for ${set.job_title}`}
                   >
-                    Continue review
+                    {actionLabel}
                   </button>
                 </div>
               );

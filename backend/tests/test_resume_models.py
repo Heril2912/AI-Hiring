@@ -53,6 +53,12 @@ def test_models_exported_and_tables_registered():
         "provider_profiles",
         "simulation_attempts",
         "simulation_answers",
+        "simulation_interview_assessments",
+        "simulation_question_assessments",
+        "simulation_answer_segments",
+        "simulation_assessment_reviews",
+        "simulation_review_audit_events",
+        "ai_interview_question_sets",
     }
 
 

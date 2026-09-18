@@ -9,7 +9,6 @@ interface JobsDirectoryProps {
   onSelectJob: (jobId: string) => void;
   onCreateJob: () => void;
   onRefresh: () => void;
-  onOpenInterviewTemplate?: (jobId: string) => void;
 }
 
 export function JobsDirectory({
@@ -19,7 +18,6 @@ export function JobsDirectory({
   onSelectJob,
   onCreateJob,
   onRefresh,
-  onOpenInterviewTemplate,
 }: JobsDirectoryProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -207,20 +205,6 @@ export function JobsDirectory({
                   <span className="job-action-link">
                     Edit Draft &amp; Requirements <Icon name="chevron-right" size={14} />
                   </span>
-                  {onOpenInterviewTemplate && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-xs inline-flex items-center gap-1"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenInterviewTemplate(j.jobId);
-                      }}
-                      title="Open Standardized Interview Template and Question Drafts"
-                    >
-                      <Icon name="message-square" size={12} />
-                      <span>Interview Template</span>
-                    </button>
-                  )}
                 </div>
               </div>
             );
