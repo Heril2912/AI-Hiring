@@ -353,3 +353,100 @@ export interface SimulationSubmitResponse {
   message: string;
 }
 
+export interface SimulationAnswerSegmentItem {
+  segment_id: string;
+  sequence_order: number;
+  start_char: number;
+  end_char: number;
+  segment_text: string;
+}
+
+export type ReviewDecision =
+  | "ACCEPTED"
+  | "EDITED"
+  | "OVERRIDDEN"
+  | "REJECTED"
+  | "INSUFFICIENT";
+
+export interface AssessmentReviewItem {
+  review_id: string;
+  assessment_id: string;
+  attempt_id: string;
+  question_id: string;
+  reviewer_user_id: string;
+  review_version: number;
+  decision: ReviewDecision;
+  reviewed_observation: string;
+  reviewed_rubric_level?: number | null;
+  retained_citations: string[];
+  reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeterministicAggregate {
+  policy_version: string;
+  policy_hash: string;
+  aggregate_score?: number | null;
+  numerator?: number | null;
+  denominator?: number | null;
+  total_core_questions: number;
+  scored_core_questions: number;
+  excluded_core_questions: number;
+  supplemental_questions_excluded: number;
+  weights_breakdown: Record<string, number>;
+  included_items: Array<{ question_id: string; competency: string; level: number; weight: number }>;
+  excluded_items: Array<{ question_id: string; competency: string; reason: string }>;
+}
+
+export interface FinalizationEligibility {
+  is_eligible: boolean;
+  total_core_questions: number;
+  reviewed_core_questions: number;
+  pending_core_questions: number;
+  missing_citations_count: number;
+  blocking_reasons: string[];
+}
+
+export interface InterviewFinalizeResponse {
+  interview_assessment_id: string;
+  attempt_id: string;
+  lifecycle_status: string;
+  is_finalized: boolean;
+  finalized_at: string;
+  finalized_by_user_id: string;
+  aggregate_score?: number | null;
+  aggregate_summary?: Record<string, any> | null;
+  safe_message: string;
+}
+
+export interface ReviewWorkspaceQuestionItem {
+  question_id: string;
+  display_order: number;
+  layer: InterviewLayer;
+  competency_name: string;
+  question_text: string;
+  estimated_time_minutes: number;
+  rubric?: AnchoredRubric | null;
+  submitted_answer?: string | null;
+  answer_segments: SimulationAnswerSegmentItem[];
+  provisional_assessment?: ProvisionalAssessmentItem | null;
+  latest_review?: AssessmentReviewItem | null;
+  review_history: AssessmentReviewItem[];
+}
+
+export interface ReviewWorkspaceResponse {
+  attempt_id: string;
+  lifecycle_status: string;
+  is_finalized: boolean;
+  candidate_id: string;
+  candidate_name: string;
+  job_id: string;
+  job_title: string;
+  record_version: number;
+  questions: ReviewWorkspaceQuestionItem[];
+  aggregate?: DeterministicAggregate | null;
+  eligibility: FinalizationEligibility;
+  finalized_assessment?: Record<string, any> | null;
+}
+

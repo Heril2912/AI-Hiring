@@ -7505,5 +7505,86 @@ input, select, textarea {
   margin-left: 6px;
 }
 
+/* ==========================================================================
+   Phase 3D.3 AI-Curated Interview UI & Recruiter Review Workspace Styles
+   ========================================================================== */
+
+.interview-plan-section {
+  padding-bottom: 96px;
+}
+
+.ai-curation-header {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-lg);
+}
+
+.editorial-question-item {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.editorial-question-item:hover {
+  border-color: #cbd5e1;
+}
+
+.editorial-question-text {
+  font-size: 1.0625rem; /* ~17px */
+  line-height: 1.55;
+  color: #0f172a;
+  font-weight: 500;
+  margin: 10px 0 12px 0;
+}
+
+.editorial-source-caption {
+  font-size: 13px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editorial-question-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+  flex-wrap: wrap;
+}
+
+/* Sticky Action Bar Safe Spacing & 200% Zoom / Mobile Responsiveness */
+.sticky-action-bar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 30;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: var(--radius-lg);
+  padding: 14px 20px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+  margin-top: 24px;
+}
+
+@media (max-width: 768px), (max-height: 620px) {
+  .interview-plan-section {
+    padding-bottom: 24px;
+  }
+  .sticky-action-bar {
+    position: static;
+    box-shadow: none;
+    margin-top: 20px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+}
+
+
 
 

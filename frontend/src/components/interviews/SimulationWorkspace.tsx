@@ -8,6 +8,7 @@ import {
   SimulationSubmitResponse,
 } from "../../types/interview";
 import { formatCompetencyName } from "./InterviewWorkspace";
+import { InterviewReviewWorkspace } from "./InterviewReviewWorkspace";
 
 interface SimulationWorkspaceProps {
   planId: string;
@@ -52,6 +53,9 @@ export function SimulationWorkspace({
   const [assessmentError, setAssessmentError] = useState<string | null>(null);
   const [assessmentSuccess, setAssessmentSuccess] = useState<string | null>(null);
 
+  // Phase 3D.3: Human Review Workspace mode
+  const [activeMode, setActiveMode] = useState<"SIMULATION" | "REVIEW">("SIMULATION");
+
   // Debounce ref for autosave
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dirtyQuestionIdRef = useRef<string | null>(null);
@@ -81,6 +85,13 @@ export function SimulationWorkspace({
           });
           setAnswersMap(aMap);
           setVersionsMap(vMap);
+          if (
+            res.lifecycle_status === "PROVISIONALLY_ASSESSED" ||
+            res.lifecycle_status === "FINALIZED" ||
+            (res as any).lifecycle_status === "HUMAN_REVIEWED"
+          ) {
+            setActiveMode("REVIEW");
+          }
         }
       } catch (err: any) {
         if (isMounted) {
@@ -290,6 +301,7 @@ export function SimulationWorkspace({
       setAssessmentSuccess(
         `Provisional AI assessment complete. ${res.successful_count || 0} evaluated, ${res.insufficient_evidence_count || 0} insufficient evidence, ${res.validation_failure_count || 0} manual review required.`
       );
+      setActiveMode("REVIEW");
     } catch (err: any) {
       setAssessmentError(err?.message || "Failed to complete provisional AI assessment.");
     } finally {
@@ -366,7 +378,39 @@ export function SimulationWorkspace({
         </div>
 
         {/* Action and Lifecycle Status */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Phase 3D.3: Mode Switcher when simulation has assessments or is submitted */}
+          {(isSubmitted ||
+            attempt.lifecycle_status === "PROVISIONALLY_ASSESSED" ||
+            attempt.lifecycle_status === "FINALIZED" ||
+            (attempt as any).lifecycle_status === "HUMAN_REVIEWED" ||
+            (attempt.assessments && Object.keys(attempt.assessments).length > 0)) && (
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded border border-slate-200 text-xs">
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded font-medium transition-colors ${
+                  activeMode === "SIMULATION"
+                    ? "bg-white text-slate-900 shadow-xs border border-slate-200"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+                onClick={() => setActiveMode("SIMULATION")}
+              >
+                Simulation
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded font-medium transition-colors ${
+                  activeMode === "REVIEW"
+                    ? "bg-white text-slate-900 shadow-xs border border-slate-200"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+                onClick={() => setActiveMode("REVIEW")}
+              >
+                Human Review Workspace
+              </button>
+            </div>
+          )}
+
           {/* Pause / Resume button */}
           {!isSubmitted && (
             <button
@@ -427,7 +471,18 @@ export function SimulationWorkspace({
         </div>
       )}
 
-      {/* Paused Banner */}
+      {/* Phase 3D.3: Either render Review Workspace or Simulation Workspace */}
+      {activeMode === "REVIEW" ? (
+        <InterviewReviewWorkspace
+          attemptId={attempt.attempt_id}
+          onNavigateBack={onNavigateBack}
+          onFinalized={() => {
+            setAttempt((prev) => (prev ? { ...prev, lifecycle_status: "FINALIZED" as any } : null));
+          }}
+        />
+      ) : (
+        <>
+          {/* Paused Banner */}
       {isPaused && (
         <div
           className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between text-amber-900 text-sm"
@@ -725,6 +780,8 @@ export function SimulationWorkspace({
           </div>
         </div>
       ) : null}
+        </>
+      )}
 
       {/* Submit Confirmation Modal */}
       {showSubmitModal && (
