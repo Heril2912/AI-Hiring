@@ -102,6 +102,24 @@ export function InterviewReviewWorkspace({
     };
   }, [data]);
 
+  // Core rating distribution (human-reviewed core ratings only)
+  const ratingDistribution = useMemo(() => {
+    const dist: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let totalScored = 0;
+    if (data?.questions) {
+      data.questions
+        .filter((q) => q.layer === "COMMON_CORE" && q.latest_review?.reviewed_rubric_level != null)
+        .forEach((q) => {
+          const lvl = q.latest_review?.reviewed_rubric_level;
+          if (lvl && lvl >= 1 && lvl <= 5) {
+            dist[lvl] = (dist[lvl] || 0) + 1;
+            totalScored += 1;
+          }
+        });
+    }
+    return { ...dist, totalScored };
+  }, [data]);
+
   // Open Edit modal initialized with provisional or latest review
   const openEditModal = () => {
     if (!activeQuestion) return;
@@ -459,6 +477,80 @@ export function InterviewReviewWorkspace({
           </p>
         </div>
       )}
+
+      {/* Phase 3D.4 Part D: Visual Summaries Grid */}
+      <div className="visual-summary-grid">
+        {/* Card 1: Review Progress & Core vs Supplemental */}
+        <div className="visual-summary-card">
+          <div className="visual-summary-title">Review Progress &amp; Core Separation</div>
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-600 font-medium">Core Questions:</span>
+              <span className="font-bold text-slate-900">
+                {reviewProgress.coreReviewedCount} of {reviewProgress.coreTotalCount} reviewed
+              </span>
+            </div>
+            <div className="rating-bar-track">
+              <div
+                className="rating-bar-fill"
+                style={{
+                  width: `${reviewProgress.coreTotalCount > 0 ? (reviewProgress.coreReviewedCount / reviewProgress.coreTotalCount) * 100 : 0}%`,
+                }}
+              />
+            </div>
+            <div className="pt-1 flex justify-between items-center text-[11px] text-slate-500">
+              <span>Supplemental Questions: {data.questions.filter(q => q.layer !== "COMMON_CORE").length}</span>
+              <span className="italic">Scores strictly segregated</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: Human-Reviewed Core Rating Distribution */}
+        <div className="visual-summary-card">
+          <div className="visual-summary-title">Core Rating Distribution (Human-Reviewed)</div>
+          <div className="space-y-1.5 text-xs">
+            {[5, 4, 3, 2, 1].map((lvl) => {
+              const count = (ratingDistribution as any)[lvl] || 0;
+              const pct = ratingDistribution.totalScored > 0 ? (count / ratingDistribution.totalScored) * 100 : 0;
+              return (
+                <div key={lvl} className="rating-distribution-bar-row">
+                  <span className="w-12 text-slate-600 font-mono text-[11px]">Level {lvl}</span>
+                  <div className="rating-bar-track">
+                    <div className="rating-bar-fill" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="w-6 text-right font-semibold text-slate-700 font-mono text-[11px]">{count}</span>
+                </div>
+              );
+            })}
+            <div className="text-[10px] text-slate-500 pt-1 text-right">
+              {ratingDistribution.totalScored} of {reviewProgress.coreTotalCount} core scored
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3: Provenance Timeline */}
+        <div className="visual-summary-card">
+          <div className="visual-summary-title">Assessment Provenance Timeline</div>
+          <div className="space-y-1">
+            <div className="provenance-timeline-step active">
+              <div className="provenance-timeline-dot completed" />
+              <span>1. Candidate Answer Submitted</span>
+            </div>
+            <div className={`provenance-timeline-step ${data.lifecycle_status !== "SUBMITTED" ? "active" : ""}`}>
+              <div className={`provenance-timeline-dot ${data.lifecycle_status !== "SUBMITTED" ? "completed" : "current"}`} />
+              <span>2. Provisional Local AI Assessment</span>
+            </div>
+            <div className={`provenance-timeline-step ${reviewProgress.reviewedCount > 0 ? "active" : ""}`}>
+              <div className={`provenance-timeline-dot ${reviewProgress.coreReviewedCount === reviewProgress.coreTotalCount ? "completed" : "current"}`} />
+              <span>3. Recruiter Human Review ({reviewProgress.coreReviewedCount}/{reviewProgress.coreTotalCount})</span>
+            </div>
+            <div className={`provenance-timeline-step ${isFinalized ? "active" : ""}`}>
+              <div className={`provenance-timeline-dot ${isFinalized ? "completed" : ""}`} />
+              <span>4. Finalized &amp; Immutable Lock</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Aggregate Score Details Drawer */}
       {showAggregateDrawer && data.aggregate && (

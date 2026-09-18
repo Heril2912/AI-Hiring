@@ -502,11 +502,11 @@ async def create_job_interview_template_draft(
 
 @router.get(
     "/latest",
-    response_model=InterviewTemplateDraftCreateResponse,
+    response_model=Optional[InterviewTemplateDraftCreateResponse],
     status_code=status.HTTP_200_OK,
     summary="Get Latest Job Interview Template",
     description=(
-        "Retrieves the latest persisted interview template (draft or approved) for the specified job requisition."
+        "Retrieves the latest persisted interview template (draft or approved) for the specified job requisition, or null if no template exists yet."
     ),
 )
 async def get_latest_job_interview_template(
@@ -514,7 +514,7 @@ async def get_latest_job_interview_template(
     revision: Optional[int] = Query(default=None, ge=1),
     auth_ctx: AuthenticatedContext = Depends(require_recruiter),
     db: Session = Depends(get_db),
-) -> InterviewTemplateDraftCreateResponse:
+) -> Optional[InterviewTemplateDraftCreateResponse]:
     actor = auth_ctx.user
 
     # Verify job existence & recruiter access
@@ -539,10 +539,7 @@ async def get_latest_job_interview_template(
     template_rec = db.execute(stmt).scalars().first()
 
     if template_rec is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "TEMPLATE_NOT_FOUND", "message": "No interview template found for job."},
-        )
+        return None
 
     preview = preview_deterministic_interview_template(
         actor=actor,
@@ -936,10 +933,10 @@ async def create_candidate_interview_plan_draft_endpoint(
 
 @router.get(
     "/{template_id}/candidate-plans/{candidate_id}/latest",
-    response_model=CandidateInterviewPlanDraftCreateResponse,
+    response_model=Optional[CandidateInterviewPlanDraftCreateResponse],
     status_code=status.HTTP_200_OK,
     summary="Get Latest Candidate Interview Plan",
-    description="Retrieves the latest persisted candidate interview plan for a specific candidate and template.",
+    description="Retrieves the latest persisted candidate interview plan for a specific candidate and template, or null if not created yet.",
 )
 async def get_latest_candidate_interview_plan(
     job_id: uuid.UUID,
@@ -947,8 +944,21 @@ async def get_latest_candidate_interview_plan(
     candidate_id: uuid.UUID,
     auth_ctx: AuthenticatedContext = Depends(require_recruiter),
     db: Session = Depends(get_db),
-) -> CandidateInterviewPlanDraftCreateResponse:
+) -> Optional[CandidateInterviewPlanDraftCreateResponse]:
     actor = auth_ctx.user
+
+    stmt_tmpl = (
+        select(JobInterviewTemplateRecord)
+        .options(selectinload(JobInterviewTemplateRecord.requisition))
+        .where(JobInterviewTemplateRecord.template_id == template_id)
+    )
+    tmpl_rec = db.execute(stmt_tmpl).scalar_one_or_none()
+    if tmpl_rec is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "TEMPLATE_NOT_FOUND", "message": "Interview template not found."},
+        )
+    _check_recruiter_authorization(actor, tmpl_rec.requisition)
 
     stmt = (
         select(CandidateInterviewPlanRecord)
@@ -966,13 +976,7 @@ async def get_latest_candidate_interview_plan(
     plan_rec = db.execute(stmt).scalars().first()
 
     if plan_rec is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "PLAN_NOT_FOUND", "message": "No candidate interview plan found."},
-        )
-
-    # Check authorization
-    _check_recruiter_authorization(actor, plan_rec.template.requisition)
+        return None
 
     supp_dtos = _map_plan_record_supplemental_questions_to_dto(plan_rec)
 
