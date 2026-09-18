@@ -1,0 +1,311 @@
+"""API endpoints for Phase 3D.5 Dedicated AI Interview Questions Workspace."""
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session
+
+from app.api.auth import AuthenticatedContext, require_recruiter
+from app.database import get_db
+from app.schemas.ai_question_set import (
+    AiQuestionSetApproveResponse,
+    AiQuestionSetDetailResponse,
+    AiQuestionSetDirectoryResponse,
+    AiQuestionSetGenerateRequest,
+    AiQuestionSetValidateResponse,
+    AiQuestionSlotUpdateRequest,
+    EligibleJobsResponse,
+)
+from app.services.ai_question_set_service import (
+    approve_ai_question_set,
+    generate_ai_questions_by_job_id,
+    generate_or_open_ai_question_set,
+    get_ai_question_set_by_template,
+    get_eligible_jobs_for_ai_questions,
+    list_ai_question_sets,
+    regenerate_ai_question_slot,
+    update_ai_question_slot,
+    validate_ai_question_set,
+)
+
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["ai-interviews"],
+)
+
+
+@router.get(
+    "/ai-interviews/eligible-jobs",
+    response_model=EligibleJobsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Eligible Jobs for AI Question Generation",
+    description="Returns organization/recruiter-scoped jobs with requirement counts only, preserving zero-leakage security boundary.",
+)
+@router.get(
+    "/ai-question-sets/eligible-jobs",
+    response_model=EligibleJobsResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def get_eligible_jobs_endpoint(
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> EligibleJobsResponse:
+    return get_eligible_jobs_for_ai_questions(
+        actor=auth_ctx.user,
+        db=db,
+    )
+
+
+@router.post(
+    "/ai-interviews/generate",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generate AI Question Set by Job ID",
+    description="Server-authoritative generation of AI questions using approved job revision and deterministic blueprint.",
+)
+@router.post(
+    "/ai-question-sets/generate",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def generate_ai_questions_by_job_endpoint(
+    payload: AiQuestionSetGenerateRequest,
+    force_regenerate: bool = Query(default=False),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return await generate_ai_questions_by_job_id(
+        actor=auth_ctx.user,
+        job_id=payload.job_id,
+        force_regenerate=force_regenerate,
+        db=db,
+    )
+
+
+@router.get(
+    "/ai-interviews",
+    response_model=AiQuestionSetDirectoryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List AI Question Sets",
+    description="Lists organization-scoped AI interview question sets with filter, search, and status counts.",
+)
+@router.get(
+    "/ai-question-sets",
+    response_model=AiQuestionSetDirectoryResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def list_ai_interviews_endpoint(
+    search: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    status_filter: Optional[str] = Query(default=None),
+    sort: str = Query(default="updated_at"),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDirectoryResponse:
+    effective_status = status_filter or status
+    return list_ai_question_sets(
+        actor=auth_ctx.user,
+        db=db,
+        search=search,
+        status_filter=effective_status,
+        sort_by=sort,
+    )
+
+
+@router.get(
+    "/ai-interviews/{template_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get AI Question Set For Template",
+    description="Retrieves the detailed AI question set for an authorized template. Strictly omits deterministic question text.",
+)
+@router.get(
+    "/ai-question-sets/{template_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.get(
+    "/templates/{template_id}/ai-question-set",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def get_ai_interview_set_endpoint(
+    template_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return get_ai_question_set_by_template(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        db=db,
+    )
+
+
+@router.post(
+    "/jobs/{job_id}/interview-templates/{template_id}/generate-ai-questions",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generate or Open AI Question Set",
+    description="Generates or opens the dedicated AI question set grounded in the deterministic blueprint.",
+)
+@router.post(
+    "/jobs/{job_id}/templates/{template_id}/ai-question-sets/generate",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.post(
+    "/jobs/{job_id}/interview-templates/{template_id}/ai-question-sets/generate",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def generate_or_open_ai_questions_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    force_regenerate: bool = Query(default=False),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return await generate_or_open_ai_question_set(
+        actor=auth_ctx.user,
+        job_id=job_id,
+        template_id=template_id,
+        force_regenerate=force_regenerate,
+        db=db,
+    )
+
+
+@router.patch(
+    "/ai-interviews/{template_id}/items/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update AI Question Slot",
+    description="Records a review decision (keep, edit, manual author, or revise) for a single question slot.",
+)
+@router.patch(
+    "/ai-question-sets/{template_id}/items/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.patch(
+    "/templates/{template_id}/slots/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def update_ai_question_slot_endpoint(
+    template_id: uuid.UUID,
+    slot_id: uuid.UUID,
+    payload: AiQuestionSlotUpdateRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return update_ai_question_slot(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        slot_id=slot_id,
+        payload=payload,
+        db=db,
+    )
+
+
+@router.post(
+    "/ai-interviews/{template_id}/regenerate-slot/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Regenerate Single Question Slot",
+    description="Regenerates AI question wording for a single blueprint slot using the local provider.",
+)
+@router.post(
+    "/ai-question-sets/{template_id}/regenerate-slot/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.post(
+    "/templates/{template_id}/slots/{slot_id}/regenerate",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def regenerate_ai_question_slot_endpoint(
+    template_id: uuid.UUID,
+    slot_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return await regenerate_ai_question_slot(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        slot_id=slot_id,
+        db=db,
+    )
+
+
+@router.post(
+    "/ai-interviews/{template_id}/validate",
+    response_model=AiQuestionSetValidateResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Validate AI Question Set",
+    description="Checks readiness, staleness, and safety compliance for the entire AI question set.",
+)
+@router.post(
+    "/ai-question-sets/{template_id}/validate",
+    response_model=AiQuestionSetValidateResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.post(
+    "/templates/{template_id}/ai-question-set/validate",
+    response_model=AiQuestionSetValidateResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def validate_ai_question_set_endpoint(
+    template_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetValidateResponse:
+    return validate_ai_question_set(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        db=db,
+    )
+
+
+@router.post(
+    "/ai-interviews/{template_id}/approve",
+    response_model=AiQuestionSetApproveResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Approve and Seal AI Question Set",
+    description="Seals the content hash and marks the approved AI question set as immutable.",
+)
+@router.post(
+    "/ai-question-sets/{template_id}/approve",
+    response_model=AiQuestionSetApproveResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.post(
+    "/templates/{template_id}/ai-question-set/approve",
+    response_model=AiQuestionSetApproveResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def approve_ai_question_set_endpoint(
+    template_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetApproveResponse:
+    return approve_ai_question_set(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        db=db,
+    )

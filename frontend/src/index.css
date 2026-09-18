@@ -7820,7 +7820,38 @@ input, select, textarea {
   }
 }
 
+/* ==========================================================================
+   Phase 3D.5: Dedicated AI Interview Questions Workspace & Directory
+   ========================================================================== */
+.ai-interviews-directory-container,
+.ai-workspace-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
 
+.ai-set-card {
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
 
+.ai-set-card:hover {
+  transform: translateY(-1px);
+}
 
+.blueprint-header-bar {
+  background-color: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+}
 
+.blueprint-explanation-note {
+  background-color: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .ai-interviews-directory-container,
+  .ai-workspace-container {
+    padding: 16px 12px;
+  }
+}

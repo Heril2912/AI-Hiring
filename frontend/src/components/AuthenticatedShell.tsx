@@ -8,6 +8,7 @@ interface AuthenticatedShellProps {
   onNavigateTab?: (tab: string) => void;
   candidateCount?: number;
   jobsCount?: number;
+  aiQuestionsCount?: number;
   connectionState?: "checking" | "connected" | "unavailable";
 }
 
@@ -17,6 +18,7 @@ export function AuthenticatedShell({
   onNavigateTab,
   candidateCount = 0,
   jobsCount = 0,
+  aiQuestionsCount = 0,
   connectionState = "connected",
 }: AuthenticatedShellProps) {
   const { user, logout } = useAuth();
@@ -120,6 +122,23 @@ export function AuthenticatedShell({
               >
                 <Icon name="upload" size={15} />
                 <span>Upload Resume</span>
+              </button>
+
+              <button
+                type="button"
+                className={`nav-tab-btn ${
+                  activeNavTab === "ai_interviews" || activeNavTab === "ai-interviews"
+                    ? "tab-active"
+                    : ""
+                }`}
+                aria-label="AI-generated interview questions"
+                onClick={() => onNavigateTab?.("ai_interviews")}
+              >
+                <Icon name="sparkles" size={15} />
+                <span>AI Questions</span>
+                {aiQuestionsCount !== undefined && aiQuestionsCount > 0 && (
+                  <span className="nav-count-pill">{aiQuestionsCount}</span>
+                )}
               </button>
             </>
           )}

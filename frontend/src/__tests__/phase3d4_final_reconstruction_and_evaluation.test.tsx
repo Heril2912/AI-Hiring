@@ -122,7 +122,7 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
     created_at: "2026-09-18T10:00:00Z",
   };
 
-  it("PART A & B: Renders reconstructed AI-Curated header with eyebrow, title, and non-concatenated metrics", async () => {
+  it("PART A & B: Renders reconstructed deterministic blueprint header with title, explanation note, and AI action", async () => {
     (clientModule.apiFetch as any).mockImplementation((url: string) => {
       if (url.includes("/interview-context")) return Promise.resolve(mockContext);
       if (url.includes("/interview-templates/latest")) return Promise.resolve(mockTemplateData);
@@ -132,23 +132,22 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
     render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByText("AI-Curated Interview")).toBeInTheDocument();
+      expect(screen.getByText("Interview Template: Staff Backend Architect")).toBeInTheDocument();
     });
 
-    // Eyebrow and Description
-    expect(screen.getByText("LOCAL AI ASSISTANCE")).toBeInTheDocument();
+    // Authoritative foundation explanation note
     expect(
-      screen.getByText(/Question wording is refined locally/i)
+      screen.getByText(/Authoritative Foundation:/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/This workspace defines the deterministic interview blueprint for this role/i)
     ).toBeInTheDocument();
 
-    // Summary counts
-    expect(screen.getByText(/3 questions/i)).toBeInTheDocument();
-    expect(screen.getByText(/using accepted AI-curated wording/i)).toBeInTheDocument();
-    expect(screen.getByText(/retaining deterministic wording/i)).toBeInTheDocument();
+    // Prominent Generate AI Questions button
+    expect(screen.getByRole("button", { name: /Generate AI Questions/i })).toBeInTheDocument();
 
-    // Segmented tabs
-    expect(screen.getByRole("tab", { name: "AI-curated version" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Deterministic baseline" })).toBeInTheDocument();
+    // Deterministic blueprint structure
+    expect(screen.getByText("Authoritative Blueprint Structure")).toBeInTheDocument();
   });
 
   it("PART B: Editorial question list shows flat items without duplicated cards or chevrons", async () => {
@@ -161,13 +160,12 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
     render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByText("AI-Curated Interview")).toBeInTheDocument();
+      expect(screen.getByText("Interview Template: Staff Backend Architect")).toBeInTheDocument();
     });
 
-    // Question 1 metadata and badge
+    // Question 1 metadata and actions
     expect(screen.getByText("Question 1")).toBeInTheDocument();
     expect(screen.getByText("Distributed Consensus")).toBeInTheDocument();
-    expect(screen.getByText("AI-curated")).toBeInTheDocument();
     expect(screen.getByText("Explain how Raft handles leader elections during network partitioning.")).toBeInTheDocument();
 
     // Direct actions
@@ -176,11 +174,10 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
 
     // Question 2 is Deterministic
     expect(screen.getByText("Question 2")).toBeInTheDocument();
-    expect(screen.getAllByText("Deterministic baseline").length).toBeGreaterThan(0);
+    expect(screen.getByText("Describe an incident where observability pipelines stalled during peak load.")).toBeInTheDocument();
 
-    // Question 3 is AI Fallback without deterministic source
+    // Question 3 is rendered
     expect(screen.getByText("Question 3")).toBeInTheDocument();
-    expect(screen.getByText("AI fallback · recruiter review required")).toBeInTheDocument();
   });
 
   it("PART B5: Template action section appears in document flow with compact mode notice", async () => {
@@ -193,7 +190,7 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
     render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByText("AI-Curated Interview")).toBeInTheDocument();
+      expect(screen.getByText("Interview Template: Staff Backend Architect")).toBeInTheDocument();
     });
 
     // Template actions
