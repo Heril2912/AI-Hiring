@@ -90,6 +90,9 @@ class MockWordingProvider(BaseWordingProvider):
     async def reword_question(self, request: BoundedWordingRequest) -> BoundedWordingResponse:
         return await self.request_wording_assistance(request)
 
+    async def request_provisional_assessment(self, request):
+        raise NotImplementedError("Not used in wording semantic validation")
+
     async def test_connection(self) -> dict:
         return {"status": "ok"}
 

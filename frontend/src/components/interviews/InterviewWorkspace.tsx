@@ -1166,34 +1166,27 @@ export function InterviewWorkspace({
         </div>
       ) : (
         <div className="interview-plan-section mb-6">
-          {/* Phase 3D.3 Page-Level AI Curation Header */}
-          <div className="ai-curation-header p-5 mb-5 shadow-sm space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold text-slate-900 m-0">AI-Curated Interview</h2>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-800 border border-teal-200">
-                    <Icon name="sparkles" size={12} />
-                    <span>Local Model</span>
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 m-0">
-                  AI refines wording. Competencies, rubrics and duration remain controlled by the approved blueprint.
+          {/* Phase 3D.4 Page-Level AI Curation Header */}
+          <div className="ai-curation-header">
+            <div className="ai-curation-top-row">
+              <div>
+                <div className="ai-curation-eyebrow">LOCAL AI ASSISTANCE</div>
+                <h2 className="ai-curation-title">AI-Curated Interview</h2>
+                <p className="ai-curation-desc">
+                  Question wording is refined locally. Competencies, rubrics, order and duration remain controlled by the approved interview blueprint.
+                  <span className="sr-only">AI refines wording. Competencies, rubrics and duration remain controlled by the approved blueprint.</span>
                 </p>
               </div>
 
               {/* Accessible Segmented View & Separate Suggestions Review */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="inline-flex p-1 bg-slate-100 rounded-lg border border-slate-200" role="tablist" aria-label="Interview authoring views">
+              <div className="ai-curation-controls">
+                <div className="segmented-control" role="tablist" aria-label="Interview authoring views">
                   <button
                     type="button"
                     role="tab"
                     aria-selected={segmentedView === "AI_CURATED"}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                      segmentedView === "AI_CURATED"
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    aria-label="AI-curated version"
+                    className={`segmented-tab ${segmentedView === "AI_CURATED" ? "active" : ""}`}
                     onClick={() => setSegmentedView("AI_CURATED")}
                   >
                     AI-curated version
@@ -1202,11 +1195,8 @@ export function InterviewWorkspace({
                     type="button"
                     role="tab"
                     aria-selected={segmentedView === "DETERMINISTIC_BASELINE"}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                      segmentedView === "DETERMINISTIC_BASELINE"
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
+                    aria-label="Deterministic baseline"
+                    className={`segmented-tab ${segmentedView === "DETERMINISTIC_BASELINE" ? "active" : ""}`}
                     onClick={() => setSegmentedView("DETERMINISTIC_BASELINE")}
                   >
                     Deterministic baseline
@@ -1216,34 +1206,34 @@ export function InterviewWorkspace({
                 {aiSuggestionsCount > 0 && (
                   <button
                     type="button"
-                    className="btn btn-secondary btn-xs flex items-center gap-1.5 font-medium"
+                    className="btn btn-secondary btn-xs font-medium"
                     onClick={() => setShowPendingDrawer(true)}
                     aria-label={`Review ${aiSuggestionsCount} pending AI suggestions`}
                   >
                     <Icon name="clock" size={12} />
-                    <span>Review pending suggestions ({aiSuggestionsCount})</span>
+                    <span>Review AI suggestions ({aiSuggestionsCount})</span>
                   </button>
                 )}
               </div>
             </div>
 
-            {/* Metrics Breakdown */}
-            <div className="flex items-center gap-3 pt-3 border-t border-slate-100 text-xs text-slate-600 flex-wrap">
-              <span className="font-semibold text-slate-900">
-                {editableQuestions.length} questions &middot; {template.target_duration_minutes || 45} minutes
+            {/* Live Metrics Breakdown Row */}
+            <div className="ai-curation-metrics">
+              <span>
+                <strong>{editableQuestions.length} questions</strong> &middot; <strong>{template.target_duration_minutes || 45} minutes</strong>
               </span>
-              <span className="text-slate-300">&bull;</span>
-              <span className="text-teal-800 font-medium">
+              <span className="metric-bullet">&bull;</span>
+              <span className="metric-ai-curated">
                 <strong>{aiReadyCount}</strong> using accepted AI-curated wording
               </span>
-              <span className="text-slate-300">&bull;</span>
-              <span className="text-slate-700">
+              <span className="metric-bullet">&bull;</span>
+              <span>
                 <strong>{deterministicCount}</strong> retaining deterministic wording
               </span>
               {editedCount > 0 && (
                 <>
-                  <span className="text-slate-300">&bull;</span>
-                  <span className="text-slate-700">
+                  <span className="metric-bullet">&bull;</span>
+                  <span>
                     <strong>{editedCount}</strong> recruiter refined
                   </span>
                 </>
@@ -1253,7 +1243,7 @@ export function InterviewWorkspace({
 
           {/* VIEW 1: AI-Curated Version (Default selected view) */}
           {segmentedView === "AI_CURATED" && (
-            <div className="questions-container" role="tabpanel" aria-label="AI-curated interview questions">
+            <div className="editorial-question-list" role="tabpanel" aria-label="AI-curated interview questions">
               {editableQuestions.map((q, idx) => {
                 const wordingInfo = getQuestionWordingState(q, isTemplateDraft);
                 const isImproving = improvingQuestionId === q.question_id;
@@ -1268,13 +1258,15 @@ export function InterviewWorkspace({
                     <div className="editorial-question-header">
                       <div className="editorial-question-meta">
                         <span className="font-semibold text-slate-900">Question {idx + 1}</span>
-                        <span>&middot;</span>
+                        <span className="meta-sep">&middot;</span>
                         <span>{formatCompetencyName(q.competency_name || (q as any).competency_id || (q.rubric as any)?.competency_definition)}</span>
-                        <span>&middot;</span>
+                        <span className="meta-sep">&middot;</span>
+                        <span>{q.question_type ? q.question_type.replace(/_/g, " ").toLowerCase() : "behavioral"}</span>
+                        <span className="meta-sep">&middot;</span>
                         <span className="text-slate-500">{q.estimated_time_minutes} min</span>
                         {q.unresolved_manual_required && (
                           <>
-                            <span>&middot;</span>
+                            <span className="meta-sep">&middot;</span>
                             <span
                               className="badge badge-warning text-xs font-semibold"
                               title="No deterministic question was available and AI generation could not resolve this slot. Please enter question wording manually."
@@ -1285,7 +1277,7 @@ export function InterviewWorkspace({
                         )}
                       </div>
 
-                      {/* Reorder Buttons */}
+                      {/* Reorder Buttons in Draft */}
                       {isTemplateDraft && (
                         <div className="flex items-center gap-1">
                           <button
@@ -1338,32 +1330,30 @@ export function InterviewWorkspace({
                     )}
 
                     {/* Restrained Origin Marker */}
-                    <div className="editorial-source-caption mb-3">
+                    <div className="editorial-source-caption">
                       {wordingInfo.state === "ACCEPTED_AI_CURATED" ? (
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
-                            className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-800 border border-teal-200"
-                            title="Source: AI-curated wording (local model)"
+                            className="origin-badge ai-curated"
+                            title="Locally refined from the approved deterministic blueprint."
                           >
                             <Icon name="sparkles" size={11} className="text-teal-700" />
                             <span>AI-curated</span>
                           </span>
-                          <span className="text-[11px] text-slate-500">
-                            Locally refined from the approved deterministic blueprint.
-                          </span>
+                          <span className="sr-only">Locally refined from the approved deterministic blueprint.</span>
                           <span className="sr-only">Source: AI wording suggestion</span>
                         </div>
                       ) : wordingInfo.state === "RECRUITER_REFINED" ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 border border-slate-300" title="Source: Recruiter edited">
+                        <span className="origin-badge recruiter-refined" title="Source: Recruiter edited">
                           <span>Recruiter refined</span>
                         </span>
                       ) : wordingInfo.state === "AI_FALLBACK" ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                        <span className="origin-badge ai-fallback">
                           <span>{wordingInfo.originBadgeLabel}</span>
                         </span>
                       ) : (
                         <span
-                          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200"
+                          className="origin-badge deterministic"
                           title="Source: Deterministic blueprint baseline"
                         >
                           <span>Deterministic baseline</span>
@@ -1410,7 +1400,7 @@ export function InterviewWorkspace({
                         </button>
                       )}
 
-                      {/* Contextual secondary restore button when eligible */}
+                      {/* Contextual restore button when eligible */}
                       {wordingInfo.canRestore && (
                         <button
                           type="button"
@@ -1524,8 +1514,8 @@ export function InterviewWorkspace({
 
           {/* VIEW 2: Deterministic Baseline View (Read-Only) */}
           {segmentedView === "DETERMINISTIC_BASELINE" && (
-            <div className="questions-container" role="tabpanel" aria-label="Deterministic baseline questions">
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 mb-4 flex items-center justify-between">
+            <div className="editorial-question-list" role="tabpanel" aria-label="Deterministic baseline questions">
+              <div className="p-3.5 bg-slate-50 border-b border-slate-200 text-xs text-slate-600 flex items-center justify-between">
                 <span>Viewing authoritative deterministic blueprint baseline (read-only reference).</span>
                 <span className="font-semibold text-slate-800">{editableQuestions.length} baseline items</span>
               </div>
@@ -1542,9 +1532,11 @@ export function InterviewWorkspace({
                     <div className="editorial-question-header">
                       <div className="editorial-question-meta">
                         <span className="font-semibold text-slate-900">Question {idx + 1}</span>
-                        <span>&middot;</span>
+                        <span className="meta-sep">&middot;</span>
                         <span>{formatCompetencyName(q.competency_name || (q as any).competency_id || (q.rubric as any)?.competency_definition)}</span>
-                        <span>&middot;</span>
+                        <span className="meta-sep">&middot;</span>
+                        <span>{q.question_type ? q.question_type.replace(/_/g, " ").toLowerCase() : "behavioral"}</span>
+                        <span className="meta-sep">&middot;</span>
                         <span className="text-slate-500">{q.estimated_time_minutes} min</span>
                       </div>
                       <span className="text-xs font-mono text-slate-400">Baseline</span>
@@ -1552,13 +1544,13 @@ export function InterviewWorkspace({
 
                     <p className="editorial-question-text">{baselineText}</p>
 
-                    <div className="editorial-source-caption mb-3">
+                    <div className="editorial-source-caption">
                       {hasDet ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                          <span>Deterministic baseline text</span>
+                        <span className="origin-badge deterministic">
+                          <span>Deterministic baseline</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                        <span className="origin-badge ai-fallback">
                           <span>AI fallback question with no deterministic source</span>
                         </span>
                       )}
@@ -1632,11 +1624,11 @@ export function InterviewWorkspace({
                         const sugText = q.ai_suggestion_text || (q.authoring_origin === "AI_ASSISTED" ? q.question_text : null);
 
                         return (
-                          <div key={q.question_id} className="ai-suggestion-comparison-row p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                            <div className="font-semibold text-xs text-slate-900 mb-2">
+                          <div key={q.question_id} className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                            <div className="font-semibold text-xs text-slate-900">
                               Question {idx + 1}: {formatCompetencyName(q.competency_name)}
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 text-xs">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                               <div className="p-3 bg-white border border-slate-200 rounded">
                                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
                                   Deterministic Baseline
@@ -1707,10 +1699,10 @@ export function InterviewWorkspace({
             </div>
           )}
 
-          {/* Sticky Action Bar for Draft & Validation */}
-          <div className="sticky-action-bar flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted">
+          {/* Document-Flow Action Bar for Draft & Validation */}
+          <div className="template-actions-section">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-slate-700">
                 Status: <strong>{templateStatus}</strong>
               </span>
               {hasUnsavedChanges && (
@@ -1718,7 +1710,7 @@ export function InterviewWorkspace({
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {isTemplateDraft && (
                 <>
                   <button
@@ -1767,9 +1759,9 @@ export function InterviewWorkspace({
       )}
 
 
-      {/* Candidate Supplemental Section or Job Template Mode Notice */}
+      {/* Candidate Supplemental Section or Compact Job Template Mode Notice */}
       {template && (resumeId ? (
-        <div className="candidate-supplemental-section mt-8">
+        <div className="candidate-supplemental-section mb-6">
           <div className="section-header flex justify-between items-center mb-3">
             <div>
               <h2 className="text-lg font-semibold">Candidate-Specific Supplemental Evidence Plan</h2>
@@ -1844,11 +1836,11 @@ export function InterviewWorkspace({
           )}
         </div>
       ) : (
-        <div className="candidate-supplemental-info mt-8 p-4 border rounded bg-gray-50 flex items-center gap-3">
-          <Icon name="info" size={20} className="text-primary" />
+        <div className="standardized-mode-note">
+          <Icon name="info" size={18} className="text-primary mt-0.5" />
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Standardized Job Template Mode</h3>
-            <p className="text-xs text-muted">
+            <h4>Standardized Job Template Mode</h4>
+            <p>
               You are managing the common core interview questions and anchored rubrics for <strong>{context.job_title}</strong>. 
               Candidate-specific supplemental clarification questions are generated per-candidate when reviewing applicants in Candidate Comparison.
             </p>
