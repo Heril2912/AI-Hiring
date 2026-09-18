@@ -345,10 +345,10 @@ export function AiQuestionSetWorkspace({
           <Icon name="alert-triangle" size={18} style={{ color: "var(--status-warn, #d97706)", flexShrink: 0, marginTop: "2px" }} />
           <div>
             <strong style={{ display: "block", color: "#92400e", marginBottom: "2px", fontSize: "15px" }}>
-              Deterministic Blueprint Modified
+              Job Requirements Modified
             </strong>
             <p style={{ color: "#78350f", fontSize: "14px", margin: 0 }}>
-              {detail.stale_reason || "The approved job requirements or blueprint slots have changed. Please regenerate or re-verify questions."}
+              {detail.stale_reason || "The approved job requirements have changed. Please regenerate or re-verify questions."}
             </p>
           </div>
         </div>

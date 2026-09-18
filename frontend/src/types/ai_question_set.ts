@@ -34,15 +34,18 @@ export interface AiQuestionSlotItem {
 export interface AiQuestionSetDetail {
   ai_set_id: string;
   set_version: number;
-  template_id: string;
-  source_template_version: number;
+  template_id?: string | null;
+  source_template_version?: number | null;
+  source_mode?: string;
   source_content_hash: string;
+  source_requirement_ids?: string[];
   job_id: string;
   job_title: string;
   job_revision: number;
   lifecycle_status: AiSetLifecycle;
   is_immutable: boolean;
   content_hash?: string | null;
+  action?: string | null;
   slots: AiQuestionSlotItem[];
   total_slots_count: number;
   generated_slots_count: number;
@@ -57,7 +60,8 @@ export interface AiQuestionSetDetail {
 export interface AiQuestionSetSummary {
   ai_set_id: string;
   set_version: number;
-  template_id: string;
+  template_id?: string | null;
+  source_mode?: string;
   job_id: string;
   job_title: string;
   lifecycle_status: AiSetLifecycle;
@@ -98,6 +102,8 @@ export interface EligibleJobItem {
   job_id: string;
   job_title: string;
   requirement_count: number;
+  current_ai_set_id?: string | null;
+  current_ai_set_status?: string | null;
 }
 
 export interface EligibleJobsResponse {

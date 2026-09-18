@@ -1679,9 +1679,10 @@ class AiInterviewQuestionSetRecord(Base):
 
     __tablename__ = "ai_interview_question_sets"
     __table_args__ = (
-        UniqueConstraint("template_id", "set_version", name="uq_ai_question_sets_template_id_set_version"),
         Index("ix_ai_question_sets_template_id", "template_id"),
         Index("ix_ai_question_sets_job_id", "job_id"),
+        Index("ix_ai_question_sets_job_version_id", "job_version_id"),
+        Index("ix_ai_question_sets_source_mode", "source_mode"),
         Index("ix_ai_question_sets_organization_id", "organization_id"),
         Index("ix_ai_question_sets_lifecycle_status", "lifecycle_status"),
     )
@@ -1695,23 +1696,46 @@ class AiInterviewQuestionSetRecord(Base):
         UUID(as_uuid=True),
         nullable=False,
     )
-    template_id: Mapped[uuid.UUID] = mapped_column(
+    template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("job_interview_templates.template_id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     job_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("job_requisitions.job_id", ondelete="CASCADE"),
         nullable=False,
     )
-    source_template_version: Mapped[int] = mapped_column(
+    job_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_versions.job_version_id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    job_revision: Mapped[Optional[int]] = mapped_column(
         Integer,
+        nullable=True,
+        default=1,
+        server_default=text("1"),
+    )
+    source_mode: Mapped[str] = mapped_column(
+        String(50),
         nullable=False,
+        default="BLUEPRINT_GROUNDED",
+        server_default=text("'BLUEPRINT_GROUNDED'"),
+    )
+    source_template_version: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
     )
     source_content_hash: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
+    )
+    source_requirement_ids: Mapped[List[str]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
     )
     set_version: Mapped[int] = mapped_column(
         Integer,
@@ -1741,6 +1765,22 @@ class AiInterviewQuestionSetRecord(Base):
         default=list,
         server_default=text("'[]'"),
     )
+    provider_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    model_identifier: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    prompt_template_version: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    predecessor_set_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.user_id", ondelete="RESTRICT"),
@@ -1768,7 +1808,8 @@ class AiInterviewQuestionSetRecord(Base):
     )
 
     # Relationships
-    template: Mapped["JobInterviewTemplateRecord"] = relationship("JobInterviewTemplateRecord", foreign_keys=[template_id])
+    template: Mapped[Optional["JobInterviewTemplateRecord"]] = relationship("JobInterviewTemplateRecord", foreign_keys=[template_id])
     requisition: Mapped["JobRequisition"] = relationship("JobRequisition", foreign_keys=[job_id])
+    job_version: Mapped[Optional["JobVersion"]] = relationship("JobVersion", foreign_keys=[job_version_id])
 
 

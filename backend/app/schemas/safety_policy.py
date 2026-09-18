@@ -104,6 +104,9 @@ def get_current_safety_policy() -> SafetyPolicyDefinition:
     return SafetyPolicyDefinition()
 
 
+import re
+
+
 def check_prohibited_topics(text: str) -> Optional[tuple[str, str]]:
     """Checks text against all prohibited topic categories.
     
@@ -114,6 +117,15 @@ def check_prohibited_topics(text: str) -> Optional[tuple[str, str]]:
     text_lower = text.lower()
     for category, terms in PROHIBITED_TOPIC_CATEGORIES.items():
         for term in terms:
-            if term in text_lower:
-                return (category, term)
+            term_clean = term.strip().lower()
+            if not term_clean:
+                continue
+            if " " in term_clean:
+                if term_clean in text_lower:
+                    return (category, term)
+            else:
+                pattern = r'\b' + re.escape(term_clean) + r'\b'
+                if re.search(pattern, text_lower):
+                    return (category, term)
     return None
+

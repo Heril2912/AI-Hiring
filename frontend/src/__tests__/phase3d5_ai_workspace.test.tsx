@@ -178,6 +178,11 @@ describe("Phase 3D.5 Frontend: Dedicated AI Interview Questions Workspace", () =
           job_title: "Staff Distributed Systems Engineer",
           requirement_count: 5,
         },
+        {
+          job_id: "job-102",
+          job_title: "Junior Python API Developer",
+          requirement_count: 3,
+        },
       ],
     };
 
@@ -208,7 +213,7 @@ describe("Phase 3D.5 Frontend: Dedicated AI Interview Questions Workspace", () =
       vi.mocked(clientModule.apiFetch).mockImplementation(async (url: string, opts?: any) => {
         if (url.includes("/eligible-jobs")) return mockEligibleJobs;
         if (url.includes("/ai-interviews/generate")) {
-          return { ai_set_id: "set-new", template_id: "tpl-101" };
+          return { ai_set_id: "set-new", template_id: "tpl-102" };
         }
         if (url.endsWith("/ai-interviews") || url.endsWith("/ai-question-sets")) return mockDirectoryData;
         return {};
@@ -221,34 +226,65 @@ describe("Phase 3D.5 Frontend: Dedicated AI Interview Questions Workspace", () =
       expect(await screen.findByRole("heading", { name: "AI interview questions" })).toBeInTheDocument();
       expect(screen.getByText("Choose a job, generate questions, and review them before approval.")).toBeInTheDocument();
 
-      // Verify eligible job item rendering and recent set item rendering
-      expect(screen.getAllByText("Staff Distributed Systems Engineer").length).toBe(2);
-      expect(screen.getByText("5 requirements")).toBeInTheDocument();
+      // Verify available count: job-101 is excluded because it already has a set in mockDirectoryData.sets, so only job-102 is available
+      expect(screen.getByText("1 job available")).toBeInTheDocument();
+
+      // job-101 only appears once in existing work / Continue reviewing, not in Choose a job
+      expect(screen.getAllByText("Staff Distributed Systems Engineer").length).toBe(1);
+      // job-102 appears in Choose a job
+      expect(screen.getByText("Junior Python API Developer")).toBeInTheDocument();
+      expect(screen.getByText("3 requirements")).toBeInTheDocument();
 
       // Verify generate button initial state
-      const generateBtn = screen.getByRole("button", { name: /Generate AI Questions|Generate 5 questions/i });
+      const generateBtn = screen.getByRole("button", { name: /Generate AI questions|Open AI questions/i });
       expect(generateBtn).toBeDisabled();
 
-      // Select job
-      const radioInput = screen.getByRole("radio", { name: /Staff Distributed Systems Engineer/i });
+      // Select job-102
+      const radioInput = screen.getByRole("radio", { name: /Junior Python API Developer/i });
       fireEvent.click(radioInput);
 
-      // Now generate button is enabled with dynamic slot count
-      const activeGenerateBtn = screen.getByRole("button", { name: "Generate 5 questions" });
+      // Now generate button is enabled
+      const activeGenerateBtn = screen.getByRole("button", { name: "Generate AI questions" });
       expect(activeGenerateBtn).toBeEnabled();
 
       // Click Generate questions
       fireEvent.click(activeGenerateBtn);
 
       await waitFor(() => {
-        expect(handleSelect).toHaveBeenCalledWith("tpl-101");
+        expect(handleSelect).toHaveBeenCalledWith("set-new");
       });
 
       // Verify recent AI question sets section
       expect(screen.getByText("Continue reviewing")).toBeInTheDocument();
       const openBtn = screen.getByRole("button", { name: /Continue review for Staff Distributed Systems Engineer/i });
       fireEvent.click(openBtn);
-      expect(handleSelect).toHaveBeenCalledWith("tpl-101");
+      expect(handleSelect).toHaveBeenCalledWith("set-1");
+    });
+
+    it("renders compact empty state when all eligible jobs already have AI question sets", async () => {
+      vi.mocked(clientModule.apiFetch).mockImplementation(async (url: string) => {
+        if (url.includes("/eligible-jobs")) {
+          return {
+            items: [
+              {
+                job_id: "job-101",
+                job_title: "Staff Distributed Systems Engineer",
+                requirement_count: 5,
+              },
+            ],
+          };
+        }
+        if (url.endsWith("/ai-interviews") || url.endsWith("/ai-question-sets")) return mockDirectoryData;
+        return {};
+      });
+
+      render(<AiInterviewsDirectory onSelectTemplate={vi.fn()} />);
+
+      // job-101 has an existing set, so selectable jobs = 0, triggering compact empty state for job selection
+      expect(await screen.findByText("All ready jobs have AI question sets")).toBeInTheDocument();
+      // But Continue reviewing list is still rendered
+      expect(screen.getByText("Continue reviewing")).toBeInTheDocument();
+      expect(screen.getByText("Staff Distributed Systems Engineer")).toBeInTheDocument();
     });
 
     it("renders compact empty state when no jobs are ready", async () => {
@@ -262,7 +298,7 @@ describe("Phase 3D.5 Frontend: Dedicated AI Interview Questions Workspace", () =
       render(<AiInterviewsDirectory onSelectTemplate={vi.fn()} onNavigateToJobs={handleGoToJobs} />);
 
       expect(await screen.findByText("No jobs are ready yet")).toBeInTheDocument();
-      expect(screen.getByText("Create or complete a job before generating AI interview questions.")).toBeInTheDocument();
+      expect(screen.getByText("Complete a job and add approved requirements before generating interview questions.")).toBeInTheDocument();
       const goBtn = screen.getByRole("button", { name: "Go to Jobs" });
       fireEvent.click(goBtn);
       expect(handleGoToJobs).toHaveBeenCalled();

@@ -24,6 +24,8 @@ class EligibleJobItemResponse(FrozenSchema):
     job_id: UUID
     job_title: str
     requirement_count: int
+    current_ai_set_id: Optional[UUID] = None
+    current_ai_set_status: Optional[str] = None
 
 
 class EligibleJobsResponse(FrozenSchema):
@@ -64,6 +66,7 @@ class AiQuestionSlotItemResponse(FrozenSchema):
     estimated_time_minutes: int
     permitted_probes: List[str] = Field(default_factory=list)
     rubric: Optional[SafeRubricResponse] = None
+    source_requirement_ids: List[UUID] = Field(default_factory=list)
     
     # AI question generation & review state
     ai_wording: Optional[str] = None
@@ -76,18 +79,21 @@ class AiQuestionSlotItemResponse(FrozenSchema):
 
 
 class AiQuestionSetDetailResponse(FrozenSchema):
-    """Full detail view for the master-detail workspace /ai-interviews/:templateId."""
+    """Full detail view for the master-detail workspace /ai-interviews/:templateId or /ai-interviews/:aiSetId."""
     ai_set_id: UUID
     set_version: int
-    template_id: UUID
-    source_template_version: int
+    template_id: Optional[UUID] = None
+    source_template_version: Optional[int] = None
+    source_mode: str = "BLUEPRINT_GROUNDED"  # BLUEPRINT_GROUNDED or REQUIREMENT_GROUNDED
     source_content_hash: str
+    source_requirement_ids: List[UUID] = Field(default_factory=list)
     job_id: UUID
     job_title: str
     job_revision: int
     lifecycle_status: str  # DRAFT, STALE, VALIDATED, APPROVED
     is_immutable: bool
     content_hash: Optional[str] = None
+    action: Optional[str] = None  # GENERATED or OPENED_EXISTING
     
     # Slots
     slots: List[AiQuestionSlotItemResponse] = Field(default_factory=list)
@@ -108,7 +114,8 @@ class AiQuestionSetSummaryResponse(FrozenSchema):
     """Card/row item for the /ai-interviews directory listing."""
     ai_set_id: UUID
     set_version: int
-    template_id: UUID
+    template_id: Optional[UUID] = None
+    source_mode: str = "BLUEPRINT_GROUNDED"
     job_id: UUID
     job_title: str
     lifecycle_status: str

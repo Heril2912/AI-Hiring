@@ -65,6 +65,11 @@ export function AuthenticatedShell({
 
   return (
     <div className="dashboard-app-container">
+      {/* Skip to Main Content Link for Keyboard Navigation */}
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
+
       {/* Top Application Navigation Bar */}
       <header className="dashboard-top-nav" role="banner">
         <div className="nav-brand-section">
@@ -92,6 +97,11 @@ export function AuthenticatedShell({
                     ? "tab-active"
                     : ""
                 }`}
+                aria-current={
+                  activeNavTab === "jobs" || activeNavTab === "new_job" || activeNavTab === "edit_job"
+                    ? "page"
+                    : undefined
+                }
                 onClick={() => onNavigateTab?.("jobs")}
               >
                 <Icon name="briefcase" size={15} />
@@ -106,6 +116,11 @@ export function AuthenticatedShell({
                     ? "tab-active"
                     : ""
                 }`}
+                aria-current={
+                  activeNavTab === "candidates" || activeNavTab === "profile" || activeNavTab === "extraction"
+                    ? "page"
+                    : undefined
+                }
                 onClick={() => onNavigateTab?.("candidates")}
               >
                 <Icon name="user" size={15} />
@@ -118,6 +133,7 @@ export function AuthenticatedShell({
               <button
                 type="button"
                 className={`nav-tab-btn ${activeNavTab === "upload" ? "tab-active" : ""}`}
+                aria-current={activeNavTab === "upload" ? "page" : undefined}
                 onClick={() => onNavigateTab?.("upload")}
               >
                 <Icon name="upload" size={15} />
@@ -131,6 +147,11 @@ export function AuthenticatedShell({
                     ? "tab-active"
                     : ""
                 }`}
+                aria-current={
+                  activeNavTab === "ai_interviews" || activeNavTab === "ai-interviews"
+                    ? "page"
+                    : undefined
+                }
                 aria-label="AI-generated interview questions"
                 onClick={() => onNavigateTab?.("ai_interviews")}
               >
@@ -152,6 +173,11 @@ export function AuthenticatedShell({
                     ? "tab-active"
                     : ""
                 }`}
+                aria-current={
+                  activeNavTab === "jobs" || activeNavTab === "new_job" || activeNavTab === "edit_job"
+                    ? "page"
+                    : undefined
+                }
                 onClick={() => onNavigateTab?.("jobs")}
               >
                 <Icon name="briefcase" size={15} />
@@ -161,6 +187,7 @@ export function AuthenticatedShell({
               <button
                 type="button"
                 className={`nav-tab-btn ${activeNavTab === "users" ? "tab-active" : ""}`}
+                aria-current={activeNavTab === "users" ? "page" : undefined}
                 onClick={() => onNavigateTab?.("users")}
               >
                 <Icon name="user" size={15} />
@@ -169,6 +196,7 @@ export function AuthenticatedShell({
               <button
                 type="button"
                 className={`nav-tab-btn ${activeNavTab === "events" ? "tab-active" : ""}`}
+                aria-current={activeNavTab === "events" ? "page" : undefined}
                 onClick={() => onNavigateTab?.("events")}
               >
                 <Icon name="shield" size={15} />
@@ -177,6 +205,7 @@ export function AuthenticatedShell({
               <button
                 type="button"
                 className={`nav-tab-btn ${activeNavTab === "ai_providers" ? "tab-active" : ""}`}
+                aria-current={activeNavTab === "ai_providers" ? "page" : undefined}
                 onClick={() => onNavigateTab?.("ai_providers")}
               >
                 <Icon name="sparkles" size={15} />
@@ -189,6 +218,7 @@ export function AuthenticatedShell({
             <button
               type="button"
               className={`nav-tab-btn tab-active`}
+              aria-current="page"
               onClick={() => onNavigateTab?.("reviews")}
             >
               <Icon name="award" size={15} />
@@ -255,7 +285,7 @@ export function AuthenticatedShell({
       </header>
 
       {/* Main Content Viewport */}
-      <main className="dashboard-main-viewport" role="main">
+      <main id="main-content" className="dashboard-main-viewport" role="main">
         {children}
       </main>
     </div>
