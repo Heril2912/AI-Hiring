@@ -99,7 +99,7 @@ describe("Phase 3D.3 Frontend: AI-Curated Interview UI & Human Review Workspace"
     created_at: "2026-09-17T10:00:00Z",
   };
 
-  it("PART A1 & A2: Displays coherent Page-Level AI Curation Header and accurate counts", async () => {
+  it("PART A1 & A2: Displays coherent Deterministic Blueprint header and action buttons", async () => {
     (clientModule.apiFetch as any).mockImplementation((url: string) => {
       if (url.includes("/interview-context")) return Promise.resolve(mockContext);
       if (url.includes("/interview-templates/latest")) return Promise.resolve(mockTemplateWithMixedWording);
@@ -110,25 +110,25 @@ describe("Phase 3D.3 Frontend: AI-Curated Interview UI & Human Review Workspace"
 
     // Header title
     await waitFor(() => {
-      expect(screen.getByText("AI-Curated Interview")).toBeInTheDocument();
+      expect(screen.getByText("Interview Template: Principal Infrastructure Engineer")).toBeInTheDocument();
     });
 
-    // Trust statement
+    // Authoritative foundation explanation note
     expect(
-      screen.getByText(/AI refines wording\. Competencies, rubrics and duration remain controlled by the approved blueprint\./i)
+      screen.getByText(/Authoritative Foundation:/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/This workspace defines the deterministic interview blueprint for this role/i)
     ).toBeInTheDocument();
 
-    // Metric counts
-    expect(screen.getByText(/3 questions/i)).toBeInTheDocument();
-    expect(screen.getByText(/using accepted AI-curated wording/i)).toBeInTheDocument();
-    expect(screen.getByText(/retaining deterministic wording/i)).toBeInTheDocument();
+    // Prominent Generate AI Questions button
+    expect(screen.getByRole("button", { name: /Generate AI Questions/i })).toBeInTheDocument();
 
-    // Segmented tabs
-    expect(screen.getByRole("tab", { name: "AI-curated version" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Deterministic baseline" })).toBeInTheDocument();
+    // Blueprint structure section
+    expect(screen.getByText("Authoritative Blueprint Structure")).toBeInTheDocument();
   });
 
-  it("PART A1 & A3: Shows restrained AI-curated badge and not a suggestion label for accepted wording", async () => {
+  it("PART A1 & A3: Shows deterministic blueprint question metadata and direct actions", async () => {
     (clientModule.apiFetch as any).mockImplementation((url: string) => {
       if (url.includes("/interview-context")) return Promise.resolve(mockContext);
       if (url.includes("/interview-templates/latest")) return Promise.resolve(mockTemplateWithMixedWording);
@@ -138,24 +138,24 @@ describe("Phase 3D.3 Frontend: AI-Curated Interview UI & Human Review Workspace"
     render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByText("AI-Curated Interview")).toBeInTheDocument();
+      expect(screen.getByText("Interview Template: Principal Infrastructure Engineer")).toBeInTheDocument();
     });
 
-    // Question 1 has authoring_origin AI_ASSISTED with deterministic_source_available = true
-    // Its visible origin label must be "AI-curated" with subline
-    expect(screen.getByText("AI-curated")).toBeInTheDocument();
-    expect(
-      screen.getByText("Locally refined from the approved deterministic blueprint.")
-    ).toBeInTheDocument();
+    // Question 1 metadata
+    expect(screen.getByText("Question 1")).toBeInTheDocument();
+    expect(screen.getByText("Distributed Consensus")).toBeInTheDocument();
+    expect(screen.getByText("Can you detail how Raft handles split-brain elections in unstable networks?")).toBeInTheDocument();
 
     // Question 2 is deterministic
-    expect(screen.getAllByText("Deterministic baseline").length).toBeGreaterThan(0);
+    expect(screen.getByText("Question 2")).toBeInTheDocument();
+    expect(screen.getByText("Production Triage")).toBeInTheDocument();
 
-    // Question 3 is AI fallback with no deterministic source
-    expect(screen.getByText("AI fallback · recruiter review required")).toBeInTheDocument();
+    // Question 3
+    expect(screen.getByText("Question 3")).toBeInTheDocument();
+    expect(screen.getByText("Capacity Planning")).toBeInTheDocument();
   });
 
-  it("PART A2: Segmented view switches to Deterministic Baseline read-only preserving order", async () => {
+  it("PART A2: Blueprint question list displays authoritative text and preserves order", async () => {
     (clientModule.apiFetch as any).mockImplementation((url: string) => {
       if (url.includes("/interview-context")) return Promise.resolve(mockContext);
       if (url.includes("/interview-templates/latest")) return Promise.resolve(mockTemplateWithMixedWording);
@@ -165,24 +165,19 @@ describe("Phase 3D.3 Frontend: AI-Curated Interview UI & Human Review Workspace"
     render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByText("AI-Curated Interview")).toBeInTheDocument();
+      expect(screen.getByText("Interview Template: Principal Infrastructure Engineer")).toBeInTheDocument();
     });
 
-    // Click Deterministic baseline tab
-    const detTab = screen.getByRole("tab", { name: "Deterministic baseline" });
-    fireEvent.click(detTab);
-
-    // Baseline notice
-    expect(screen.getByText(/authoritative deterministic blueprint baseline/i)).toBeInTheDocument();
-    expect(screen.getByText("Explain how Raft prevents split-brain elections.")).toBeInTheDocument();
-
-    // Identifies question without deterministic source
-    expect(
-      screen.getByText("AI fallback question with no deterministic source")
-    ).toBeInTheDocument();
+    // Verify questions in order
+    expect(screen.getByText("Question 1")).toBeInTheDocument();
+    expect(screen.getByText("Question 2")).toBeInTheDocument();
+    expect(screen.getByText("Question 3")).toBeInTheDocument();
+    expect(screen.getByText("Order #1")).toBeInTheDocument();
+    expect(screen.getByText("Order #2")).toBeInTheDocument();
+    expect(screen.getByText("Order #3")).toBeInTheDocument();
   });
 
-  it("PART A2: Pending AI suggestions appear in separate drawer without mixing into main interview", async () => {
+  it("PART A2: Pure deterministic blueprint view without AI suggestions drawer", async () => {
     (clientModule.apiFetch as any).mockImplementation((url: string) => {
       if (url.includes("/interview-context")) return Promise.resolve(mockContext);
       if (url.includes("/interview-templates/latest")) return Promise.resolve(mockTemplateWithMixedWording);
@@ -192,24 +187,12 @@ describe("Phase 3D.3 Frontend: AI-Curated Interview UI & Human Review Workspace"
     render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByText("AI-Curated Interview")).toBeInTheDocument();
+      expect(screen.getByText("Interview Template: Principal Infrastructure Engineer")).toBeInTheDocument();
     });
 
-    // Find review pending suggestions button in header
-    const drawerBtn = screen.getByRole("button", { name: /Review \d+ pending AI suggestions/i });
-    expect(drawerBtn).toBeInTheDocument();
-
-    fireEvent.click(drawerBtn);
-
-    // Drawer modal opens
-    expect(screen.getByText("Review Pending AI Suggestions")).toBeInTheDocument();
-    expect(screen.getAllByText("AI Suggestion Awaiting Review").length).toBeGreaterThan(0);
-    expect(screen.getByText("Tell me about a high-stress outage when telemetry broke.")).toBeInTheDocument();
-
-    // Close drawer
-    const doneBtn = screen.getByRole("button", { name: "Done Reviewing" });
-    fireEvent.click(doneBtn);
+    // AI suggestions drawer should NOT be present in deterministic workspace
     expect(screen.queryByText("Review Pending AI Suggestions")).toBeNull();
+    expect(screen.queryByRole("tab", { name: "AI-curated version" })).toBeNull();
   });
 
   // Human Review Workspace Tests (Parts B, C, D, E, F, G)

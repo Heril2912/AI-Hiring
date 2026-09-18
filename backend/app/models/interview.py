@@ -1667,3 +1667,108 @@ class SimulationReviewAuditEventRecord(Base):
         server_default=func.now(),
     )
 
+
+class AiInterviewQuestionSetRecord(Base):
+    """Authoritative persistent record for an AI-generated interview question set.
+    
+    Phase 3D.5: Dedicated AI Interview Questions Workspace.
+    Stores AI-generated question wording, slot-level reviews, and sealed approval state,
+    grounded in the underlying deterministic job interview template without altering
+    the authoritative deterministic blueprint.
+    """
+
+    __tablename__ = "ai_interview_question_sets"
+    __table_args__ = (
+        UniqueConstraint("template_id", "set_version", name="uq_ai_question_sets_template_id_set_version"),
+        Index("ix_ai_question_sets_template_id", "template_id"),
+        Index("ix_ai_question_sets_job_id", "job_id"),
+        Index("ix_ai_question_sets_organization_id", "organization_id"),
+        Index("ix_ai_question_sets_lifecycle_status", "lifecycle_status"),
+    )
+
+    ai_set_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_interview_templates.template_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_requisitions.job_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_template_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    source_content_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    set_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="DRAFT",
+        server_default=text("'DRAFT'"),
+    )
+    content_hash: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    is_immutable: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    items: Mapped[List[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    approved_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    template: Mapped["JobInterviewTemplateRecord"] = relationship("JobInterviewTemplateRecord", foreign_keys=[template_id])
+    requisition: Mapped["JobRequisition"] = relationship("JobRequisition", foreign_keys=[job_id])
+
+

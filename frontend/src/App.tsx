@@ -15,6 +15,8 @@ import { CandidateComparisonView } from "./components/jobs/CandidateComparisonVi
 import { RequirementGapReportView } from "./components/jobs/RequirementGapReportView";
 import { InterviewWorkspace } from "./components/interviews/InterviewWorkspace";
 import { SimulationWorkspace } from "./components/interviews/SimulationWorkspace";
+import { AiInterviewsDirectory } from "./components/ai_interviews/AiInterviewsDirectory";
+import { AiQuestionSetWorkspace } from "./components/ai_interviews/AiQuestionSetWorkspace";
 import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
@@ -54,11 +56,12 @@ function AuthenticatedApp() {
     role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews"
   );
   const [activeView, setActiveView] = useState<
-    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace" | "interview_simulation"
+    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace" | "interview_simulation" | "ai_interviews" | "ai_interview_workspace"
   >("candidates");
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [interviewRoute, setInterviewRoute] = useState<InterviewRouteState | null>(null);
   const [simulationRoute, setSimulationRoute] = useState<{ planId: string; jobId: string } | null>(null);
+  const [selectedAiTemplateId, setSelectedAiTemplateId] = useState<string | null>(null);
 
   // Health check
   const [connectionState, setConnectionState] = useState<ConnectionState>("checking");
@@ -103,6 +106,24 @@ function AuthenticatedApp() {
         });
         setActiveView("compare_candidates");
         setActiveNavTab("jobs");
+      } else if (window.location.pathname.startsWith("/ai-interviews")) {
+        const parts = window.location.pathname.split("/").filter(Boolean);
+        if (parts.length > 1 && parts[1]) {
+          setSelectedAiTemplateId(parts[1]);
+          setActiveView("ai_interview_workspace");
+        } else {
+          setActiveView("ai_interviews");
+        }
+        setActiveNavTab("ai_interviews");
+      } else if (viewParam === "ai_interviews") {
+        const tmplParam = searchParams.get("templateId");
+        if (tmplParam) {
+          setSelectedAiTemplateId(tmplParam);
+          setActiveView("ai_interview_workspace");
+        } else {
+          setActiveView("ai_interviews");
+        }
+        setActiveNavTab("ai_interviews");
       }
     } catch {
       // Ignore URL parsing errors in test environments
@@ -236,6 +257,15 @@ function AuthenticatedApp() {
     handleSelectCandidate(artifactId);
   };
 
+  const handleOpenAiQuestionSet = (templateId: string) => {
+    setSelectedAiTemplateId(templateId);
+    setActiveView("ai_interview_workspace");
+    setActiveNavTab("ai_interviews");
+    if (typeof window !== "undefined" && window.history?.pushState) {
+      window.history.pushState(null, "", `/ai-interviews/${templateId}`);
+    }
+  };
+
   const handleNavigateTab = (tab: string) => {
     setActiveNavTab(tab);
     if (tab === "jobs") {
@@ -246,6 +276,11 @@ function AuthenticatedApp() {
       fetchCandidates();
     } else if (tab === "upload") {
       setActiveView("upload");
+    } else if (tab === "ai_interviews" || tab === "ai-interviews") {
+      setActiveView("ai_interviews");
+      if (typeof window !== "undefined" && window.history?.pushState) {
+        window.history.pushState(null, "", "/ai-interviews");
+      }
     }
   };
 
@@ -278,6 +313,7 @@ function AuthenticatedApp() {
               <InterviewWorkspace
                 jobId={interviewRoute.jobId}
                 resumeId={interviewRoute.resumeId}
+                onNavigateToAiInterview={handleOpenAiQuestionSet}
                 onNavigateBack={() => {
                   if (selectedJobId) {
                     setActiveView("edit_job");
@@ -484,6 +520,7 @@ function AuthenticatedApp() {
                 <InterviewWorkspace
                   jobId={interviewRoute.jobId}
                   resumeId={interviewRoute.resumeId}
+                  onNavigateToAiInterview={handleOpenAiQuestionSet}
                   onNavigateToSimulation={(planId, jId) => {
                     setSimulationRoute({ planId, jobId: jId });
                     setActiveView("interview_simulation");
@@ -509,6 +546,30 @@ function AuthenticatedApp() {
                   jobId={simulationRoute.jobId}
                   onNavigateBack={() => {
                     setActiveView("interview_workspace");
+                  }}
+                />
+              )}
+
+              {activeView === "ai_interviews" && (
+                <AiInterviewsDirectory
+                  onSelectTemplate={handleOpenAiQuestionSet}
+                  onNavigateToJobs={() => {
+                    setActiveNavTab("jobs");
+                    setActiveView("jobs");
+                    loadJobsList();
+                  }}
+                />
+              )}
+
+              {activeView === "ai_interview_workspace" && selectedAiTemplateId && (
+                <AiQuestionSetWorkspace
+                  templateId={selectedAiTemplateId}
+                  onNavigateBack={() => {
+                    setActiveView("ai_interviews");
+                    setActiveNavTab("ai_interviews");
+                    if (typeof window !== "undefined" && window.history?.pushState) {
+                      window.history.pushState(null, "", "/ai-interviews");
+                    }
                   }}
                 />
               )}
