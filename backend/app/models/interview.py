@@ -1144,6 +1144,17 @@ class SimulationAttemptRecord(Base):
         back_populates="attempt",
         cascade="all, delete-orphan",
     )
+    reviews: Mapped[List["AssessmentReviewRecord"]] = relationship(
+        "AssessmentReviewRecord",
+        back_populates="attempt",
+        cascade="all, delete-orphan",
+    )
+    interview_assessment: Mapped[Optional["InterviewAssessmentRecord"]] = relationship(
+        "InterviewAssessmentRecord",
+        back_populates="attempt",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class SimulationAnswerRecord(Base):
@@ -1416,5 +1427,243 @@ class SimulationQuestionAssessmentRecord(Base):
     answer: Mapped["SimulationAnswerRecord"] = relationship(
         "SimulationAnswerRecord",
         back_populates="assessment",
+    )
+    reviews: Mapped[List["AssessmentReviewRecord"]] = relationship(
+        "AssessmentReviewRecord",
+        back_populates="assessment",
+        cascade="all, delete-orphan",
+        order_by="AssessmentReviewRecord.review_version.desc()",
+    )
+
+
+class AssessmentReviewRecord(Base):
+    """Authoritative persistent record for human review, overrides and citations on a question assessment."""
+
+    __tablename__ = "simulation_assessment_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "assessment_id",
+            "review_version",
+            name="uq_sim_reviews_assessment_version",
+        ),
+        Index("ix_sim_reviews_assessment_id", "assessment_id"),
+        Index("ix_sim_reviews_attempt_id", "attempt_id"),
+        Index("ix_sim_reviews_question_id", "question_id"),
+        Index("ix_sim_reviews_reviewer_user_id", "reviewer_user_id"),
+    )
+
+    review_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    assessment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_question_assessments.assessment_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    reviewer_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    review_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    decision: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )  # 'ACCEPTED', 'EDITED', 'OVERRIDDEN', 'REJECTED', 'INSUFFICIENT'
+    reviewed_observation: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    reviewed_rubric_level: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    retained_citations: Mapped[List[str]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=list,
+    )
+    reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    assessment: Mapped["SimulationQuestionAssessmentRecord"] = relationship(
+        "SimulationQuestionAssessmentRecord",
+        back_populates="reviews",
+    )
+    attempt: Mapped["SimulationAttemptRecord"] = relationship(
+        "SimulationAttemptRecord",
+        back_populates="reviews",
+    )
+
+
+class InterviewAssessmentRecord(Base):
+    """Authoritative persistent record for a finalized interview simulation assessment."""
+
+    __tablename__ = "simulation_interview_assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id",
+            name="uq_sim_interview_assessments_attempt_id",
+        ),
+        Index("ix_sim_interview_assessments_attempt_id", "attempt_id"),
+        Index("ix_sim_interview_assessments_org_id", "organization_id"),
+        Index("ix_sim_interview_assessments_finalized_by", "finalized_by_user_id"),
+    )
+
+    interview_assessment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    finalized_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="FINALIZED",
+        server_default=text("'FINALIZED'"),
+    )
+    aggregate_score: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    aggregate_summary: Mapped[Dict[str, Any]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=dict,
+    )
+    policy_version: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="1.0.0",
+        server_default=text("'1.0.0'"),
+    )
+    policy_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="",
+        server_default=text("''"),
+    )
+    is_finalized: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+    finalized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    attempt: Mapped["SimulationAttemptRecord"] = relationship(
+        "SimulationAttemptRecord",
+        back_populates="interview_assessment",
+    )
+
+
+class SimulationReviewAuditEventRecord(Base):
+    """Authoritative audit log for human review commands and finalization events."""
+
+    __tablename__ = "simulation_review_audit_events"
+    __table_args__ = (
+        Index("ix_sim_review_audit_attempt_id", "attempt_id"),
+        Index("ix_sim_review_audit_actor_user_id", "actor_user_id"),
+        Index("ix_sim_review_audit_occurred_at", "occurred_at"),
+    )
+
+    audit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    previous_state: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=True,
+    )
+    new_state: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE,
+        nullable=True,
+    )
+    reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    safe_metadata: Mapped[Dict[str, Any]] = mapped_column(
+        JSON_TYPE,
+        nullable=False,
+        default=dict,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )
 

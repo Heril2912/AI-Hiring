@@ -2081,6 +2081,477 @@ async def assess_simulation_endpoint(
         )
 
 
+# =========================================================================
+# Phase 3D.3: Human Review, Evidence Overrides & Finalization Endpoints
+# =========================================================================
+
+from app.schemas.human_review import (
+    AcceptReviewRequest,
+    AssessmentReviewItemResponse,
+    EditReviewRequest,
+    FinalizeAssessmentRequest,
+    InterviewFinalizeResponse,
+    MarkInsufficientRequest,
+    OverrideReviewRequest,
+    RejectReviewRequest,
+    ReviewWorkspaceResponse,
+)
+from app.services.human_review_service import (
+    HumanReviewError,
+    finalize_simulation_assessment,
+    get_review_workspace_data,
+    record_review_command,
+)
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/questions/{question_id}/review/accept",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Accept Provisional Assessment",
+    description="Accepts the provisional AI evaluation, preserving level and observations.",
+)
+async def accept_provisional_review_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: AcceptReviewRequest = AcceptReviewRequest(),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="accept",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/questions/{question_id}/review/edit",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Edit Assessment Observation",
+    description="Edits observation text while enforcing valid answer segment citations.",
+)
+async def edit_review_observation_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: EditReviewRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="edit",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/questions/{question_id}/review/override",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Override Rubric Level",
+    description="Overrides the rubric level with a mandatory justification reason.",
+)
+async def override_review_level_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: OverrideReviewRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="override",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/questions/{question_id}/review/reject",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Reject Provisional Observation",
+    description="Rejects the provisional observation with mandatory justification reason.",
+)
+async def reject_review_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: RejectReviewRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="reject",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/questions/{question_id}/review/mark-insufficient",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Mark Insufficient Evidence",
+    description="Marks answer as insufficient evidence, treating it neutrally without assigning a zero.",
+)
+async def mark_insufficient_review_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: MarkInsufficientRequest = MarkInsufficientRequest(),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="mark_insufficient",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.get(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/review/progress",
+    response_model=ReviewWorkspaceResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Review Workspace Data and Progress",
+    description="Loads attempt questions, segments, provisional evaluations, human reviews, aggregate score, and finalization eligibility.",
+)
+async def get_review_progress_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> ReviewWorkspaceResponse:
+    try:
+        return get_review_workspace_data(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post(
+    "/{template_id}/candidate-plans/{plan_id}/simulation/{attempt_id}/finalize",
+    response_model=InterviewFinalizeResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Finalize Interview Assessment",
+    description="Calculates deterministic core aggregate score and immutably locks the interview evaluation.",
+)
+async def finalize_simulation_endpoint(
+    job_id: uuid.UUID,
+    template_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+    payload: FinalizeAssessmentRequest = FinalizeAssessmentRequest(),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> InterviewFinalizeResponse:
+    try:
+        return finalize_simulation_assessment(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=job_id,
+            template_id=template_id,
+            plan_id=plan_id,
+            attempt_id=attempt_id,
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+# =========================================================================
+# Phase 3D.3: Simulation-Centric Direct Router
+# =========================================================================
+
+simulations_router = APIRouter(prefix="/interviews/simulations", tags=["Simulations"])
+
+
+@simulations_router.get(
+    "/{attempt_id}/review/progress",
+    response_model=ReviewWorkspaceResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Review Workspace Data and Progress (Direct)",
+)
+async def get_review_progress_direct_endpoint(
+    attempt_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> ReviewWorkspaceResponse:
+    attempt = db.query(SimulationAttemptRecord).filter_by(attempt_id=attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ATTEMPT_NOT_FOUND", "message": "Simulation attempt not found."})
+    try:
+        return get_review_workspace_data(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=attempt.job_id,
+            template_id=attempt.template_id,
+            plan_id=attempt.plan_id,
+            attempt_id=attempt_id,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@simulations_router.post(
+    "/{attempt_id}/questions/{question_id}/review/accept",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Accept Provisional Assessment (Direct)",
+)
+async def accept_review_direct_endpoint(
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: AcceptReviewRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    attempt = db.query(SimulationAttemptRecord).filter_by(attempt_id=attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ATTEMPT_NOT_FOUND", "message": "Simulation attempt not found."})
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=attempt.job_id,
+            template_id=attempt.template_id,
+            plan_id=attempt.plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="accept",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@simulations_router.post(
+    "/{attempt_id}/questions/{question_id}/review/edit",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Edit Observation (Direct)",
+)
+async def edit_review_direct_endpoint(
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: EditReviewRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    attempt = db.query(SimulationAttemptRecord).filter_by(attempt_id=attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ATTEMPT_NOT_FOUND", "message": "Simulation attempt not found."})
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=attempt.job_id,
+            template_id=attempt.template_id,
+            plan_id=attempt.plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="edit",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@simulations_router.post(
+    "/{attempt_id}/questions/{question_id}/review/override",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Override Rubric Level (Direct)",
+)
+async def override_review_direct_endpoint(
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: OverrideReviewRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    attempt = db.query(SimulationAttemptRecord).filter_by(attempt_id=attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ATTEMPT_NOT_FOUND", "message": "Simulation attempt not found."})
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=attempt.job_id,
+            template_id=attempt.template_id,
+            plan_id=attempt.plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="override",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@simulations_router.post(
+    "/{attempt_id}/questions/{question_id}/review/reject",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Reject Provisional Observation (Direct)",
+)
+async def reject_review_direct_endpoint(
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: RejectReviewRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    attempt = db.query(SimulationAttemptRecord).filter_by(attempt_id=attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ATTEMPT_NOT_FOUND", "message": "Simulation attempt not found."})
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=attempt.job_id,
+            template_id=attempt.template_id,
+            plan_id=attempt.plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="reject",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@simulations_router.post(
+    "/{attempt_id}/questions/{question_id}/review/mark-insufficient",
+    response_model=AssessmentReviewItemResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Mark Insufficient Evidence (Direct)",
+)
+async def mark_insufficient_direct_endpoint(
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: MarkInsufficientRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AssessmentReviewItemResponse:
+    attempt = db.query(SimulationAttemptRecord).filter_by(attempt_id=attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ATTEMPT_NOT_FOUND", "message": "Simulation attempt not found."})
+    try:
+        return record_review_command(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=attempt.job_id,
+            template_id=attempt.template_id,
+            plan_id=attempt.plan_id,
+            attempt_id=attempt_id,
+            question_id=question_id,
+            command="mark_insufficient",
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+@simulations_router.post(
+    "/{attempt_id}/finalize",
+    response_model=InterviewFinalizeResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Finalize Interview Assessment (Direct)",
+)
+async def finalize_simulation_direct_endpoint(
+    attempt_id: uuid.UUID,
+    payload: FinalizeAssessmentRequest = FinalizeAssessmentRequest(),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> InterviewFinalizeResponse:
+    attempt = db.query(SimulationAttemptRecord).filter_by(attempt_id=attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "ATTEMPT_NOT_FOUND", "message": "Simulation attempt not found."})
+    try:
+        return finalize_simulation_assessment(
+            db=db,
+            actor=auth_ctx.user,
+            job_id=attempt.job_id,
+            template_id=attempt.template_id,
+            plan_id=attempt.plan_id,
+            attempt_id=attempt_id,
+            payload=payload,
+        )
+    except HumanReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+
+
+
 
 
 

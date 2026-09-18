@@ -88,6 +88,86 @@ export function formatCompetencyName(raw: string | undefined | null): string {
     .join(" ");
 }
 
+export type QuestionWordingOrigin =
+  | "ACCEPTED_AI_CURATED"
+  | "DETERMINISTIC_BASELINE"
+  | "RECRUITER_REFINED"
+  | "AI_FALLBACK"
+  | "PENDING_AI_SUGGESTION";
+
+export interface QuestionWordingStateInfo {
+  state: QuestionWordingOrigin;
+  originBadgeLabel: string;
+  subline?: string;
+  terminology: string;
+  canRestore: boolean;
+  isAiCurated: boolean;
+  isFallback: boolean;
+  hasDeterministicSource: boolean;
+}
+
+export function getQuestionWordingState(
+  q: TemplateQuestion,
+  isDraft: boolean = true
+): QuestionWordingStateInfo {
+  const hasDetSource = Boolean(q.deterministic_source_available ?? Boolean(q.deterministic_source_text));
+  const isFallback = Boolean(q.safe_fallback_reason) || (!hasDetSource && q.authoring_origin === "AI_ASSISTED");
+  const canRestore = (q.can_restore !== undefined
+    ? q.can_restore
+    : (hasDetSource && q.deterministic_source_text !== q.question_text)) && isDraft;
+
+  if (isFallback) {
+    const isReviewed = Boolean((q as any).fallback_reviewed || (q as any).ai_fallback_reviewed);
+    return {
+      state: "AI_FALLBACK",
+      originBadgeLabel: isReviewed ? "AI fallback · recruiter reviewed" : "AI fallback · recruiter review required",
+      subline: undefined,
+      terminology: "AI fallback question",
+      canRestore: false,
+      isAiCurated: false,
+      isFallback: true,
+      hasDeterministicSource: false,
+    };
+  }
+
+  if (q.authoring_origin === "RECRUITER_EDITED") {
+    return {
+      state: "RECRUITER_REFINED",
+      originBadgeLabel: "Recruiter refined",
+      subline: undefined,
+      terminology: "Recruiter refined",
+      canRestore,
+      isAiCurated: false,
+      isFallback: false,
+      hasDeterministicSource: hasDetSource,
+    };
+  }
+
+  if (q.authoring_origin === "AI_ASSISTED") {
+    return {
+      state: "ACCEPTED_AI_CURATED",
+      originBadgeLabel: "AI-curated",
+      subline: "Locally refined from the approved deterministic blueprint.",
+      terminology: "AI-curated wording",
+      canRestore,
+      isAiCurated: true,
+      isFallback: false,
+      hasDeterministicSource: hasDetSource,
+    };
+  }
+
+  return {
+    state: "DETERMINISTIC_BASELINE",
+    originBadgeLabel: "Deterministic baseline",
+    subline: undefined,
+    terminology: "Deterministic baseline",
+    canRestore: false,
+    isAiCurated: false,
+    isFallback: false,
+    hasDeterministicSource: true,
+  };
+}
+
 export function InterviewWorkspace({
   jobId,
   resumeId,
@@ -117,7 +197,12 @@ export function InterviewWorkspace({
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [batchStatusSummary, setBatchStatusSummary] = useState<GenerateTemplateAiWordingResponse | null>(null);
 
-  // View Tab: Current Questions vs AI Suggestions
+  // Phase 3D.3 Segmented View: "AI-curated version" (default) vs "Deterministic baseline"
+  const [segmentedView, setSegmentedView] = useState<"AI_CURATED" | "DETERMINISTIC_BASELINE">("AI_CURATED");
+  const [showPendingDrawer, setShowPendingDrawer] = useState<boolean>(false);
+  const [openMoreMenuQuestionId, setOpenMoreMenuQuestionId] = useState<string | null>(null);
+
+  // View Tab: Current Questions vs AI Suggestions (legacy fallback compatibility)
   const [activeViewTab, setActiveViewTab] = useState<"CURRENT" | "SUGGESTIONS">("CURRENT");
 
   // Single Wording Assistance State
@@ -776,11 +861,16 @@ export function InterviewWorkspace({
   const isTemplateApproved = templateStatus === "APPROVED";
   const isTemplateDraft = templateStatus === "DRAFT" || templateStatus === "VALIDATED";
 
-  const aiReadyCount = editableQuestions.filter((q) => q.authoring_origin === "AI_ASSISTED").length;
+  const aiReadyCount = editableQuestions.filter(
+    (q) => q.authoring_origin === "AI_ASSISTED" && Boolean(q.deterministic_source_available ?? q.deterministic_source_text)
+  ).length;
   const editedCount = editableQuestions.filter((q) => q.authoring_origin === "RECRUITER_EDITED").length;
-  const deterministicCount = editableQuestions.length - aiReadyCount - editedCount;
+  const fallbackCount = editableQuestions.filter(
+    (q) => q.authoring_origin === "AI_ASSISTED" && !Boolean(q.deterministic_source_available ?? q.deterministic_source_text)
+  ).length;
+  const deterministicCount = editableQuestions.length - aiReadyCount - editedCount - fallbackCount;
   const aiSuggestionsCount = editableQuestions.filter(
-    (q) => Boolean(q.ai_suggestion_text) || q.authoring_origin === "AI_ASSISTED" || Boolean(q.ai_provenance)
+    (q) => Boolean(q.ai_suggestion_text) || (q.authoring_origin === "AI_ASSISTED" && Boolean(q.deterministic_source_available ?? q.deterministic_source_text)) || Boolean(q.ai_provenance)
   ).length;
 
   return (
@@ -1019,33 +1109,6 @@ export function InterviewWorkspace({
         </div>
       )}
 
-      {/* Summary Chips Bar */}
-      {template && (
-        <div className="flex items-center gap-3 mb-4 flex-wrap text-xs text-muted">
-          <span className="badge badge-secondary">
-            {editableQuestions.length} Total Questions
-          </span>
-          <span className="badge badge-info">
-            Target Duration: {template.target_duration_minutes || 45} min
-          </span>
-          {aiReadyCount > 0 && (
-            <span className="badge badge-ai">
-              {aiReadyCount} AI Drafted
-            </span>
-          )}
-          {editedCount > 0 && (
-            <span className="badge badge-warning">
-              {editedCount} Recruiter Edited
-            </span>
-          )}
-          {deterministicCount > 0 && (
-            <span className="badge badge-outline">
-              {deterministicCount} Deterministic Blueprint
-            </span>
-          )}
-        </div>
-      )}
-
       {/* Validation Report Alert Box */}
       {validationReport && (
         <div className={`validation-report-card ${validationReport.is_valid ? "valid" : "invalid"} mb-4`}>
@@ -1103,46 +1166,102 @@ export function InterviewWorkspace({
         </div>
       ) : (
         <div className="interview-plan-section mb-6">
-          <div className="editorial-metric-strip">
-            <div className="editorial-metric-text">
-              {editableQuestions.length} questions &middot; {template.target_duration_minutes || 45} minutes
+          {/* Phase 3D.3 Page-Level AI Curation Header */}
+          <div className="ai-curation-header p-5 mb-5 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-slate-900 m-0">AI-Curated Interview</h2>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-800 border border-teal-200">
+                    <Icon name="sparkles" size={12} />
+                    <span>Local Model</span>
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 m-0">
+                  AI refines wording. Competencies, rubrics and duration remain controlled by the approved blueprint.
+                </p>
+              </div>
+
+              {/* Accessible Segmented View & Separate Suggestions Review */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="inline-flex p-1 bg-slate-100 rounded-lg border border-slate-200" role="tablist" aria-label="Interview authoring views">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={segmentedView === "AI_CURATED"}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                      segmentedView === "AI_CURATED"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                    onClick={() => setSegmentedView("AI_CURATED")}
+                  >
+                    AI-curated version
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={segmentedView === "DETERMINISTIC_BASELINE"}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                      segmentedView === "DETERMINISTIC_BASELINE"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                    onClick={() => setSegmentedView("DETERMINISTIC_BASELINE")}
+                  >
+                    Deterministic baseline
+                  </button>
+                </div>
+
+                {aiSuggestionsCount > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs flex items-center gap-1.5 font-medium"
+                    onClick={() => setShowPendingDrawer(true)}
+                    aria-label={`Review ${aiSuggestionsCount} pending AI suggestions`}
+                  >
+                    <Icon name="clock" size={12} />
+                    <span>Review pending suggestions ({aiSuggestionsCount})</span>
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="editorial-view-tabs" role="tablist" aria-label="Question authoring views">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeViewTab === "CURRENT"}
-                className={`editorial-tab-btn ${activeViewTab === "CURRENT" ? "active" : ""}`}
-                onClick={() => setActiveViewTab("CURRENT")}
-              >
-                Current questions
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeViewTab === "SUGGESTIONS"}
-                className={`editorial-tab-btn ${activeViewTab === "SUGGESTIONS" ? "active" : ""}`}
-                onClick={() => setActiveViewTab("SUGGESTIONS")}
-              >
-                AI suggestions ({aiSuggestionsCount})
-              </button>
+
+            {/* Metrics Breakdown */}
+            <div className="flex items-center gap-3 pt-3 border-t border-slate-100 text-xs text-slate-600 flex-wrap">
+              <span className="font-semibold text-slate-900">
+                {editableQuestions.length} questions &middot; {template.target_duration_minutes || 45} minutes
+              </span>
+              <span className="text-slate-300">&bull;</span>
+              <span className="text-teal-800 font-medium">
+                <strong>{aiReadyCount}</strong> using accepted AI-curated wording
+              </span>
+              <span className="text-slate-300">&bull;</span>
+              <span className="text-slate-700">
+                <strong>{deterministicCount}</strong> retaining deterministic wording
+              </span>
+              {editedCount > 0 && (
+                <>
+                  <span className="text-slate-300">&bull;</span>
+                  <span className="text-slate-700">
+                    <strong>{editedCount}</strong> recruiter refined
+                  </span>
+                </>
+              )}
             </div>
           </div>
 
-          {/* VIEW 1: Current Questions (Editorial list) */}
-          {activeViewTab === "CURRENT" && (
-            <div className="questions-container" role="tabpanel" aria-label="Current questions">
+          {/* VIEW 1: AI-Curated Version (Default selected view) */}
+          {segmentedView === "AI_CURATED" && (
+            <div className="questions-container" role="tabpanel" aria-label="AI-curated interview questions">
               {editableQuestions.map((q, idx) => {
+                const wordingInfo = getQuestionWordingState(q, isTemplateDraft);
                 const isImproving = improvingQuestionId === q.question_id;
                 const hasAiProvenance = !!q.ai_provenance || q.authoring_origin === "AI_ASSISTED";
                 const isAiExpanded = expandedProvenanceQuestionId === q.question_id;
-                const isAiOrigin = q.authoring_origin === "AI_ASSISTED";
-                const isEditedOrigin = q.authoring_origin === "RECRUITER_EDITED";
-                const canRestore = (q.can_restore !== undefined
-                  ? q.can_restore
-                  : (Boolean(q.deterministic_source_text) && q.deterministic_source_text !== q.question_text)) && isTemplateDraft;
                 const isRestoring = isRestoringQuestionId === q.question_id;
                 const isEditing = editingQuestionId === q.question_id;
+                const isMoreOpen = openMoreMenuQuestionId === q.question_id;
 
                 return (
                   <div key={q.question_id} className="editorial-question-item">
@@ -1153,6 +1272,17 @@ export function InterviewWorkspace({
                         <span>{formatCompetencyName(q.competency_name || (q as any).competency_id || (q.rubric as any)?.competency_definition)}</span>
                         <span>&middot;</span>
                         <span className="text-slate-500">{q.estimated_time_minutes} min</span>
+                        {q.unresolved_manual_required && (
+                          <>
+                            <span>&middot;</span>
+                            <span
+                              className="badge badge-warning text-xs font-semibold"
+                              title="No deterministic question was available and AI generation could not resolve this slot. Please enter question wording manually."
+                            >
+                              Manual Question Required
+                            </span>
+                          </>
+                        )}
                       </div>
 
                       {/* Reorder Buttons */}
@@ -1182,7 +1312,7 @@ export function InterviewWorkspace({
                       )}
                     </div>
 
-                    {/* Question text: Text display by default; textarea ONLY in edit mode */}
+                    {/* Question text: Text display by default (~17-18px); textarea ONLY in edit mode */}
                     {isEditing && isTemplateDraft ? (
                       <div className="mb-3">
                         <textarea
@@ -1207,25 +1337,42 @@ export function InterviewWorkspace({
                       <p className="editorial-question-text">{q.question_text}</p>
                     )}
 
-                    {/* Source Caption */}
+                    {/* Restrained Origin Marker */}
                     <div className="editorial-source-caption mb-3">
-                      {q.unresolved_manual_required ? (
-                        <span className="text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                          Manual Question Required
+                      {wordingInfo.state === "ACCEPTED_AI_CURATED" ? (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-800 border border-teal-200"
+                            title="Source: AI-curated wording (local model)"
+                          >
+                            <Icon name="sparkles" size={11} className="text-teal-700" />
+                            <span>AI-curated</span>
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            Locally refined from the approved deterministic blueprint.
+                          </span>
+                          <span className="sr-only">Source: AI wording suggestion</span>
+                        </div>
+                      ) : wordingInfo.state === "RECRUITER_REFINED" ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 border border-slate-300" title="Source: Recruiter edited">
+                          <span>Recruiter refined</span>
                         </span>
-                      ) : isAiOrigin ? (
-                        <span>Source: AI wording suggestion ({q.ai_provenance?.model_name || "local model"})</span>
-                      ) : isEditedOrigin ? (
-                        <span>Source: Recruiter edited</span>
+                      ) : wordingInfo.state === "AI_FALLBACK" ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                          <span>{wordingInfo.originBadgeLabel}</span>
+                        </span>
                       ) : (
-                        <span>Source: Deterministic blueprint baseline</span>
-                      )}
-                      {q.safe_fallback_reason && (
-                        <span className="text-amber-700 font-medium ml-2">({q.safe_fallback_reason})</span>
+                        <span
+                          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200"
+                          title="Source: Deterministic blueprint baseline"
+                        >
+                          <span>Deterministic baseline</span>
+                          <span className="sr-only">Deterministic blueprint baseline</span>
+                        </span>
                       )}
                     </div>
 
-                    {/* Primary actions: Edit and View rubric; More context controls */}
+                    {/* Primary actions: Edit and View rubric; Secondary actions in More menu */}
                     <div className="editorial-question-actions">
                       {isTemplateDraft && !isEditing && (
                         <button
@@ -1249,45 +1396,113 @@ export function InterviewWorkspace({
                         </button>
                       )}
 
-                      {isTemplateDraft && (
+                      {isTemplateDraft && ai_capability.ai_enabled && (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-xs"
+                          className="btn btn-ghost btn-xs text-teal-800 hover:text-teal-900"
                           onClick={() => handleImproveWording(q, "COMMON_CORE")}
-                          disabled={isImproving || !ai_capability.ai_enabled}
-                          title={`Improve wording for question ${idx + 1}`}
+                          disabled={isImproving}
                           aria-label={`Improve wording for question ${idx + 1}`}
+                          title="Get AI wording suggestion"
                         >
                           <Icon name="sparkles" size={13} />
-                          <span>{isImproving ? "Requesting suggestion..." : "Get AI wording suggestion"}</span>
+                          <span>{isImproving ? "Refining…" : "Improve wording"}</span>
                         </button>
                       )}
 
-                      {canRestore && (
+                      {/* Contextual secondary restore button when eligible */}
+                      {wordingInfo.canRestore && (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-xs"
+                          className="btn btn-ghost btn-xs text-slate-600 hover:text-slate-900"
                           onClick={() => handleRestoreDeterministic(q, "COMMON_CORE")}
                           disabled={isRestoring}
                           title="Restore original deterministic baseline wording"
                           aria-label="Restore original deterministic baseline wording"
                         >
-                          <Icon name="history" size={13} />
-                          <span>{isRestoring ? "Restoring..." : "Restore deterministic"}</span>
+                          <Icon name="history" size={12} />
+                          <span>Restore baseline</span>
                         </button>
                       )}
 
-                      {hasAiProvenance && (
+                      {/* Contextual Secondary More Menu */}
+                      <div className="relative inline-block text-left">
                         <button
                           type="button"
-                          className="btn btn-ghost btn-xs text-muted"
-                          onClick={() => setExpandedProvenanceQuestionId(isAiExpanded ? null : q.question_id)}
-                          aria-expanded={isAiExpanded}
+                          className="btn btn-ghost btn-xs text-slate-600"
+                          onClick={() => setOpenMoreMenuQuestionId(isMoreOpen ? null : q.question_id)}
+                          aria-expanded={isMoreOpen}
+                          title="More options"
                         >
-                          <Icon name={isAiExpanded ? "chevron-up" : "info"} size={13} />
-                          <span>Technical details</span>
+                          <span className="font-bold tracking-widest text-xs leading-none">•••</span>
+                          <span>More</span>
                         </button>
-                      )}
+
+                        {isMoreOpen && (
+                          <div className="absolute left-0 mt-1 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-20 p-1 space-y-1">
+                            {isTemplateDraft && (
+                              <button
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 rounded flex items-center gap-2"
+                                onClick={() => {
+                                  setOpenMoreMenuQuestionId(null);
+                                  handleImproveWording(q, "COMMON_CORE");
+                                }}
+                                disabled={isImproving || !ai_capability.ai_enabled}
+                                aria-label={`Improve wording for question ${idx + 1}`}
+                              >
+                                <Icon name="sparkles" size={12} />
+                                <span>{isImproving ? "Requesting suggestion..." : "Get AI wording suggestion"}</span>
+                              </button>
+                            )}
+
+                            {wordingInfo.canRestore && (
+                              <button
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 rounded flex items-center gap-2"
+                                onClick={() => {
+                                  setOpenMoreMenuQuestionId(null);
+                                  handleRestoreDeterministic(q, "COMMON_CORE");
+                                }}
+                                disabled={isRestoring}
+                                title="Restore original deterministic baseline wording"
+                                aria-label="Restore original deterministic baseline wording"
+                              >
+                                <Icon name="history" size={12} />
+                                <span>{isRestoring ? "Restoring..." : "Restore deterministic"}</span>
+                              </button>
+                            )}
+
+                            {q.deterministic_source_text && q.deterministic_source_text !== q.question_text && (
+                              <button
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 rounded flex items-center gap-2"
+                                onClick={() => {
+                                  setOpenMoreMenuQuestionId(null);
+                                  setComparingQuestionId(q.question_id);
+                                }}
+                              >
+                                <Icon name="history" size={12} />
+                                <span>Compare with baseline</span>
+                              </button>
+                            )}
+
+                            {hasAiProvenance && (
+                              <button
+                                type="button"
+                                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 rounded flex items-center gap-2"
+                                onClick={() => {
+                                  setOpenMoreMenuQuestionId(null);
+                                  setExpandedProvenanceQuestionId(isAiExpanded ? null : q.question_id);
+                                }}
+                              >
+                                <Icon name="info" size={12} />
+                                <span>Technical details</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {hasAiProvenance && isAiExpanded && (
@@ -1307,88 +1522,188 @@ export function InterviewWorkspace({
             </div>
           )}
 
-          {/* VIEW 2: AI Suggestions (Side-by-side comparison view) */}
-          {activeViewTab === "SUGGESTIONS" && (
-            <div className="ai-suggestions-container" role="tabpanel" aria-label="AI wording suggestions">
-              {editableQuestions.filter(q => Boolean(q.ai_suggestion_text || q.authoring_origin === "AI_ASSISTED" || q.ai_provenance)).length === 0 ? (
-                <div className="p-8 text-center bg-slate-50 border rounded-md text-slate-600">
-                  <Icon name="sparkles" size={24} className="mx-auto mb-2 text-slate-400" />
-                  <p className="font-medium text-slate-800">No pending AI wording suggestions.</p>
-                  <p className="text-xs text-slate-500 mt-1">Use "Generate interview wording with AI" or click "Get AI wording suggestion" on any question to produce reviewable alternatives.</p>
-                </div>
-              ) : (
-                editableQuestions
-                  .filter(q => Boolean(q.ai_suggestion_text || q.authoring_origin === "AI_ASSISTED" || q.ai_provenance))
-                  .map((q, idx) => {
-                    const currentText = q.question_text;
-                    const detText = q.deterministic_source_text || "AI fallback — no deterministic version available.";
-                    const sugText = q.ai_suggestion_text || (q.authoring_origin === "AI_ASSISTED" ? q.question_text : null);
+          {/* VIEW 2: Deterministic Baseline View (Read-Only) */}
+          {segmentedView === "DETERMINISTIC_BASELINE" && (
+            <div className="questions-container" role="tabpanel" aria-label="Deterministic baseline questions">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 mb-4 flex items-center justify-between">
+                <span>Viewing authoritative deterministic blueprint baseline (read-only reference).</span>
+                <span className="font-semibold text-slate-800">{editableQuestions.length} baseline items</span>
+              </div>
+              {editableQuestions.map((q, idx) => {
+                const hasDet = Boolean(q.deterministic_source_available ?? Boolean(q.deterministic_source_text));
+                const baselineText = q.deterministic_source_text || q.question_text;
+                const canRestore = (q.can_restore !== undefined
+                  ? q.can_restore
+                  : (hasDet && q.deterministic_source_text !== q.question_text)) && isTemplateDraft;
+                const isRestoring = isRestoringQuestionId === q.question_id;
 
-                    return (
-                      <div key={q.question_id} className="ai-suggestion-comparison-row">
-                        <div className="ai-suggestion-col">
-                          <span className="ai-suggestion-col-title">Current / Deterministic Baseline</span>
-                          <div className="ai-suggestion-col-content">
-                            {q.deterministic_source_available ? detText : (
-                              <span className="text-amber-800 italic">AI fallback — no deterministic version available.</span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="ai-suggestion-col">
-                          <span className="ai-suggestion-col-title">AI Wording Suggestion</span>
-                          <div className="ai-suggestion-col-content">
-                            {sugText || <span className="text-slate-400 italic">No alternative suggestion available.</span>}
-                          </div>
-                        </div>
-
-                        <div className="ai-suggestion-actions">
-                          {sugText && isTemplateDraft && (
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-xs"
-                              onClick={() => {
-                                const qIdx = editableQuestions.findIndex(x => x.question_id === q.question_id);
-                                if (qIdx !== -1) {
-                                  handleQuestionTextChange(qIdx, sugText);
-                                  // mark authoring origin AI_ASSISTED
-                                  const updated = [...editableQuestions];
-                                  updated[qIdx] = { ...updated[qIdx], question_text: sugText, authoring_origin: "AI_ASSISTED" };
-                                  setEditableQuestions(updated);
-                                  setSuccessMessage("Applied AI wording suggestion.");
-                                }
-                              }}
-                            >
-                              <Icon name="check" size={12} />
-                              <span>Use AI wording</span>
-                            </button>
-                          )}
-
-                          {isTemplateDraft && (
-                            <button
-                              type="button"
-                              className="btn btn-outline btn-xs"
-                              onClick={() => {
-                                if (q.deterministic_source_text) {
-                                  const qIdx = editableQuestions.findIndex(x => x.question_id === q.question_id);
-                                  if (qIdx !== -1) {
-                                    handleQuestionTextChange(qIdx, q.deterministic_source_text);
-                                    const updated = [...editableQuestions];
-                                    updated[qIdx] = { ...updated[qIdx], question_text: q.deterministic_source_text, authoring_origin: "DETERMINISTIC" };
-                                    setEditableQuestions(updated);
-                                    setSuccessMessage("Retained deterministic baseline wording.");
-                                  }
-                                }
-                              }}
-                            >
-                              <span>Keep current wording</span>
-                            </button>
-                          )}
-                        </div>
+                return (
+                  <div key={`det-${q.question_id}`} className="editorial-question-item">
+                    <div className="editorial-question-header">
+                      <div className="editorial-question-meta">
+                        <span className="font-semibold text-slate-900">Question {idx + 1}</span>
+                        <span>&middot;</span>
+                        <span>{formatCompetencyName(q.competency_name || (q as any).competency_id || (q.rubric as any)?.competency_definition)}</span>
+                        <span>&middot;</span>
+                        <span className="text-slate-500">{q.estimated_time_minutes} min</span>
                       </div>
-                    );
-                  })
-              )}
+                      <span className="text-xs font-mono text-slate-400">Baseline</span>
+                    </div>
+
+                    <p className="editorial-question-text">{baselineText}</p>
+
+                    <div className="editorial-source-caption mb-3">
+                      {hasDet ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                          <span>Deterministic baseline text</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                          <span>AI fallback question with no deterministic source</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="editorial-question-actions">
+                      {q.rubric && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => setSelectedRubricQuestion(q)}
+                        >
+                          <Icon name="file-text" size={13} />
+                          <span>View rubric</span>
+                        </button>
+                      )}
+
+                      {canRestore && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-xs"
+                          onClick={() => handleRestoreDeterministic(q, "COMMON_CORE")}
+                          disabled={isRestoring}
+                          title="Restore original deterministic baseline wording"
+                          aria-label="Restore original deterministic baseline wording"
+                        >
+                          <Icon name="history" size={13} />
+                          <span>{isRestoring ? "Restoring..." : "Restore to this wording"}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Phase 3D.3 Dedicated Pending AI Suggestions Drawer / Modal */}
+          {showPendingDrawer && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-lg max-w-4xl w-full max-h-[85vh] flex flex-col shadow-xl border border-slate-200">
+                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 m-0">Review Pending AI Suggestions</h3>
+                    <p className="text-xs text-slate-500 m-0">
+                      Compare pending suggestions against current wording. Accepted wording becomes AI-curated.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs text-slate-500 hover:text-slate-900"
+                    onClick={() => setShowPendingDrawer(false)}
+                  >
+                    <Icon name="x" size={16} />
+                  </button>
+                </div>
+
+                <div className="p-4 overflow-y-auto space-y-4 flex-1">
+                  {editableQuestions.filter(q => Boolean(q.ai_suggestion_text || q.authoring_origin === "AI_ASSISTED" || q.ai_provenance)).length === 0 ? (
+                    <div className="p-8 text-center bg-slate-50 border rounded-md text-slate-600">
+                      <Icon name="sparkles" size={24} className="mx-auto mb-2 text-slate-400" />
+                      <p className="font-medium text-slate-800">No pending AI wording suggestions.</p>
+                      <p className="text-xs text-slate-500 mt-1">Use &ldquo;Generate interview wording with AI&rdquo; on questions to produce reviewable alternatives.</p>
+                    </div>
+                  ) : (
+                    editableQuestions
+                      .filter(q => Boolean(q.ai_suggestion_text || q.authoring_origin === "AI_ASSISTED" || q.ai_provenance))
+                      .map((q, idx) => {
+                        const currentText = q.question_text;
+                        const detText = q.deterministic_source_text || "AI fallback — no deterministic version available.";
+                        const sugText = q.ai_suggestion_text || (q.authoring_origin === "AI_ASSISTED" ? q.question_text : null);
+
+                        return (
+                          <div key={q.question_id} className="ai-suggestion-comparison-row p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                            <div className="font-semibold text-xs text-slate-900 mb-2">
+                              Question {idx + 1}: {formatCompetencyName(q.competency_name)}
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 text-xs">
+                              <div className="p-3 bg-white border border-slate-200 rounded">
+                                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                                  Deterministic Baseline
+                                </span>
+                                <p className="m-0 text-slate-800 leading-relaxed">{detText}</p>
+                              </div>
+                              <div className="p-3 bg-white border border-teal-200 rounded">
+                                <span className="text-[11px] font-bold text-teal-800 uppercase tracking-wider block mb-1">
+                                  AI Suggestion Awaiting Review
+                                </span>
+                                <p className="m-0 text-slate-900 leading-relaxed font-medium">{sugText || currentText}</p>
+                              </div>
+                            </div>
+                            <div className="flex justify-end gap-2">
+                              {sugText && sugText !== currentText && (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-xs"
+                                  onClick={async () => {
+                                    const variant: StructuredWordingVariant = {
+                                      variant_text: sugText,
+                                      rationale_code: "CLARITY_IMPROVEMENT",
+                                      referenced_identifiers: [],
+                                    };
+                                    const dummyResult: any = {
+                                      question_id: q.question_id,
+                                      deterministic_baseline: q.deterministic_source_text || q.question_text,
+                                      variants: [variant],
+                                      model_provenance: { model_name: "local-qwen", provider_name: "local_mlx" },
+                                    };
+                                    await handleUseSuggestion(q, variant, dummyResult, "COMMON_CORE");
+                                    setSuccessMessage(`Accepted AI-curated wording for Question ${idx + 1}.`);
+                                  }}
+                                >
+                                  <Icon name="check" size={12} />
+                                  <span>Accept AI-curated wording</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-xs"
+                                onClick={() => {
+                                  const updated = editableQuestions.map(item =>
+                                    item.question_id === q.question_id ? { ...item, ai_suggestion_text: null } : item
+                                  );
+                                  setEditableQuestions(updated);
+                                }}
+                              >
+                                <span>Keep current wording</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+
+                <div className="p-3 border-t border-slate-100 flex justify-end">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setShowPendingDrawer(false)}
+                  >
+                    Done Reviewing
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
