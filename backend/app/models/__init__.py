@@ -14,6 +14,11 @@ from app.models.candidate import (
     CandidateProfileRecord,
     ProfileCorrectionRecord,
 )
+from app.models.candidate_access import (
+    CandidateAccountBindingRecord,
+    CandidateBindingStatus,
+    CandidateInvitationRecord,
+)
 from app.models.extraction import BlockType, ExtractionBlock, ExtractionMethod, ResumeExtraction
 from app.models.job import (
     EmploymentType,
@@ -167,4 +172,7 @@ __all__ = [
     "ATSSyncCheckpointRecord",
     "ATSExportReceiptRecord",
     "ATSReconciliationRecord",
+    "CandidateInvitationRecord",
+    "CandidateAccountBindingRecord",
+    "CandidateBindingStatus",
 ]

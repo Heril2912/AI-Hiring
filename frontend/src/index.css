@@ -8442,3 +8442,373 @@ input, select, textarea {
   line-height: 1.4;
 }
 
+/* ==========================================================================
+   Phase 3F.1: Candidate Portal & Authentication Styling
+   ========================================================================== */
+
+.candidate-auth-layout {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-canvas, #f8fafc);
+  padding: 24px 16px;
+}
+
+.candidate-auth-container {
+  width: 100%;
+  max-width: 460px;
+}
+
+.candidate-auth-card {
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  padding: 32px 28px;
+  box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.07));
+}
+
+.candidate-auth-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.candidate-badge-container {
+  display: inline-flex;
+  margin-bottom: 12px;
+}
+
+.candidate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #f0fdfa;
+  color: #0d9488;
+  border: 1px solid #ccfbf1;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  letter-spacing: 0.02em;
+}
+
+.candidate-auth-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  margin: 0 0 6px 0;
+}
+
+.candidate-auth-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary, #64748b);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.candidate-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input-wrapper input {
+  padding-right: 40px;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.password-toggle-btn:hover {
+  color: var(--text-primary, #0f172a);
+}
+
+.password-toggle-btn:focus-visible {
+  outline: 2px solid var(--border-focus, #3b82f6);
+}
+
+.password-requirements-box {
+  background-color: var(--bg-surface-subtle, #f8fafc);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  padding: 12px;
+  margin-top: -4px;
+}
+
+.password-requirements-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.password-requirements-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.requirement-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  transition: color 0.15s ease;
+}
+
+.requirement-item.valid {
+  color: #16a34a;
+  font-weight: 500;
+}
+
+.candidate-submit-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.candidate-auth-footer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+  text-align: center;
+}
+
+.candidate-back-link {
+  background: none;
+  border: none;
+  color: var(--brand-primary, #4f46e5);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.candidate-back-link:hover {
+  text-decoration: underline;
+}
+
+/* Candidate Portal Shell */
+.candidate-shell-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-canvas, #f8fafc);
+}
+
+.candidate-shell-header {
+  height: 60px;
+  background-color: var(--bg-surface, #ffffff);
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  box-shadow: var(--shadow-subtle, 0 1px 2px 0 rgba(0, 0, 0, 0.05));
+}
+
+.candidate-shell-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.candidate-portal-chip {
+  background-color: #f0fdfa;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid #ccfbf1;
+}
+
+.candidate-shell-user-menu {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.candidate-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+.candidate-shell-main {
+  flex: 1;
+  padding: 40px 24px;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.candidate-home-container {
+  display: flex;
+  justify-content: center;
+}
+
+.candidate-welcome-card {
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  padding: 48px 36px;
+  text-align: center;
+  box-shadow: var(--shadow-sm, 0 1px 3px 0 rgba(0, 0, 0, 0.05));
+  max-width: 580px;
+}
+
+.candidate-welcome-icon-box {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background-color: #f0fdfa;
+  color: #0d9488;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px auto;
+}
+
+.candidate-welcome-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  margin: 0 0 12px 0;
+}
+
+.candidate-welcome-description {
+  font-size: 14px;
+  color: var(--text-secondary, #64748b);
+  line-height: 1.6;
+  margin: 0 0 24px 0;
+}
+
+.candidate-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--bg-surface-subtle, #f8fafc);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+.candidate-status-indicator .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #22c55e;
+}
+
+/* Candidate Invitation Modal Styling */
+.candidate-invitation-modal {
+  max-width: 620px;
+}
+
+.invitation-generate-box {
+  background-color: var(--bg-surface-subtle, #f8fafc);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.invitation-link-container {
+  margin-top: 12px;
+  padding: 12px;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.invitation-raw-link {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  word-break: break-all;
+  color: #0f172a;
+  user-select: all;
+  padding: 6px 8px;
+  background-color: #f1f5f9;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.invitation-copy-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.invitation-history-section {
+  margin-top: 20px;
+}
+
+.invitation-history-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+  margin-bottom: 8px;
+}
+
+.invitation-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.invitation-status-badge.active {
+  background-color: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.invitation-status-badge.consumed {
+  background-color: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.invitation-status-badge.revoked {
+  background-color: var(--bg-surface-subtle, #f1f5f9);
+  color: var(--text-secondary, #475569);
+  border: 1px solid var(--border-subtle, #cbd5e1);
+}
+
+.invitation-status-badge.expired {
+  background-color: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+

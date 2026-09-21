@@ -21,6 +21,10 @@ from app.models.auth import (
     UserRole,
     UserSessionRecord,
 )
+from app.models.candidate_access import (
+    CandidateAccountBindingRecord,
+    CandidateBindingStatus,
+)
 from app.schemas.auth import (
     AuthMeResponse,
     ChangePasswordRequest,
@@ -85,6 +89,28 @@ def _set_session_cookie(response: Response, raw_token: str, settings: Settings) 
 def _clear_session_cookie(response: Response, settings: Settings) -> None:
     response.delete_cookie(
         key=settings.session_cookie_name,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite=settings.session_cookie_samesite,
+        path="/",
+    )
+
+
+def _set_candidate_session_cookie(response: Response, raw_token: str, settings: Settings) -> None:
+    response.set_cookie(
+        key=settings.candidate_session_cookie_name,
+        value=raw_token,
+        max_age=settings.session_absolute_lifetime_seconds,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite=settings.session_cookie_samesite,
+        path="/",
+    )
+
+
+def _clear_candidate_session_cookie(response: Response, settings: Settings) -> None:
+    response.delete_cookie(
+        key=settings.candidate_session_cookie_name,
         httponly=True,
         secure=settings.session_cookie_secure,
         samesite=settings.session_cookie_samesite,
@@ -254,6 +280,178 @@ require_recruiter = require_role({UserRole.RECRUITER})
 require_reviewer = require_role({UserRole.REVIEWER})
 require_recruiter_or_admin = require_role({UserRole.RECRUITER, UserRole.ADMIN})
 require_reviewer_or_admin = require_role({UserRole.REVIEWER, UserRole.ADMIN})
+
+
+class CandidateAuthenticatedContext:
+    def __init__(
+        self,
+        user: UserRecord,
+        session: UserSessionRecord,
+        binding: CandidateAccountBindingRecord,
+    ):
+        self.user = user
+        self.session = session
+        self.binding = binding
+
+
+async def get_candidate_authenticated_context(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> CandidateAuthenticatedContext:
+    # 1. Prefer candidate-specific session cookie
+    raw_token = request.cookies.get(settings.candidate_session_cookie_name)
+    if not raw_token:
+        # Fallback to general session cookie only if candidate cookie absent
+        raw_token = request.cookies.get(settings.session_cookie_name)
+
+    if not raw_token:
+        raise UNAUTHENTICATED_ERROR
+
+    token_digest = hash_token(raw_token)
+    now = datetime.now(timezone.utc)
+
+    stmt = (
+        select(UserSessionRecord)
+        .options(selectinload(UserSessionRecord.user))
+        .where(UserSessionRecord.token_hash == token_digest)
+    )
+    user_session = db.execute(stmt).scalar_one_or_none()
+
+    if user_session is None or user_session.revoked_at is not None:
+        raise UNAUTHENTICATED_ERROR
+
+    abs_exp = user_session.absolute_expires_at
+    if abs_exp.tzinfo is None:
+        abs_exp = abs_exp.replace(tzinfo=timezone.utc)
+
+    idle_exp = user_session.idle_expires_at
+    if idle_exp.tzinfo is None:
+        idle_exp = idle_exp.replace(tzinfo=timezone.utc)
+
+    if now >= abs_exp or now >= idle_exp:
+        reason = SessionRevokeReason.EXPIRED_ABSOLUTE if now >= abs_exp else SessionRevokeReason.EXPIRED_IDLE
+        user_session.revoked_at = now
+        user_session.revoke_reason = reason
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.SESSION_REVOKED,
+            result=AuditResult.SUCCESS,
+            reason_code=AuditReasonCode.SESSION_EXPIRED,
+            actor_user_id=user_session.user_id,
+            resource_type="user_session",
+            resource_id=str(user_session.session_id),
+            safe_metadata={"revoke_reason": reason.value},
+        )
+        db.commit()
+        raise UNAUTHENTICATED_ERROR
+
+    user = user_session.user
+    if user is None or not user.is_active or user.role != UserRole.CANDIDATE:
+        raise UNAUTHENTICATED_ERROR
+
+    # Verify active CandidateAccountBindingRecord
+    binding_stmt = select(CandidateAccountBindingRecord).where(
+        CandidateAccountBindingRecord.user_id == user.user_id
+    )
+    binding = db.execute(binding_stmt).scalar_one_or_none()
+    if binding is None or binding.status != CandidateBindingStatus.ACTIVE.value:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.BINDING_SUSPENDED if (binding and binding.status == "SUSPENDED") else AuditReasonCode.UNAUTHORIZED,
+            actor_user_id=user.user_id,
+            resource_type="candidate_account_binding",
+            resource_id=str(binding.binding_id) if binding else None,
+            safe_metadata={"status": binding.status if binding else "MISSING"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "CANDIDATE_ACCESS_SUSPENDED",
+                "message": "Candidate access has been suspended or is not active.",
+            },
+        )
+
+    last_seen = user_session.last_seen_at
+    if last_seen.tzinfo is None:
+        last_seen = last_seen.replace(tzinfo=timezone.utc)
+
+    if (now - last_seen).total_seconds() > 60:
+        user_session.last_seen_at = now
+        new_idle = now + timedelta(seconds=settings.session_idle_lifetime_seconds)
+        user_session.idle_expires_at = min(new_idle, abs_exp)
+        db.commit()
+
+    return CandidateAuthenticatedContext(user=user, session=user_session, binding=binding)
+
+
+async def require_candidate(
+    cand_ctx: CandidateAuthenticatedContext = Depends(get_candidate_authenticated_context),
+) -> CandidateAuthenticatedContext:
+    """Enforces active Candidate session with active binding."""
+    return cand_ctx
+
+
+def verify_candidate_csrf_and_origin(
+    request: Request,
+    cand_ctx: CandidateAuthenticatedContext = Depends(get_candidate_authenticated_context),
+    x_csrf_token: Optional[str] = Header(default=None, alias="X-CSRF-Token"),
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+) -> CandidateAuthenticatedContext:
+    origin = request.headers.get("origin")
+    if origin:
+        norm_origin = origin.strip().rstrip("/")
+        allowed_origins = [o.strip().rstrip("/") for o in settings.get_allowed_frontend_origins()]
+        if norm_origin not in allowed_origins:
+            _record_audit_event(
+                db=db,
+                event_type=AuditEventType.ACCESS_DENIED,
+                result=AuditResult.DENIED,
+                reason_code=AuditReasonCode.UNAUTHORIZED,
+                actor_user_id=cand_ctx.user.user_id,
+                resource_type="candidate_session",
+                resource_id=str(cand_ctx.session.session_id),
+                safe_metadata={"denial_reason": "ORIGIN_MISMATCH"},
+            )
+            db.commit()
+            raise CSRF_DENIED_ERROR
+
+    if not x_csrf_token or not x_csrf_token.strip():
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.UNAUTHORIZED,
+            actor_user_id=cand_ctx.user.user_id,
+            resource_type="candidate_session",
+            resource_id=str(cand_ctx.session.session_id),
+            safe_metadata={"denial_reason": "MISSING_CSRF_TOKEN"},
+        )
+        db.commit()
+        raise CSRF_DENIED_ERROR
+
+    token_digest = hash_token(x_csrf_token.strip())
+    expected_digest = cand_ctx.session.csrf_token_hash
+
+    if not hmac.compare_digest(token_digest, expected_digest):
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.UNAUTHORIZED,
+            actor_user_id=cand_ctx.user.user_id,
+            resource_type="candidate_session",
+            resource_id=str(cand_ctx.session.session_id),
+            safe_metadata={"denial_reason": "INVALID_CSRF_TOKEN"},
+        )
+        db.commit()
+        raise CSRF_DENIED_ERROR
+
+    return cand_ctx
 
 
 def verify_csrf_and_origin(

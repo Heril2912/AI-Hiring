@@ -8,7 +8,7 @@
  * backend authorization remains authoritative.
  */
 
-export type PortalContext = "admin" | "recruiter" | "default";
+export type PortalContext = "admin" | "recruiter" | "candidate" | "default";
 
 /**
  * Determines the current portal context from the given hostname or window.location.hostname.
@@ -29,6 +29,9 @@ export function getPortalContext(hostname?: string): PortalContext {
   if (normHost === "recruiter.localhost" || normHost.startsWith("recruiter.")) {
     return "recruiter";
   }
+  if (normHost === "candidate.localhost" || normHost.startsWith("candidate.")) {
+    return "candidate";
+  }
   return "default";
 }
 
@@ -36,7 +39,7 @@ export function getPortalContext(hostname?: string): PortalContext {
  * Returns the origin URL for the target portal preserving protocol and port.
  */
 export function getPortalOrigin(
-  target: "admin" | "recruiter",
+  target: "admin" | "recruiter" | "candidate",
   win?: { location: { protocol?: string; port?: string; hostname?: string } }
 ): string {
   const activeWin = win || (typeof window !== "undefined" ? window : undefined);
@@ -63,7 +66,7 @@ export function getPortalOrigin(
  * Constructs a safe cross-portal URL to open a specific route in the target workspace.
  */
 export function getCrossPortalUrl(
-  target: "admin" | "recruiter",
+  target: "admin" | "recruiter" | "candidate",
   pathAndQuery: string = "",
   win?: { location: { protocol?: string; port?: string; hostname?: string } }
 ): string {
@@ -90,6 +93,8 @@ export function getPortalLabel(portal: PortalContext): string {
       return "Admin workspace";
     case "recruiter":
       return "Recruiter workspace";
+    case "candidate":
+      return "Candidate portal";
     default:
       return "Smart Hiring Platform";
   }
@@ -104,6 +109,8 @@ export function getLoginPortalSubtitle(portal: PortalContext): string {
       return "Sign in to Admin workspace";
     case "recruiter":
       return "Sign in to Recruiter workspace";
+    case "candidate":
+      return "Sign in to your Candidate portal";
     default:
       return "Sign in to continue to the recruitment workspace.";
   }
