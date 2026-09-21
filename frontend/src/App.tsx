@@ -22,6 +22,10 @@ import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
 import { validateInternalReturnUrl, ComparisonNavigationState } from "./utils/navigation";
 import { getPortalContext, getCrossPortalUrl } from "./utils/portal";
+import { CandidateAuthProvider, useCandidateAuth } from "./context/CandidateAuthContext";
+import { CandidateActivationPage } from "./components/candidate/CandidateActivationPage";
+import { CandidateLoginPage } from "./components/candidate/CandidateLoginPage";
+import { CandidateShell } from "./components/candidate/CandidateShell";
 
 // Re-export validation utility for direct callers and test assertions
 export { validateInternalReturnUrl };
@@ -636,6 +640,71 @@ function AuthenticatedApp() {
   );
 }
 
+function CandidateMainContent({ initialView }: { initialView?: "activate" | "login" | "shell" }) {
+  const { status } = useCandidateAuth();
+  const [activeView, setActiveView] = useState<"activate" | "login" | "shell">(
+    initialView || (typeof window !== "undefined" && window.location.pathname.startsWith("/candidate/activate") ? "activate" : "shell")
+  );
+
+  if (activeView === "activate") {
+    return (
+      <CandidateActivationPage
+        onSuccess={() => {
+          setActiveView("shell");
+          if (typeof window !== "undefined" && window.history?.pushState) {
+            window.history.pushState(null, "", "/candidate");
+          }
+        }}
+        onNavigateLogin={() => {
+          setActiveView("login");
+          if (typeof window !== "undefined" && window.history?.pushState) {
+            window.history.pushState(null, "", "/candidate/login");
+          }
+        }}
+      />
+    );
+  }
+
+  if (status === "RESTORING_SESSION") {
+    return (
+      <div className="auth-loading-splash" role="status" aria-live="polite">
+        <div className="loading-spinner" />
+        <p className="loading-text">Authenticating candidate practice session...</p>
+      </div>
+    );
+  }
+
+  if (status === "UNAUTHENTICATED" || activeView === "login") {
+    return (
+      <CandidateLoginPage
+        onSuccess={() => {
+          setActiveView("shell");
+          if (typeof window !== "undefined" && window.history?.pushState) {
+            window.history.pushState(null, "", "/candidate");
+          }
+        }}
+        onNavigateActivate={() => {
+          setActiveView("activate");
+          if (typeof window !== "undefined" && window.history?.pushState) {
+            window.history.pushState(null, "", "/candidate/activate");
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <CandidateShell
+      onLogout={() => {
+        setActiveView("login");
+        if (typeof window !== "undefined" && window.history?.pushState) {
+          window.history.pushState(null, "", "/candidate/login");
+        }
+      }}
+    />
+  );
+}
+
 function MainContent() {
   const { status } = useAuth();
 
@@ -660,6 +729,24 @@ function MainContent() {
 }
 
 export function App() {
+  const [pathname] = useState<string>(
+    typeof window !== "undefined" ? window.location.pathname : "/"
+  );
+  const portal = getPortalContext();
+
+  const isCandidateRoute =
+    portal === "candidate" ||
+    pathname.startsWith("/candidate");
+
+  if (isCandidateRoute) {
+    const isActivate = pathname.startsWith("/candidate/activate");
+    return (
+      <CandidateAuthProvider>
+        <CandidateMainContent initialView={isActivate ? "activate" : undefined} />
+      </CandidateAuthProvider>
+    );
+  }
+
   return (
     <AuthProvider>
       <MainContent />

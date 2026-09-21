@@ -55,9 +55,9 @@ def auth_db():
         Base.metadata.drop_all(bind=engine)
 
 
-# 1. All three valid roles and rejection of invalid roles
+# 1. All valid roles and rejection of invalid roles
 def test_user_roles_valid_and_invalid(auth_db):
-    for valid_role in [UserRole.ADMIN, UserRole.RECRUITER, UserRole.REVIEWER]:
+    for valid_role in [UserRole.ADMIN, UserRole.RECRUITER, UserRole.REVIEWER, UserRole.CANDIDATE]:
         user = UserRecord(
             user_id=uuid.uuid4(),
             email=f"{valid_role.value.lower()}@domain.test",
@@ -71,7 +71,7 @@ def test_user_roles_valid_and_invalid(auth_db):
 
     table = Base.metadata.tables["users"]
     role_col = table.c.role
-    assert set([e.value for e in UserRole]) == {"ADMIN", "RECRUITER", "REVIEWER"}
+    assert set([e.value for e in UserRole]) == {"ADMIN", "RECRUITER", "REVIEWER", "CANDIDATE"}
     assert role_col.type.name == "ck_users_role"
 
 
@@ -300,6 +300,10 @@ def test_audit_event_enum_constraints():
         "PROVIDER_CONFIG_REJECTED",
         "PROVIDER_COMPATIBILITY_TESTED",
         "ACCESS_DENIED",
+        "CANDIDATE_INVITATION_CREATED",
+        "CANDIDATE_INVITATION_REVOKED",
+        "CANDIDATE_ACTIVATED",
+        "CANDIDATE_BINDING_UPDATED",
     }
     assert set([e.value for e in AuditResult]) == {"SUCCESS", "FAILURE", "DENIED"}
     assert set([e.value for e in AuditReasonCode]) == {
@@ -321,6 +325,14 @@ def test_audit_event_enum_constraints():
         "ACCESS_DENIED",
         "STALE_VERSION",
         "MASS_ASSIGNMENT_ATTEMPT",
+        "INVITATION_EXPIRED",
+        "INVITATION_REVOKED",
+        "INVITATION_CONSUMED",
+        "INVITATION_INVALID",
+        "BINDING_SUSPENDED",
+        "INVITATION_CREATED",
+        "INVITATION_REVOKED_BY_RECRUITER",
+        "CANDIDATE_ACCOUNT_ACTIVATED",
     }
 
 

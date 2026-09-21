@@ -69,6 +69,8 @@ def test_models_exported_and_tables_registered():
         "ats_sync_checkpoints",
         "ats_export_receipts",
         "ats_reconciliation_records",
+        "candidate_invitations",
+        "candidate_account_bindings",
     }
 
 
