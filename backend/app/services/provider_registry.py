@@ -782,7 +782,7 @@ class ProviderRegistry:
             )
 
         if active_profile.provider_type == ProviderType.LOCAL_OPENAI_COMPATIBLE:
-            raw_model = active_profile.model_identifier or "qwen/qwen3-4b-thinking-2507"
+            raw_model = active_profile.model_identifier or "qwen/qwen3-4b-2507"
             clean_model = "Qwen3 4B" if ("qwen3" in raw_model.lower() or "qwen" in raw_model.lower()) else raw_model.split("/")[-1]
             return RecruiterAIAvailabilityResponse(
                 ai_enabled=True,

@@ -271,6 +271,12 @@ export async function fetchJobVersions(jobId: string): Promise<JobVersionSummary
   return apiFetch<JobVersionSummary[]>(`/api/v1/jobs/${jobId}/versions`);
 }
 
+export async function deleteJob(jobId: string): Promise<{ success: boolean; message: string }> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/jobs/${jobId}`, {
+    method: "DELETE",
+  });
+}
+
 // =========================================================================
 // Match Run & Candidate Comparison API Helpers
 // =========================================================================

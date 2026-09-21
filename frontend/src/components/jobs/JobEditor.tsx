@@ -253,15 +253,11 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
   }, [requirements]);
 
   // Save Flow
-  const handleSave = async (e?: FormEvent) => {
-    if (e) e.preventDefault();
-    setSaveError(null);
-    setConflictError(null);
-    setSaveSuccessMsg(null);
-
+  const performSaveInternal = async (): Promise<JobDetail> => {
     if (!title.trim()) {
       setSaveError("Job title is required.");
-      return;
+      handleFocusField("title");
+      throw new Error("Job title is required.");
     }
 
     // Validate requirements labels and constraints
@@ -271,118 +267,52 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
       const trimmedLabel = r.label.trim();
       if (!trimmedLabel) {
         setSaveError(`Requirement #${i + 1} has an empty name.`);
-        return;
+        throw new Error(`Requirement #${i + 1} has an empty name.`);
       }
       const normKey = `${r.category}:${trimmedLabel.toLowerCase()}`;
       if (seenReqs.has(normKey)) {
         setSaveError(`Duplicate requirement "${trimmedLabel}" in category "${r.category}". Requirements must be unique per category.`);
-        return;
+        throw new Error(`Duplicate requirement "${trimmedLabel}" in category "${r.category}".`);
       }
       seenReqs.add(normKey);
 
       if (r.minExperienceMonths !== undefined && r.minExperienceMonths !== null) {
         if (isNaN(r.minExperienceMonths) || r.minExperienceMonths < 1) {
           setSaveError(`Requirement #${i + 1} ("${trimmedLabel}"): Minimum experience must be at least 1 month.`);
-          return;
+          throw new Error("Invalid minExperienceMonths");
         }
       }
 
       if (r.recencyYears !== undefined && r.recencyYears !== null) {
         if (isNaN(r.recencyYears) || r.recencyYears < 1 || r.recencyYears > 50) {
           setSaveError(`Requirement #${i + 1} ("${trimmedLabel}"): Recency must be between 1 and 50 years.`);
-          return;
+          throw new Error("Invalid recencyYears");
         }
       }
     }
 
-    try {
-      setIsSaving(true);
+    if (!jobId) {
+      // 1. Create New Job Requisition + Draft
+      const createPayload: JobCreatePayload = {
+        title: title.trim(),
+        department: department.trim() || null,
+        location: location.trim() || null,
+        employmentType: employmentType as any,
+        workplaceType: workplaceType as any,
+        openingsCount: openingsCount ? parseInt(openingsCount, 10) : null,
+        internalReference: internalReference.trim() || null,
+        summary: summary.trim() || null,
+        responsibilities: responsibilities.trim() || null,
+        jobDescriptionText: jobDescriptionText.trim() || null,
+        occupationConceptId: occupationConceptId || null,
+      };
 
-      if (!jobId) {
-        // 1. Create New Job Requisition + Draft
-        const createPayload: JobCreatePayload = {
-          title: title.trim(),
-          department: department.trim() || null,
-          location: location.trim() || null,
-          employmentType: employmentType as any,
-          workplaceType: workplaceType as any,
-          openingsCount: openingsCount ? parseInt(openingsCount, 10) : null,
-          internalReference: internalReference.trim() || null,
-          summary: summary.trim() || null,
-          responsibilities: responsibilities.trim() || null,
-          jobDescriptionText: jobDescriptionText.trim() || null,
-          occupationConceptId: occupationConceptId || null,
-        };
+      const createdJob = await createJobRequisition(createPayload);
+      const newJobId = createdJob.jobId;
 
-        const createdJob = await createJobRequisition(createPayload);
-        const newJobId = createdJob.jobId;
-
-        // If requirements exist, save them atomically
-        if (requirements.length > 0) {
-          const reqPayload = {
-            expectedRevision: createdJob.currentVersion.revision,
-            requirements: requirements.map((r, idx) => ({
-              displayOrder: idx,
-              category: r.category,
-              label: r.label.trim(),
-              taxonomySkillConceptId: r.taxonomySkillConceptId || null,
-              necessity: r.necessity,
-              priority: r.priority,
-              customWeightOverride:
-                typeof r.customWeightOverride === "number" && !isNaN(r.customWeightOverride)
-                  ? r.customWeightOverride
-                  : null,
-              minExperienceMonths:
-                typeof r.minExperienceMonths === "number" && !isNaN(r.minExperienceMonths) && r.minExperienceMonths > 0
-                  ? r.minExperienceMonths
-                  : null,
-              recencyYears:
-                typeof r.recencyYears === "number" && !isNaN(r.recencyYears) && r.recencyYears > 0
-                  ? r.recencyYears
-                  : null,
-              acceptedEvidenceTypes: Array.isArray(r.acceptedEvidenceTypes) ? r.acceptedEvidenceTypes : [],
-              acceptedEquivalents: Array.isArray(r.acceptedEquivalents)
-                ? r.acceptedEquivalents.filter((eq) => typeof eq === "string" && eq.trim())
-                : [],
-              rationale: r.rationale && r.rationale.trim() ? r.rationale.trim() : null,
-            })),
-          };
-          const updatedWithReqs = await saveDraftRequirements(newJobId, reqPayload);
-          setJobDetail(updatedWithReqs);
-          setCurrentRevision(updatedWithReqs.currentVersion.revision);
-        }
-
-        setIsDirty(false);
-        setSaveSuccessMsg("Job draft saved successfully.");
-        if (onJobCreated) {
-          onJobCreated(newJobId);
-        }
-      } else {
-        // 2. Update Existing Job Requisition
-        let latestDetail: JobDetail;
-
-        // Step A: Update basic draft details
-        const draftPayload: JobDraftUpdatePayload = {
-          expectedRevision: currentRevision,
-          title: title.trim(),
-          department: department.trim() || null,
-          location: location.trim() || null,
-          employmentType: employmentType as any,
-          workplaceType: workplaceType as any,
-          openingsCount: openingsCount ? parseInt(openingsCount, 10) : null,
-          internalReference: internalReference.trim() || null,
-          summary: summary.trim() || null,
-          responsibilities: responsibilities.trim() || null,
-          jobDescriptionText: jobDescriptionText.trim() || null,
-          occupationConceptId: occupationConceptId || null,
-        };
-
-        latestDetail = await updateJobDraft(jobId, draftPayload);
-        let nextRev = latestDetail.currentVersion.revision;
-
-        // Step B: Atomically save requirements with new expected revision
+      if (requirements.length > 0) {
         const reqPayload = {
-          expectedRevision: nextRev,
+          expectedRevision: createdJob.currentVersion.revision,
           requirements: requirements.map((r, idx) => ({
             displayOrder: idx,
             category: r.category,
@@ -409,24 +339,141 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
             rationale: r.rationale && r.rationale.trim() ? r.rationale.trim() : null,
           })),
         };
-
-        const finalDetail = await saveDraftRequirements(jobId, reqPayload);
-        setJobDetail(finalDetail);
-        setCurrentRevision(finalDetail.currentVersion.revision);
-        setRequirements(finalDetail.currentVersion.requirements || []);
+        const updatedWithReqs = await saveDraftRequirements(newJobId, reqPayload);
+        setJobDetail(updatedWithReqs);
+        setCurrentRevision(updatedWithReqs.currentVersion.revision);
         setIsDirty(false);
-        setSaveSuccessMsg("Job draft saved successfully.");
+        if (onJobCreated) onJobCreated(newJobId);
+        return updatedWithReqs;
       }
+
+      setJobDetail(createdJob);
+      setCurrentRevision(createdJob.currentVersion.revision);
+      setIsDirty(false);
+      if (onJobCreated) onJobCreated(newJobId);
+      return createdJob;
+    } else {
+      // 2. Update Existing Job Requisition
+      const draftPayload: JobDraftUpdatePayload = {
+        expectedRevision: currentRevision,
+        title: title.trim(),
+        department: department.trim() || null,
+        location: location.trim() || null,
+        employmentType: employmentType as any,
+        workplaceType: workplaceType as any,
+        openingsCount: openingsCount ? parseInt(openingsCount, 10) : null,
+        internalReference: internalReference.trim() || null,
+        summary: summary.trim() || null,
+        responsibilities: responsibilities.trim() || null,
+        jobDescriptionText: jobDescriptionText.trim() || null,
+        occupationConceptId: occupationConceptId || null,
+      };
+
+      const latestDetail = await updateJobDraft(jobId, draftPayload);
+      const nextRev = latestDetail.currentVersion.revision;
+
+      const reqPayload = {
+        expectedRevision: nextRev,
+        requirements: requirements.map((r, idx) => ({
+          displayOrder: idx,
+          category: r.category,
+          label: r.label.trim(),
+          taxonomySkillConceptId: r.taxonomySkillConceptId || null,
+          necessity: r.necessity,
+          priority: r.priority,
+          customWeightOverride:
+            typeof r.customWeightOverride === "number" && !isNaN(r.customWeightOverride)
+              ? r.customWeightOverride
+              : null,
+          minExperienceMonths:
+            typeof r.minExperienceMonths === "number" && !isNaN(r.minExperienceMonths) && r.minExperienceMonths > 0
+              ? r.minExperienceMonths
+              : null,
+          recencyYears:
+            typeof r.recencyYears === "number" && !isNaN(r.recencyYears) && r.recencyYears > 0
+              ? r.recencyYears
+              : null,
+          acceptedEvidenceTypes: Array.isArray(r.acceptedEvidenceTypes) ? r.acceptedEvidenceTypes : [],
+          acceptedEquivalents: Array.isArray(r.acceptedEquivalents)
+            ? r.acceptedEquivalents.filter((eq) => typeof eq === "string" && eq.trim())
+            : [],
+          rationale: r.rationale && r.rationale.trim() ? r.rationale.trim() : null,
+        })),
+      };
+
+      const finalDetail = await saveDraftRequirements(jobId, reqPayload);
+      setJobDetail(finalDetail);
+      setCurrentRevision(finalDetail.currentVersion.revision);
+      setRequirements(finalDetail.currentVersion.requirements || []);
+      setIsDirty(false);
+      return finalDetail;
+    }
+  };
+
+  const handleSave = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    setSaveError(null);
+    setConflictError(null);
+    setSaveSuccessMsg(null);
+
+    try {
+      setIsSaving(true);
+      await performSaveInternal();
+      setSaveSuccessMsg("Job draft saved successfully.");
     } catch (err: any) {
       if (err?.code === "REVISION_CONFLICT") {
         setConflictError(
           "Draft revision conflict: Another recruiter or session updated this requisition. Your local edits are preserved below."
         );
-      } else {
-        setSaveError(err?.message || "Failed to save job draft.");
+      } else if (err?.message) {
+        setSaveError(err.message);
       }
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleApproveJob = async () => {
+    setSaveError(null);
+    setConflictError(null);
+    setSaveSuccessMsg(null);
+
+    if (requirements.length === 0) {
+      setSaveError("Add at least one requirement before approving the job.");
+      handleFocusField("requirements");
+      return;
+    }
+
+    try {
+      setIsMarkingReady(true);
+      let targetJobId = jobId;
+      let targetRev = currentRevision;
+
+      // Save draft first if dirty or new job
+      if (!targetJobId || isDirty) {
+        const saved = await performSaveInternal();
+        targetJobId = saved.jobId;
+        targetRev = saved.currentVersion.revision;
+      }
+
+      if (targetJobId) {
+        const updated = await markJobReady(targetJobId, targetRev);
+        setJobDetail(updated);
+        setCurrentRevision(updated.currentVersion.revision);
+        setIsDirty(false);
+        setSaveSuccessMsg(`Job approved successfully (Revision #${updated.currentVersion.revision}).`);
+        setReadinessResult(null);
+      }
+    } catch (err: any) {
+      if (err?.code === "REVISION_CONFLICT") {
+        setConflictError("Draft revision conflict: This requisition was updated or changed status in another session. Please reload.");
+      } else if (err?.code === "JOB_READINESS_FAILED") {
+        setSaveError(err?.message || "Readiness validation failed on server. Please fix blocking errors.");
+      } else {
+        setSaveError(err?.message || "Failed to approve job.");
+      }
+    } finally {
+      setIsMarkingReady(false);
     }
   };
 
@@ -482,33 +529,6 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
       setReadinessError(err?.message || "Failed to check readiness.");
     } finally {
       setIsCheckingReadiness(false);
-    }
-  };
-
-  const handleConfirmMarkReady = async () => {
-    if (!jobId) return;
-    setSaveError(null);
-    setConflictError(null);
-    try {
-      setIsMarkingReady(true);
-      const updated = await markJobReady(jobId, currentRevision);
-      setJobDetail(updated);
-      setCurrentRevision(updated.currentVersion.revision);
-      setIsDirty(false);
-      setIsReadyModalOpen(false);
-      setSaveSuccessMsg(`Requisition revision #${updated.currentVersion.revision} is now locked as READY_FOR_MATCHING.`);
-      setReadinessResult(null);
-    } catch (err: any) {
-      if (err?.code === "REVISION_CONFLICT") {
-        setConflictError("Draft revision conflict: This requisition was updated or changed status in another session. Please reload.");
-      } else if (err?.code === "JOB_READINESS_FAILED") {
-        setSaveError(err?.message || "Readiness validation failed on server. Please fix blocking errors.");
-      } else {
-        setSaveError(err?.message || "Failed to lock revision as ready for matching.");
-      }
-      setIsReadyModalOpen(false);
-    } finally {
-      setIsMarkingReady(false);
     }
   };
 
@@ -1195,7 +1215,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
           )}
 
           {/* Actions Row */}
-          <div className="draft-save-action-row" style={{ marginTop: "24px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <div className="draft-save-action-row" style={{ marginTop: "24px", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
             {isReadOnly ? (
               <button
                 type="button"
@@ -1210,83 +1230,28 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
               <>
                 <button
                   type="button"
-                  className="btn btn-primary btn-lg save-draft-primary-btn"
+                  className="btn btn-secondary btn-lg save-draft-primary-btn"
                   onClick={handleSave}
-                  disabled={isSaving}
+                  disabled={isSaving || isMarkingReady}
                 >
                   <Icon name="check" size={18} />
-                  <span>{isSaving ? "Saving draft..." : "Save Draft Requisition"}</span>
+                  <span>{isSaving ? "Saving draft..." : "Save as draft"}</span>
                 </button>
-                {jobId && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-lg"
-                    onClick={() => setIsReadyModalOpen(true)}
-                  >
-                    <Icon name="badge-check" size={18} />
-                    <span>Mark ready for matching</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="btn btn-primary btn-lg"
+                  onClick={handleApproveJob}
+                  disabled={isSaving || isMarkingReady || requirements.length === 0}
+                  title={requirements.length === 0 ? "Add at least one requirement before approving" : undefined}
+                >
+                  <Icon name="badge-check" size={18} />
+                  <span>{isMarkingReady ? "Approving..." : "Approve job"}</span>
+                </button>
               </>
             )}
           </div>
         </section>
       </div>
-
-      {/* Confirmation Dialog for Locking Revision */}
-      {isReadyModalOpen && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="ready-modal-title">
-          <div className="modal-container" style={{ maxWidth: "540px" }}>
-            <div className="modal-header">
-              <h3 id="ready-modal-title" className="modal-title">Lock Revision for Matching</h3>
-              <button
-                type="button"
-                className="btn-icon-subtle"
-                onClick={() => setIsReadyModalOpen(false)}
-                aria-label="Close dialog"
-              >
-                <Icon name="x" size={18} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <p style={{ marginBottom: "12px", color: "var(--color-text-primary)" }}>
-                You are about to freeze <strong>Version {versionNumber} (Revision #{currentRevision})</strong> as <code>READY_FOR_MATCHING</code>.
-              </p>
-              <div className="guidance-box" style={{ background: "var(--color-bg-subtle)", padding: "14px", borderRadius: "6px", marginBottom: "16px" }}>
-                <p style={{ margin: "0 0 8px 0", fontWeight: 600, fontSize: "0.88rem" }}>Important workflow notes:</p>
-                <ul style={{ margin: 0, paddingLeft: "20px", fontSize: "0.85rem", color: "var(--color-text-secondary)" }}>
-                  <li style={{ marginBottom: "6px" }}>This exact revision will be locked as read-only and immutable.</li>
-                  <li style={{ marginBottom: "6px" }}>It will serve as the authoritative input for candidate matching.</li>
-                  <li style={{ marginBottom: "6px" }}>Subsequent edits will require creating a new draft successor revision.</li>
-                  <li>This state does not publish the job externally or make automated hiring decisions.</li>
-                </ul>
-              </div>
-              <p style={{ fontSize: "0.85rem", color: "var(--color-text-secondary)" }}>
-                Server-side validation will re-verify all required fields before committing.
-              </p>
-            </div>
-            <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-md"
-                onClick={() => setIsReadyModalOpen(false)}
-                disabled={isMarkingReady}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-md"
-                onClick={handleConfirmMarkReady}
-                disabled={isMarkingReady}
-              >
-                <Icon name="check" size={15} />
-                <span>{isMarkingReady ? "Validating & Locking..." : "Confirm and Lock Revision"}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

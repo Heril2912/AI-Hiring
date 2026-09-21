@@ -62,7 +62,11 @@ export function AiInterviewsDirectory({
   }, []);
 
   // Phase 3E.2 deduplication: Exclude jobs that already have an AI question set in existing work
-  const existingJobIds = new Set(recentDirectory?.sets?.map((s) => s.job_id) || []);
+  const existingJobIds = new Set(
+    recentDirectory?.sets
+      ?.filter((s) => (s.generated_question_count ?? 0) > 0)
+      .map((s) => s.job_id) || []
+  );
   const selectableJobs = eligibleJobs.filter(
     (job) => !existingJobIds.has(job.job_id) && !job.current_ai_set_id
   );

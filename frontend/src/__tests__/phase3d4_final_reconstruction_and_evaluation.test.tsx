@@ -129,7 +129,7 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
       return Promise.resolve({});
     });
 
-    render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
+    render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => { }} />);
 
     await waitFor(() => {
       expect(screen.getByText("Interview Template: Staff Backend Architect")).toBeInTheDocument();
@@ -157,7 +157,7 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
       return Promise.resolve({});
     });
 
-    render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
+    render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => { }} />);
 
     await waitFor(() => {
       expect(screen.getByText("Interview Template: Staff Backend Architect")).toBeInTheDocument();
@@ -187,7 +187,7 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
       return Promise.resolve({});
     });
 
-    render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => {}} />);
+    render(<InterviewWorkspace jobId="job-101" onNavigateBack={() => { }} />);
 
     await waitFor(() => {
       expect(screen.getByText("Interview Template: Staff Backend Architect")).toBeInTheDocument();
@@ -294,7 +294,7 @@ describe("Phase 3D.4 Final UI Reconstruction, Accessibility, and Evaluation Test
       return Promise.resolve({});
     });
 
-    render(<InterviewReviewWorkspace attemptId="att-888" onNavigateBack={() => {}} />);
+    render(<InterviewReviewWorkspace attemptId="att-888" onNavigateBack={() => { }} />);
 
     await waitFor(() => {
       expect(screen.getByText(/Recruiter Evidence Review/i)).toBeInTheDocument();

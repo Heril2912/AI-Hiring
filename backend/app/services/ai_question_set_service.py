@@ -313,7 +313,7 @@ async def _generate_requirement_grounded_slots(
         )
 
         try:
-            provider = custom_provider or (reg.get_provider_for_profile(active_profile.profile_id) if active_profile else None)
+            provider = custom_provider or (reg.get_provider_instance(active_profile) if active_profile else None)
             if not provider:
                 item["validation_status"] = "FAILED"
                 item["safe_failure_code"] = "PROVIDER_UNAVAILABLE"
@@ -569,6 +569,12 @@ def list_ai_question_sets(
 
     for ai_set in latest_by_key.values():
         eff_status = ai_set.lifecycle_status
+        gen_count = sum(1 for it in (ai_set.items or []) if it.get("ai_wording"))
+        total_slots = len(ai_set.items or [])
+
+        # Do not include failed / empty question sets in Continue Reviewing directory
+        if total_slots == 0 or gen_count == 0:
+            continue
 
         total_count += 1
         if eff_status == "APPROVED":
@@ -590,9 +596,6 @@ def list_ai_question_sets(
             ver = db.execute(stmt_ver).scalars().first()
             if ver and ver.title:
                 title = ver.title
-
-        gen_count = sum(1 for it in ai_set.items if it.get("ai_wording"))
-        total_slots = len(ai_set.items)
 
         if search and search.strip():
             if search.strip().lower() not in title.lower():
@@ -678,9 +681,14 @@ def get_eligible_jobs_for_ai_questions(
         latest_ai = db.execute(stmt_ai).scalars().first()
 
         # Phase 3E.2 binding directory rule:
-        # If the current revision of a job already has an AI question set, exclude it from
+        # If the current revision of a job already has an AI question set with valid generated questions, exclude it from
         # "Choose a job". It appears solely under "Continue reviewing" / existing sets.
-        if latest_ai is not None:
+        has_valid_ai_set = (
+            latest_ai is not None
+            and bool(latest_ai.items)
+            and any(it.get("ai_wording") for it in latest_ai.items)
+        )
+        if has_valid_ai_set:
             continue
 
         items.append(
@@ -853,6 +861,12 @@ async def generate_ai_questions_by_job_id(
         custom_provider=custom_provider,
     )
 
+    if not items or len(items) == 0 or all(not it.get("ai_wording") for it in items):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PROVIDER_UNAVAILABLE", "message": "Failed to generate AI questions. Local AI is unavailable. Please check that LM Studio is running."},
+        )
+
     next_version = (existing_set.set_version + 1) if (existing_set and force_regenerate) else 1
 
     org_id = getattr(actor, "organization_id", getattr(job, "organization_id", None)) or uuid.uuid4()
@@ -983,6 +997,12 @@ async def generate_or_open_ai_question_set(
             item["safe_failure_code"] = "PROVIDER_UNAVAILABLE"
 
         items.append(item)
+
+    if not items or len(items) == 0 or all(not it.get("ai_wording") for it in items):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PROVIDER_UNAVAILABLE", "message": "Failed to generate AI questions. Local AI is unavailable. Please check that LM Studio is running."},
+        )
 
     new_set = AiInterviewQuestionSetRecord(
         ai_set_id=uuid.uuid4(),
@@ -1185,7 +1205,7 @@ async def regenerate_ai_question_slot(
             active_prof = reg.get_active_profile()
         except Exception:
             pass
-        provider = custom_provider or (reg.get_provider_for_profile(active_prof.profile_id) if active_prof else None)
+        provider = custom_provider or (reg.get_provider_instance(active_prof) if active_prof else None)
         if not provider:
             target_item["validation_status"] = "FAILED"
             target_item["safe_failure_code"] = "PROVIDER_UNAVAILABLE"

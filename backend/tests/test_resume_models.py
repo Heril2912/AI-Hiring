@@ -59,6 +59,16 @@ def test_models_exported_and_tables_registered():
         "simulation_assessment_reviews",
         "simulation_review_audit_events",
         "ai_interview_question_sets",
+        "ats_connections",
+        "ats_external_jobs",
+        "ats_external_candidates",
+        "ats_external_attachments",
+        "ats_object_mappings",
+        "ats_import_runs",
+        "ats_import_item_results",
+        "ats_sync_checkpoints",
+        "ats_export_receipts",
+        "ats_reconciliation_records",
     }
 
 

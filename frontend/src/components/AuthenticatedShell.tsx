@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Icon } from "./Icon";
+import { getPortalContext, getCrossPortalUrl } from "../utils/portal";
 
 interface AuthenticatedShellProps {
   children: ReactNode;
@@ -26,6 +27,8 @@ export function AuthenticatedShell({
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const portalContext = getPortalContext();
 
   // Close menu on outside click or Escape key
   useEffect(() => {
@@ -62,6 +65,16 @@ export function AuthenticatedShell({
   };
 
   const role = user?.role || "REVIEWER";
+  const displayedWorkspaceLabel =
+    portalContext === "admin"
+      ? "Admin workspace"
+      : portalContext === "recruiter"
+      ? "Recruiter workspace"
+      : role === "ADMIN"
+      ? "Admin workspace"
+      : role === "RECRUITER"
+      ? "Recruiter workspace"
+      : "Reviewer workspace";
 
   return (
     <div className="dashboard-app-container">
@@ -77,7 +90,15 @@ export function AuthenticatedShell({
             <Icon name="sparkles" size={18} />
           </div>
           <div className="brand-title-group">
-            <h1 className="brand-title">Smart Hiring Platform</h1>
+            <div className="brand-title-row">
+              <h1 className="brand-title">Smart Hiring Platform</h1>
+              <span
+                className="portal-workspace-label"
+                aria-label={`Current Workspace: ${displayedWorkspaceLabel}`}
+              >
+                {displayedWorkspaceLabel}
+              </span>
+            </div>
             <span className="brand-subtitle">
               {role === "ADMIN" && "Administration & User Governance"}
               {role === "RECRUITER" && "Evidence-Based Parsing & Audited Profiles"}
@@ -211,6 +232,15 @@ export function AuthenticatedShell({
                 <Icon name="sparkles" size={15} />
                 <span>AI Providers</span>
               </button>
+              <button
+                type="button"
+                className={`nav-tab-btn ${activeNavTab === "ats_integrations" ? "tab-active" : ""}`}
+                aria-current={activeNavTab === "ats_integrations" ? "page" : undefined}
+                onClick={() => onNavigateTab?.("ats_integrations")}
+              >
+                <Icon name="external-link" size={15} />
+                <span>ATS Integrations</span>
+              </button>
             </>
           )}
 
@@ -268,6 +298,21 @@ export function AuthenticatedShell({
                   <p className="dropdown-email">{user?.email}</p>
                 </div>
                 <div className="dropdown-divider" />
+                <a
+                  href={getCrossPortalUrl(portalContext === "admin" || role === "ADMIN" ? "recruiter" : "admin")}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="dropdown-menu-item"
+                  role="menuitem"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  <Icon name="external-link" size={15} />
+                  <span>
+                    {portalContext === "admin" || role === "ADMIN"
+                      ? "Open Recruiter workspace"
+                      : "Open Admin workspace"}
+                  </span>
+                </a>
                 <button
                   type="button"
                   className="dropdown-menu-item logout-btn"

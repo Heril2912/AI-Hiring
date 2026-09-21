@@ -5,6 +5,7 @@ import { EvidenceDrawer } from "./EvidenceDrawer";
 import { VersionHistoryDrawer, ProfileSummary } from "./VersionHistoryDrawer";
 import { ReviewDrawer } from "./ReviewDrawer";
 import { ExtractionResultData } from "./ExtractionReview";
+import { AtsExportModal } from "./ats/AtsExportModal";
 
 export type ExtractedField = {
   fieldName: string;
@@ -173,6 +174,7 @@ export function CandidateProfileReview({
   const [conflictError, setConflictError] = useState<boolean>(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [showDiffPreview, setShowDiffPreview] = useState<boolean>(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
 
   // Draft scalar inputs for correction
   const [draftFullName, setDraftFullName] = useState("");
@@ -761,6 +763,15 @@ export function CandidateProfileReview({
               <Icon name="file-text" size={14} /> Raw Extraction
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setIsExportModalOpen(true)}
+            className="btn btn-secondary btn-sm"
+            title="Export candidate review note to ATS"
+          >
+            <Icon name="external-link" size={14} /> Export to ATS
+          </button>
         </div>
       </div>
 
@@ -824,9 +835,15 @@ export function CandidateProfileReview({
                 {fullNameStr}
               </h1>
               <div className="hero-status-tags">
-                <span className={`badge ${isHumanCorrected ? "badge-provenance-corrected" : "badge-provenance-parser"}`}>
-                  {isHumanCorrected ? "Human Corrected" : "Parser Generated"}
-                </span>
+                {(currentProfile.provenance?.includes("Local") || currentProfile.provenance?.includes("ATS")) ? (
+                  <span className="badge badge-provenance-parser" style={{ backgroundColor: "#f0fdf4", color: "#166534" }}>
+                    Source: Local Folder ATS Demo
+                  </span>
+                ) : (
+                  <span className={`badge ${isHumanCorrected ? "badge-provenance-corrected" : "badge-provenance-parser"}`}>
+                    {isHumanCorrected ? "Human Corrected" : "Parser Generated"}
+                  </span>
+                )}
                 <span className="badge badge-version">v{currentProfile.profileVersion}</span>
                 {currentProfile.reviewRequired && !isHumanCorrected && (
                   <span className="badge badge-review-warn">Needs Review</span>
@@ -1972,6 +1989,15 @@ export function CandidateProfileReview({
             </div>
           </div>
         </div>
+      )}
+
+      {isExportModalOpen && (
+        <AtsExportModal
+          isOpen={isExportModalOpen}
+          candidateId={currentProfile.profileId}
+          candidateName={currentProfile.identity?.fullName?.value || "Candidate"}
+          onClose={() => setIsExportModalOpen(false)}
+        />
       )}
     </div>
   );
