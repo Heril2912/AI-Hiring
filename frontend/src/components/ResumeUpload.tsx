@@ -63,6 +63,8 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+import { AtsImportModal } from "./ats/AtsImportModal";
+
 interface ResumeUploadProps {
   onCandidateProcessed: (artifactId: string) => void;
   onNavigateCandidates?: () => void;
@@ -74,6 +76,7 @@ export function ResumeUpload({ onCandidateProcessed, onNavigateCandidates }: Res
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentArtifactId, setCurrentArtifactId] = useState<string | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -194,17 +197,42 @@ export function ResumeUpload({ onCandidateProcessed, onNavigateCandidates }: Res
     <div className="upload-workspace-container">
       {/* Top Header */}
       <div className="upload-workspace-header">
-        {onNavigateCandidates && (
-          <button type="button" onClick={onNavigateCandidates} className="btn-back-link">
-            <Icon name="arrow-left" size={16} />
-            <span>Back to Candidates</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            {onNavigateCandidates && (
+              <button type="button" onClick={onNavigateCandidates} className="btn-back-link">
+                <Icon name="arrow-left" size={16} />
+                <span>Back to Candidates</span>
+              </button>
+            )}
+            <h2 className="upload-workspace-title">Upload Candidate Resume</h2>
+            <p className="upload-workspace-subtitle">
+              Upload text-based PDF or native DOCX resumes. The platform extracts structured profile records with full evidence traceability.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-secondary btn-md"
+            onClick={() => setIsImportModalOpen(true)}
+            style={{ marginTop: "8px" }}
+          >
+            <Icon name="external-link" size={15} />
+            <span>Import from ATS / File</span>
           </button>
-        )}
-        <h2 className="upload-workspace-title">Upload Candidate Resume</h2>
-        <p className="upload-workspace-subtitle">
-          Upload text-based PDF or native DOCX resumes. The platform extracts structured profile records with full evidence traceability.
-        </p>
+        </div>
       </div>
+
+      <AtsImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportComplete={() => {
+          setIsImportModalOpen(false);
+          if (onNavigateCandidates) {
+            onNavigateCandidates();
+          }
+        }}
+      />
 
       {/* Main Upload Dropzone Card */}
       <div className="upload-card-wrapper">

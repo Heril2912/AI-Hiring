@@ -1,6 +1,7 @@
 import React, { useState, useEffect, FormEvent } from "react";
 import { apiFetch, ApiError } from "../../api/client";
 import { Icon } from "../Icon";
+import { AtsConnectionsAdmin } from "./AtsConnectionsAdmin";
 
 interface UserItem {
   userId: string;
@@ -880,6 +881,8 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
           </div>
         </div>
       )}
+
+      {activeTab === "ats_integrations" && <AtsConnectionsAdmin />}
 
       {/* AI Providers Section */}
       {activeTab === "ai_providers" && (

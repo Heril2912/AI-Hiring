@@ -252,6 +252,8 @@ def require_role(allowed_roles: set[UserRole]):
 require_admin = require_role({UserRole.ADMIN})
 require_recruiter = require_role({UserRole.RECRUITER})
 require_reviewer = require_role({UserRole.REVIEWER})
+require_recruiter_or_admin = require_role({UserRole.RECRUITER, UserRole.ADMIN})
+require_reviewer_or_admin = require_role({UserRole.REVIEWER, UserRole.ADMIN})
 
 
 def verify_csrf_and_origin(
@@ -266,8 +268,8 @@ def verify_csrf_and_origin(
     origin = request.headers.get("origin")
     if origin:
         norm_origin = origin.strip().rstrip("/")
-        norm_expected = settings.frontend_origin.strip().rstrip("/")
-        if norm_origin != norm_expected:
+        allowed_origins = [o.strip().rstrip("/") for o in settings.get_allowed_frontend_origins()]
+        if norm_origin not in allowed_origins:
             _record_audit_event(
                 db=db,
                 event_type=AuditEventType.SESSION_REVOKED,

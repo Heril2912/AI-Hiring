@@ -1,6 +1,7 @@
 import React, { useState, FormEvent } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { Icon } from "../Icon";
+import { getPortalContext, getLoginPortalSubtitle } from "../../utils/portal";
 
 export function LoginPage() {
   const { login, sessionError, clearSessionError } = useAuth();
@@ -11,6 +12,8 @@ export function LoginPage() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  const portalContext = getPortalContext();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -110,9 +113,14 @@ export function LoginPage() {
         {/* Right Side: Focused Sign In Form */}
         <div className="auth-form-panel">
           <div className="auth-form-header">
+            {portalContext !== "default" && (
+              <span className="auth-portal-badge" aria-label={`Portal: ${portalContext}`}>
+                {portalContext === "admin" ? "Admin Workspace" : "Recruiter Workspace"}
+              </span>
+            )}
             <h2 className="auth-form-title">Welcome back</h2>
             <p className="auth-form-subtitle">
-              Sign in to continue to the recruitment workspace.
+              {getLoginPortalSubtitle(portalContext)}
             </p>
           </div>
 

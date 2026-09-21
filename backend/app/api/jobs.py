@@ -365,7 +365,7 @@ async def list_jobs(
 
     stmt = select(JobRequisition).options(
         selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
-    )
+    ).where(JobRequisition.deleted_at.is_(None))
 
     # Recruiter sees only their own jobs; Admin sees all
     if actor.role == UserRole.RECRUITER:
@@ -416,7 +416,10 @@ async def get_job(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
             selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     req = db.execute(stmt).scalar_one_or_none()
 
@@ -462,7 +465,10 @@ async def update_job_draft(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
             selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     req = db.execute(stmt).scalar_one_or_none()
 
@@ -558,7 +564,10 @@ async def save_draft_requirements(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
             selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     req = db.execute(stmt).scalar_one_or_none()
 
@@ -668,7 +677,10 @@ async def check_job_readiness(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
             selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     req = db.execute(stmt).scalar_one_or_none()
 
@@ -760,7 +772,10 @@ async def mark_job_ready(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
             selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
         .with_for_update(of=JobRequisition)
     )
     req = db.execute(stmt).scalar_one_or_none()
@@ -882,7 +897,10 @@ async def create_successor_version(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
             selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
         .with_for_update(of=JobRequisition)
     )
     req = db.execute(stmt).scalar_one_or_none()
@@ -1005,7 +1023,10 @@ async def list_job_versions(
         .options(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     req = db.execute(stmt).scalar_one_or_none()
 
@@ -1017,6 +1038,49 @@ async def list_job_versions(
 
     sorted_versions = sorted(req.versions, key=lambda v: v.version_number, reverse=True)
     return [_build_job_version_summary_response(v) for v in sorted_versions]
+
+
+@router.delete(
+    "/{job_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Soft Delete Job Requisition",
+    description="Soft deletes a job requisition by setting deleted_at and deleted_by_user_id. Preserves historical records.",
+)
+async def delete_job(
+    job_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    actor = auth_ctx.user
+    now = datetime.now(timezone.utc)
+
+    stmt = select(JobRequisition).where(
+        JobRequisition.job_id == job_id,
+        JobRequisition.deleted_at.is_(None),
+    )
+    req = db.execute(stmt).scalar_one_or_none()
+
+    if req is None or (actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job not found."},
+        )
+
+    req.deleted_at = now
+    req.deleted_by_user_id = actor.user_id
+    req.updated_at = now
+
+    try:
+        db.commit()
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("Failed to delete job requisition", extra={"job_id": str(job_id), "error_type": type(e).__name__})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "JOB_DELETION_FAILED", "message": "Failed to delete job."},
+        )
+
+    return {"message": "Job deleted."}
 
 
 # ---------------------------------------------------------------------------
@@ -1048,7 +1112,10 @@ async def get_job_interview_workspace_context(
         .options(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     job = db.execute(stmt_job).scalar_one_or_none()
 
@@ -1116,7 +1183,10 @@ async def get_interview_workspace_context(
         .options(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
         )
-        .where(JobRequisition.job_id == job_id)
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     job = db.execute(stmt_job).scalar_one_or_none()
 

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Icon } from "./Icon";
+import { AtsImportModal } from "./ats/AtsImportModal";
 
 export type CandidateSummary = {
   artifactId: string;
@@ -21,6 +22,7 @@ interface CandidatesDirectoryProps {
   isLoading: boolean;
   onSelectCandidate: (artifactId: string) => void;
   onNavigateUpload: () => void;
+  onRefreshCandidates?: () => void;
 }
 
 export function CandidatesDirectory({
@@ -28,8 +30,10 @@ export function CandidatesDirectory({
   isLoading,
   onSelectCandidate,
   onNavigateUpload,
+  onRefreshCandidates,
 }: CandidatesDirectoryProps) {
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
 
   const filteredCandidates = candidates.filter((c) => {
     if (!searchQuery.trim()) return true;
@@ -71,14 +75,34 @@ export function CandidatesDirectory({
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onNavigateUpload}
-          className="btn btn-primary btn-md"
-        >
-          <Icon name="upload" size={15} /> Upload Resume
-        </button>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button
+            type="button"
+            onClick={() => setIsImportModalOpen(true)}
+            className="btn btn-secondary btn-md"
+          >
+            <Icon name="external-link" size={15} /> Import from ATS
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateUpload}
+            className="btn btn-primary btn-md"
+          >
+            <Icon name="upload" size={15} /> Upload Resume
+          </button>
+        </div>
       </div>
+
+      <AtsImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportComplete={() => {
+          setIsImportModalOpen(false);
+          if (onRefreshCandidates) {
+            onRefreshCandidates();
+          }
+        }}
+      />
 
       {/* Search Bar & Filters */}
       <div className="directory-toolbar">
@@ -122,15 +146,24 @@ export function CandidatesDirectory({
           </div>
           <h3 className="empty-title">No candidate profiles yet</h3>
           <p className="empty-description">
-            Upload your first text-based PDF or native DOCX resume to extract verified candidate profiles with full evidence traceability.
+            Upload your first text-based PDF or native DOCX resume, or scan resumes from the Local Folder ATS demo.
           </p>
-          <button
-            type="button"
-            onClick={onNavigateUpload}
-            className="btn btn-primary btn-md"
-          >
-            <Icon name="upload" size={15} /> Upload Resume
-          </button>
+          <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+            <button
+              type="button"
+              onClick={() => setIsImportModalOpen(true)}
+              className="btn btn-secondary btn-md"
+            >
+              <Icon name="external-link" size={15} /> Import from ATS
+            </button>
+            <button
+              type="button"
+              onClick={onNavigateUpload}
+              className="btn btn-primary btn-md"
+            >
+              <Icon name="upload" size={15} /> Upload Resume
+            </button>
+          </div>
         </div>
       ) : filteredCandidates.length === 0 ? (
         <div className="empty-state-card">
@@ -151,6 +184,10 @@ export function CandidatesDirectory({
         <div className="candidates-grid">
           {filteredCandidates.map((c) => {
             const isHumanCorrected = c.provenance === "HUMAN_CORRECTED";
+            const isLocalAtsDemo =
+              c.provenance === "Local ATS Demo" ||
+              c.provenance === "Local Folder ATS Demo" ||
+              (c.provenance && (c.provenance.includes("Local") || c.provenance.includes("ATS")));
             const initials = getInitials(c.fullName);
 
             return (
@@ -188,7 +225,11 @@ export function CandidatesDirectory({
                       <span className="badge badge-version">v{c.latestProfileVersion}</span>
                     )}
 
-                    {isHumanCorrected ? (
+                    {isLocalAtsDemo ? (
+                      <span className="badge badge-provenance-parser" style={{ backgroundColor: "#f0fdf4", color: "#166534" }}>
+                        Source: Local Folder ATS Demo
+                      </span>
+                    ) : isHumanCorrected ? (
                       <span className="badge badge-provenance-corrected">Corrected</span>
                     ) : (
                       <span className="badge badge-provenance-parser">Parser</span>

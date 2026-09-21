@@ -78,7 +78,7 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
 
     expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Product Marketing Manager")).toBeInTheDocument();
-    expect(screen.getByText("4 Requirements")).toBeInTheDocument();
+    expect(screen.getByText(/4 requirements/i)).toBeInTheDocument();
 
     // Test Search input
     const searchInput = screen.getByLabelText("Search jobs");
@@ -648,8 +648,15 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
       fireEvent.click(goToFieldBtn);
     });
 
-    it("requires confirmation to lock revision, and canceling does not mutate state", async () => {
-      vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(mockDraftJobDetail);
+    it("disables approve job when requisition has 0 requirements", async () => {
+      const emptyReqsJobDetail: jobsApi.JobDetail = {
+        ...mockDraftJobDetail,
+        currentVersion: {
+          ...mockDraftJobDetail.currentVersion,
+          requirements: [],
+        },
+      };
+      vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(emptyReqsJobDetail);
 
       render(
         <JobEditor
@@ -661,21 +668,13 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
 
       await screen.findByDisplayValue("Senior Fullstack Engineer");
 
-      const markReadyBtn = screen.getByText("Mark ready for matching");
-      fireEvent.click(markReadyBtn);
-
-      // Verify modal is open with important workflow guidance
-      expect(screen.getByText("Lock Revision for Matching")).toBeInTheDocument();
-      expect(screen.getByText(/You are about to freeze/)).toBeInTheDocument();
-      expect(screen.getByText(/This exact revision will be locked as read-only and immutable/)).toBeInTheDocument();
-
-      // Click Cancel
-      fireEvent.click(screen.getByText("Cancel"));
-      expect(screen.queryByText("Lock Revision for Matching")).not.toBeInTheDocument();
+      const approveBtn = screen.getByRole("button", { name: /Approve job/i });
+      expect(approveBtn).toBeDisabled();
+      expect(approveBtn).toHaveAttribute("title", "Add at least one requirement before approving");
       expect(jobsApi.markJobReady).not.toHaveBeenCalled();
     });
 
-    it("locks revision as READY_FOR_MATCHING, makes form read-only, and creates successor revision", async () => {
+    it("locks revision as READY_FOR_MATCHING on direct approval, makes form read-only, and creates successor revision", async () => {
       vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(mockDraftJobDetail);
       const mockReadyJobDetail: jobsApi.JobDetail = {
         ...mockDraftJobDetail,
@@ -699,21 +698,21 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
 
       await screen.findByDisplayValue("Senior Fullstack Engineer");
 
-      // Open modal and confirm
-      fireEvent.click(screen.getByText("Mark ready for matching"));
-      fireEvent.click(screen.getByText("Confirm and Lock Revision"));
+      // Direct single-step approval
+      const approveBtn = screen.getByRole("button", { name: /Approve job/i });
+      fireEvent.click(approveBtn);
 
       // Check that status changed and locked strip appeared
       expect(await screen.findByText(/This revision \(v1, Rev #2\) is locked and ready for candidate comparison\./)).toBeInTheDocument();
       expect(screen.getByText("v1 (Ready for matching)")).toBeInTheDocument();
-      expect(screen.getByText(/Requisition revision #2 is now locked as READY_FOR_MATCHING/)).toBeInTheDocument();
+      expect(screen.getByText(/Job approved successfully \(Revision #2\)\./)).toBeInTheDocument();
 
       // Verify title input is now disabled (read-only)
       const titleInput = screen.getByLabelText(/Job Title/);
       expect(titleInput).toBeDisabled();
 
       // Normal Save draft button is gone
-      expect(screen.queryByText("Save Draft Requisition")).not.toBeInTheDocument();
+      expect(screen.queryByText("Save as draft")).not.toBeInTheDocument();
 
       // Now create successor version
       const mockSuccessorJobDetail: jobsApi.JobDetail = {
@@ -754,8 +753,8 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
 
       await screen.findByDisplayValue("Senior Fullstack Engineer");
 
-      fireEvent.click(screen.getByText("Mark ready for matching"));
-      fireEvent.click(screen.getByText("Confirm and Lock Revision"));
+      const approveBtn = screen.getByRole("button", { name: /Approve job/i });
+      fireEvent.click(approveBtn);
 
       expect(await screen.findByText("Revision Conflict")).toBeInTheDocument();
       expect(screen.getByText(/This requisition was updated or changed status in another session/)).toBeInTheDocument();

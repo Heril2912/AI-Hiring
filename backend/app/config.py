@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     max_docx_compression_ratio: int = 100
     resume_intake_directory: str = "backend/runtime/resume_intake"
     resume_quarantine_directory: str = "backend/runtime/quarantine"
+    ats_local_drop_root: str = "local_ats_demo"
     min_pdf_direct_text_chars: int = 30
     max_pdf_extracted_chars: int = 500000
     max_docx_extracted_chars: int = 500000
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     login_failure_threshold: int = 5
     login_cooldown_seconds: int = 900
     frontend_origin: str = "http://localhost:5173"
+    allowed_frontend_origins: str = "http://localhost:5173,http://admin.localhost:5173,http://recruiter.localhost:5173"
     scrypt_n: int = 16384
     scrypt_r: int = 8
     scrypt_p: int = 1
@@ -65,6 +67,17 @@ class Settings(BaseSettings):
         if origin == "*":
             raise ValueError("Wildcard frontend_origin ('*') is not allowed when credentials/sessions are enabled.")
         return origin
+
+    @field_validator("allowed_frontend_origins")
+    @classmethod
+    def validate_allowed_frontend_origins(cls, v: str) -> str:
+        if not v or not v.strip():
+            return ""
+        origins = [o.strip() for o in v.split(",") if o.strip()]
+        for origin in origins:
+            if origin == "*":
+                raise ValueError("Wildcard origins ('*') are not allowed when credentials/sessions are enabled.")
+        return v
 
     @field_validator("session_cookie_samesite")
     @classmethod
@@ -114,6 +127,17 @@ class Settings(BaseSettings):
             raise ValueError("session_idle_lifetime_seconds cannot exceed session_absolute_lifetime_seconds.")
         return self
 
+    def get_allowed_frontend_origins(self) -> list[str]:
+        origins = []
+        if self.frontend_origin and self.frontend_origin.strip():
+            origins.append(self.frontend_origin.strip().rstrip("/"))
+        if self.allowed_frontend_origins:
+            for item in self.allowed_frontend_origins.split(","):
+                norm = item.strip().rstrip("/")
+                if norm and norm not in origins:
+                    origins.append(norm)
+        return origins
+
     def get_remote_allowed_hosts_list(self) -> list[str]:
         if not self.llm_remote_allowed_hosts:
             return []
@@ -130,6 +154,14 @@ class Settings(BaseSettings):
         if raw_path.is_absolute():
             return raw_path.resolve()
         return (REPO_ROOT / raw_path).resolve()
+
+    def get_ats_local_drop_root(self) -> Path:
+        raw_path = Path(self.ats_local_drop_root)
+        if raw_path.is_absolute():
+            resolved = raw_path.resolve()
+        else:
+            resolved = (REPO_ROOT / raw_path).resolve()
+        return resolved
 
 
 @lru_cache

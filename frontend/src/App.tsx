@@ -21,6 +21,7 @@ import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
 import { validateInternalReturnUrl, ComparisonNavigationState } from "./utils/navigation";
+import { getPortalContext, getCrossPortalUrl } from "./utils/portal";
 
 // Re-export validation utility for direct callers and test assertions
 export { validateInternalReturnUrl };
@@ -50,6 +51,7 @@ export interface InterviewRouteState {
 function AuthenticatedApp() {
   const { user } = useAuth();
   const role = user?.role || "REVIEWER";
+  const portalContext = getPortalContext();
 
   // Navigation tab state
   const [activeNavTab, setActiveNavTab] = useState<string>(
@@ -87,6 +89,9 @@ function AuthenticatedApp() {
     try {
       const searchParams = new URLSearchParams(window.location.search);
       const viewParam = searchParams.get("view");
+      const tabParam = searchParams.get("tab");
+      const returnUrlParam = searchParams.get("returnUrl");
+      const validReturn = validateInternalReturnUrl(returnUrlParam);
       const reportIdParam = searchParams.get("reportId");
       const jobIdParam = searchParams.get("jobId");
       const runIdParam = searchParams.get("runId");
@@ -106,6 +111,26 @@ function AuthenticatedApp() {
         });
         setActiveView("compare_candidates");
         setActiveNavTab("jobs");
+      } else if (
+        tabParam === "upload" ||
+        viewParam === "upload" ||
+        (validReturn && validReturn.includes("tab=upload"))
+      ) {
+        setActiveView("upload");
+        setActiveNavTab("upload");
+      } else if (
+        tabParam === "ats_integrations" ||
+        (validReturn && validReturn.includes("tab=ats_integrations"))
+      ) {
+        setActiveNavTab("ats_integrations");
+      } else if (tabParam === "jobs") {
+        setActiveView("jobs");
+        setActiveNavTab("jobs");
+      } else if (tabParam === "candidates") {
+        setActiveView("candidates");
+        setActiveNavTab("candidates");
+      } else if (tabParam === "users" || tabParam === "events" || tabParam === "ai_providers") {
+        setActiveNavTab(tabParam);
       } else if (
         viewParam === "interview_template" ||
         viewParam === "interview_workspace" ||
@@ -143,6 +168,35 @@ function AuthenticatedApp() {
   }, []);
 
   useEffect(() => {
+    const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const tabParam = searchParams?.get("tab");
+    const viewParam = searchParams?.get("view");
+    const returnUrlParam = searchParams?.get("returnUrl");
+    const validReturn = validateInternalReturnUrl(returnUrlParam);
+
+    if (
+      tabParam === "upload" ||
+      viewParam === "upload" ||
+      (validReturn && validReturn.includes("tab=upload"))
+    ) {
+      setActiveNavTab("upload");
+      setActiveView("upload");
+      return;
+    }
+    if (
+      tabParam === "ats_integrations" ||
+      (validReturn && validReturn.includes("tab=ats_integrations"))
+    ) {
+      setActiveNavTab("ats_integrations");
+      return;
+    }
+    if (tabParam) {
+      setActiveNavTab(tabParam);
+      if (tabParam === "jobs") setActiveView("jobs");
+      if (tabParam === "candidates") setActiveView("candidates");
+      return;
+    }
+
     const defaultTab = role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews";
     setActiveNavTab(defaultTab);
     if (role === "RECRUITER" && activeView === "candidates") {
@@ -304,6 +358,26 @@ function AuthenticatedApp() {
       jobsCount={jobs.length}
       connectionState={connectionState}
     >
+      {portalContext === "admin" && role !== "ADMIN" && (
+        <div className="portal-mismatch-banner" role="status" aria-live="polite">
+          <Icon name="info" size={16} />
+          <div className="portal-mismatch-content">
+            <span className="portal-mismatch-title">Administrator Workspace</span>
+            <p className="portal-mismatch-desc">
+              You are signed in as a {role.toLowerCase()}. System administration tools require administrator authorization.
+            </p>
+            <a
+              href={getCrossPortalUrl("recruiter")}
+              className="btn btn-secondary btn-sm"
+              style={{ marginTop: "8px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+            >
+              <Icon name="external-link" size={13} />
+              <span>Open Recruiter workspace</span>
+            </a>
+          </div>
+        </div>
+      )}
+
       {role === "ADMIN" && (
         <>
           {activeNavTab === "jobs" ? (
@@ -462,6 +536,7 @@ function AuthenticatedApp() {
                     setActiveView("upload");
                     setActiveNavTab("upload");
                   }}
+                  onRefreshCandidates={fetchCandidates}
                 />
               )}
 

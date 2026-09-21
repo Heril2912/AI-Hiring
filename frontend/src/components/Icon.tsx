@@ -48,7 +48,8 @@ export type IconName =
   | "bar-chart"
   | "play"
   | "pause"
-  | "lock";
+  | "lock"
+  | "folder";
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName;
@@ -377,6 +378,10 @@ export function Icon({ name, size = 18, className = "", "aria-label": ariaLabel,
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </>
+        );
+      case "folder":
+        return (
+          <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
         );
       case "info":
       default:

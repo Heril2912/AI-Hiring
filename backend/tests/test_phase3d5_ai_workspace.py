@@ -830,7 +830,7 @@ async def test_requirement_update_marks_set_stale_and_allows_successor(test_db: 
 
     fake_provider = FakeWordingProvider(
         simulated_mode="SUCCESS",
-        reworded_text_override="How do you handle channel synchronization and race conditions in Go?",
+        reworded_text_override="How do you handle channel synchronization and concurrency hazards in Go?",
     )
 
     res_v1 = await generate_ai_questions_by_job_id(

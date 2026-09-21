@@ -117,6 +117,7 @@ class JobRequisition(Base):
         Index("ix_job_requisitions_status", "status"),
         Index("ix_job_requisitions_created_by_updated_at", "created_by_user_id", "updated_at"),
         Index("ix_job_requisitions_idempotency_key", "idempotency_key"),
+        Index("ix_job_requisitions_deleted_at", "deleted_at"),
     )
 
     job_id: Mapped[uuid.UUID] = mapped_column(
@@ -162,6 +163,19 @@ class JobRequisition(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    deleted_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.user_id",
+            ondelete="SET NULL",
+            name="fk_job_requisitions_deleted_by_user_id_users",
+        ),
+        nullable=True,
     )
 
     # Relationships

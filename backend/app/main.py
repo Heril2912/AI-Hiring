@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.ats import router as ats_router
 from app.api.gap_reports import gap_reports_router, result_reports_router
 from app.api.interviews import router as interviews_router, simulations_router
 from app.api.ai_interviews import router as ai_interviews_router
@@ -11,9 +13,19 @@ from app.api.jobs import router as jobs_router
 from app.api.matches import router as matches_router
 from app.api.resumes import router as resumes_router
 from app.api.taxonomy import router as taxonomy_router
+from app.config import get_settings
 from app.database import check_database_connection
 
 app = FastAPI(title="AI-Driven Smart Hiring Platform")
+
+settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.get_allowed_frontend_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 from fastapi.encoders import jsonable_encoder
@@ -43,6 +55,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(ats_router)
 app.include_router(jobs_router)
 app.include_router(interviews_router)
 app.include_router(simulations_router)

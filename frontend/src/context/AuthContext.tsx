@@ -199,3 +199,8 @@ export function useAuth(): AuthContextValue {
   }
   return context;
 }
+
+export function useOptionalAuth(): AuthContextValue | null {
+  const context = useContext(AuthContext);
+  return context || null;
+}
