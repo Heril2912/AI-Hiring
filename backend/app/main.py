@@ -7,6 +7,7 @@ from app.api.auth import router as auth_router
 from app.api.ats import router as ats_router
 from app.api.candidate_auth import router as candidate_auth_router
 from app.api.candidate_invitations import router as candidate_invitations_router
+from app.api.candidate_practice import router as candidate_practice_router
 from app.api.gap_reports import gap_reports_router, result_reports_router
 from app.api.interviews import router as interviews_router, simulations_router
 from app.api.ai_interviews import router as ai_interviews_router
@@ -58,6 +59,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(auth_router)
 app.include_router(candidate_auth_router)
 app.include_router(candidate_invitations_router)
+app.include_router(candidate_practice_router)
 app.include_router(admin_router)
 app.include_router(ats_router)
 app.include_router(jobs_router)

@@ -9,6 +9,8 @@ import {
   SafeRubricDto,
 } from "../../types/ai_question_set";
 import { SafeRubricModal } from "./SafeRubricModal";
+import { McqAuthoringModal, McqFormData } from "./McqAuthoringModal";
+import { CandidateSafePreviewModal } from "./CandidateSafePreviewModal";
 import "./ai-interviews.css";
 
 interface AiQuestionSetWorkspaceProps {
@@ -16,11 +18,14 @@ interface AiQuestionSetWorkspaceProps {
   onNavigateBack: () => void;
 }
 
+type WorkspaceTab = "CONVERSATIONAL" | "MCQ";
+
 export function AiQuestionSetWorkspace({
   templateId,
   onNavigateBack,
 }: AiQuestionSetWorkspaceProps) {
   const [detail, setDetail] = useState<AiQuestionSetDetail | null>(null);
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("CONVERSATIONAL");
   const [activeSlotIndex, setActiveSlotIndex] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,13 +33,25 @@ export function AiQuestionSetWorkspace({
   const [isUpdatingSlot, setIsUpdatingSlot] = useState<boolean>(false);
   const [isApproving, setIsApproving] = useState<boolean>(false);
   const [isValidating, setIsValidating] = useState<boolean>(false);
+  const [isGeneratingMcqs, setIsGeneratingMcqs] = useState<boolean>(false);
   const [validationResult, setValidationResult] = useState<AiQuestionSetValidateResult | null>(null);
   const [activeRubric, setActiveRubric] = useState<{ rubric: SafeRubricDto; competencyName: string } | null>(null);
 
-  // Edit wording state
+  // Edit wording state for conversational questions
   const [isEditingWording, setIsEditingWording] = useState<boolean>(false);
   const [editedWordingText, setEditedWordingText] = useState<string>("");
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+
+  // MCQ Modal State
+  const [isMcqModalOpen, setIsMcqModalOpen] = useState<boolean>(false);
+  const [editingMcqData, setEditingMcqData] = useState<McqFormData | null>(null);
+
+  // Candidate Preview Modal State
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
+
+  // Generate MCQs target count dialog
+  const [showGenerateMcqDialog, setShowGenerateMcqDialog] = useState<boolean>(false);
+  const [mcqGenerateCount, setMcqGenerateCount] = useState<number>(5);
 
   // Ref to return focus to rubric button after closing modal
   const viewRubricBtnRef = useRef<HTMLButtonElement>(null);
@@ -75,8 +92,11 @@ export function AiQuestionSetWorkspace({
       setError(null);
       const res = await apiFetch<AiQuestionSetDetail>(`/api/v1/ai-interviews/${templateId}`);
       setDetail(res);
-      if (res.slots && res.slots.length > 0) {
-        setEditedWordingText(res.slots[activeSlotIndex]?.ai_wording || "");
+      const convSlots = res.slots.filter(
+        (s) => s.question_format === "CONVERSATION" || !s.question_format
+      );
+      if (convSlots.length > 0) {
+        setEditedWordingText(convSlots[activeSlotIndex]?.ai_wording || "");
       }
     } catch (err: any) {
       setError(err?.message || "Failed to load AI question set.");
@@ -89,7 +109,14 @@ export function AiQuestionSetWorkspace({
     loadQuestionSet(true);
   }, [templateId]);
 
-  const activeSlot: AiQuestionSlotItem | undefined = detail?.slots?.[activeSlotIndex];
+  const conversationalSlots: AiQuestionSlotItem[] = (detail?.slots || []).filter(
+    (s) => s.question_format === "CONVERSATION" || !s.question_format
+  );
+  const mcqSlots: AiQuestionSlotItem[] = (detail?.slots || []).filter(
+    (s) => s.question_format === "MCQ_SINGLE_ANSWER"
+  );
+
+  const activeSlot: AiQuestionSlotItem | undefined = conversationalSlots[activeSlotIndex];
 
   useEffect(() => {
     if (activeSlot) {
@@ -128,9 +155,8 @@ export function AiQuestionSetWorkspace({
           : "Question slot updated.";
       setActionFeedback(feedbackMsg);
 
-      // Advance to the next unreviewed slot if available
-      if (decision === "KEEP" && updatedDetail.slots) {
-        const nextUnreviewedIdx = updatedDetail.slots.findIndex(
+      if (decision === "KEEP") {
+        const nextUnreviewedIdx = conversationalSlots.findIndex(
           (s, idx) => idx > activeSlotIndex && s.review_state === "UNREVIEWED"
         );
         if (nextUnreviewedIdx !== -1) {
@@ -186,7 +212,7 @@ export function AiQuestionSetWorkspace({
     try {
       setIsApproving(true);
       setError(null);
-      const res = await apiFetch<AiQuestionSetApproveResult>(
+      await apiFetch<AiQuestionSetApproveResult>(
         `/api/v1/ai-interviews/${templateId}/approve`,
         { method: "POST" }
       );
@@ -199,9 +225,132 @@ export function AiQuestionSetWorkspace({
     }
   };
 
+  const handleGenerateMcqs = async () => {
+    try {
+      setIsGeneratingMcqs(true);
+      setError(null);
+      setShowGenerateMcqDialog(false);
+      const updated = await apiFetch<AiQuestionSetDetail>(
+        `/api/v1/ai-interviews/${templateId}/generate-mcqs`,
+        {
+          method: "POST",
+          body: JSON.stringify({ target_count: mcqGenerateCount }),
+        }
+      );
+      setDetail(updated);
+      setActionFeedback(`Successfully generated ${mcqGenerateCount} multiple-choice questions.`);
+    } catch (err: any) {
+      setError(err?.message || "MCQ generation failed. Ensure local AI provider is reachable.");
+    } finally {
+      setIsGeneratingMcqs(false);
+    }
+  };
+
+  const handleSaveMcq = async (formData: McqFormData) => {
+    if (formData.slot_id) {
+      // Edit existing MCQ
+      const updated = await apiFetch<AiQuestionSetDetail>(
+        `/api/v1/ai-interviews/${templateId}/mcq-slots/${formData.slot_id}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            competency_name: formData.competency_name,
+            question_text: formData.question_text,
+            difficulty: formData.difficulty,
+            estimated_time_minutes: formData.estimated_time_minutes,
+            options: formData.options,
+            correct_option_id: formData.correct_option_id,
+            answer_explanation: formData.answer_explanation,
+          }),
+        }
+      );
+      setDetail(updated);
+      setActionFeedback("Multiple choice question updated.");
+    } else {
+      // Add manual MCQ
+      const updated = await apiFetch<AiQuestionSetDetail>(
+        `/api/v1/ai-interviews/${templateId}/mcq-slots`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            competency_name: formData.competency_name,
+            question_text: formData.question_text,
+            difficulty: formData.difficulty,
+            estimated_time_minutes: formData.estimated_time_minutes,
+            options: formData.options,
+            correct_option_id: formData.correct_option_id,
+            answer_explanation: formData.answer_explanation,
+          }),
+        }
+      );
+      setDetail(updated);
+      setActionFeedback("New multiple choice question added.");
+    }
+  };
+
+  const handleDeleteMcq = async (slotId: string) => {
+    try {
+      setError(null);
+      const updated = await apiFetch<AiQuestionSetDetail>(
+        `/api/v1/ai-interviews/${templateId}/mcq-slots/${slotId}`,
+        { method: "DELETE" }
+      );
+      setDetail(updated);
+      setActionFeedback("Multiple choice question removed.");
+    } catch (err: any) {
+      setError(err?.message || "Failed to remove MCQ.");
+    }
+  };
+
+  const handleMoveMcq = async (index: number, direction: "UP" | "DOWN") => {
+    if (
+      (direction === "UP" && index === 0) ||
+      (direction === "DOWN" && index === mcqSlots.length - 1)
+    ) {
+      return;
+    }
+    const targetIdx = direction === "UP" ? index - 1 : index + 1;
+    const reordered = [...mcqSlots];
+    const [moved] = reordered.splice(index, 1);
+    reordered.splice(targetIdx, 0, moved);
+
+    const orderedSlotIds = reordered.map((s) => s.slot_id);
+    try {
+      setError(null);
+      const updated = await apiFetch<AiQuestionSetDetail>(
+        `/api/v1/ai-interviews/${templateId}/reorder-mcqs`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ ordered_slot_ids: orderedSlotIds }),
+        }
+      );
+      setDetail(updated);
+    } catch (err: any) {
+      setError(err?.message || "Failed to reorder MCQs.");
+    }
+  };
+
+  const handleOpenAddMcq = () => {
+    setEditingMcqData(null);
+    setIsMcqModalOpen(true);
+  };
+
+  const handleOpenEditMcq = (slot: AiQuestionSlotItem) => {
+    setEditingMcqData({
+      slot_id: slot.slot_id,
+      competency_name: slot.competency_name,
+      question_text: slot.ai_wording || "",
+      difficulty: slot.difficulty || "INTERMEDIATE",
+      estimated_time_minutes: slot.estimated_time_minutes,
+      options: slot.options || [],
+      correct_option_id: slot.correct_option_id || "A",
+      answer_explanation: slot.answer_explanation || "",
+    });
+    setIsMcqModalOpen(true);
+  };
+
   const handleCloseRubric = () => {
     setActiveRubric(null);
-    // Return focus to View Rubric button for keyboard accessibility
     setTimeout(() => {
       viewRubricBtnRef.current?.focus();
     }, 50);
@@ -290,7 +439,7 @@ export function AiQuestionSetWorkspace({
 
           <div className="aiq-progress-group">
             <span className="aiq-progress-text">
-              {reviewedCount} of {totalCount} reviewed
+              {conversationalSlots.length} Conversational · {mcqSlots.length} MCQs ({reviewedCount} of {totalCount} reviewed)
             </span>
             <div className="aiq-progress-track">
               <div
@@ -303,6 +452,16 @@ export function AiQuestionSetWorkspace({
 
         {/* Header Actions */}
         <div className="aiq-header-actions">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setIsPreviewModalOpen(true)}
+            title="Preview candidate-safe view of this interview set"
+          >
+            <Icon name="eye" size={15} />
+            <span>Candidate Preview</span>
+          </button>
+
           {!isApproved && (
             <button
               type="button"
@@ -401,198 +560,561 @@ export function AiQuestionSetWorkspace({
         </div>
       )}
 
-      {/* Workspace 2-Column Layout */}
-      <div className="aiq-workspace-layout">
-        {/* Left: Question Navigator */}
-        <nav className="aiq-question-navigation" aria-label="Question slots navigator">
-          <div className="aiq-nav-header">
-            <span>Questions</span>
-            <span>{reviewedCount}/{totalCount} Reviewed</span>
-          </div>
+      {/* Segmented Workspace Tabs */}
+      <div
+        style={{
+          display: "flex",
+          gap: "8px",
+          marginBottom: "20px",
+          borderBottom: "1px solid var(--border-subtle, #e2e8f0)",
+          paddingBottom: "12px",
+        }}
+        role="tablist"
+        aria-label="Interview Question Formats"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "CONVERSATIONAL"}
+          className={`btn ${activeTab === "CONVERSATIONAL" ? "btn-primary" : "btn-secondary"} btn-sm`}
+          onClick={() => setActiveTab("CONVERSATIONAL")}
+        >
+          <Icon name="message-square" size={15} />
+          <span>Conversational Questions ({conversationalSlots.length}/5)</span>
+        </button>
 
-          {detail.slots.map((slot, index) => {
-            const isActive = index === activeSlotIndex;
-            const isReviewed = slot.review_state !== "UNREVIEWED";
-            const numStr = String(index + 1).padStart(2, "0");
-            const badgeClass = isReviewed ? (slot.review_state === "EDITED" ? "edited" : "reviewed") : "to-review";
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "MCQ"}
+          className={`btn ${activeTab === "MCQ" ? "btn-primary" : "btn-secondary"} btn-sm`}
+          onClick={() => setActiveTab("MCQ")}
+        >
+          <Icon name="badge-check" size={15} />
+          <span>Multiple Choice Questions ({mcqSlots.length}/10)</span>
+        </button>
+      </div>
 
-            return (
-              <button
-                key={slot.slot_id}
-                type="button"
-                className={`aiq-nav-item ${isActive ? "aiq-active" : ""}`}
-                onClick={() => setActiveSlotIndex(index)}
-              >
-                <span className="aiq-nav-num">{numStr}</span>
-                <div className="aiq-nav-content">
-                  <div className="aiq-nav-title">{humanizeCompetency(slot.competency_name)}</div>
-                  <div className="aiq-nav-sub">
-                    {humanizeType(slot.question_type)} · {slot.estimated_time_minutes} min
-                  </div>
-                  <span className={`aiq-nav-state-badge ${badgeClass}`}>
-                    {humanizeReviewState(slot.review_state)}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-        </nav>
+      {/* Tab 1: Conversational Questions (2-Column Layout) */}
+      {activeTab === "CONVERSATIONAL" && (
+        <div className="aiq-workspace-layout">
+          {/* Left: Question Navigator */}
+          <nav className="aiq-question-navigation" aria-label="Question slots navigator">
+            <div className="aiq-nav-header">
+              <span>Conversational</span>
+              <span>{conversationalSlots.filter(s => s.review_state !== "UNREVIEWED").length}/{conversationalSlots.length} Reviewed</span>
+            </div>
 
-        {/* Right: Question Editor */}
-        <main className="aiq-question-editor">
-          {activeSlot ? (
-            <>
-              {/* Editor Header */}
-              <div className="aiq-editor-header">
-                <div>
-                  <div className="aiq-editor-slot-meta">
-                    Question {activeSlotIndex + 1} of {totalCount} · {humanizeType(activeSlot.question_type)} · {activeSlot.estimated_time_minutes} minutes
-                  </div>
-                  <h2 className="aiq-editor-competency">
-                    {humanizeCompetency(activeSlot.competency_name)}
-                  </h2>
-                </div>
+            {conversationalSlots.map((slot, index) => {
+              const isActive = index === activeSlotIndex;
+              const isReviewed = slot.review_state !== "UNREVIEWED";
+              const numStr = String(index + 1).padStart(2, "0");
+              const badgeClass = isReviewed ? (slot.review_state === "EDITED" ? "edited" : "reviewed") : "to-review";
 
-                {activeSlot.rubric && (
-                  <button
-                    ref={viewRubricBtnRef}
-                    type="button"
-                    className="aiq-rubric-btn"
-                    onClick={() =>
-                      setActiveRubric({
-                        rubric: activeSlot.rubric!,
-                        competencyName: activeSlot.competency_name,
-                      })
-                    }
-                  >
-                    <Icon name="file-text" size={15} />
-                    <span>View rubric</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Question Wording Surface */}
-              <section className="aiq-wording-section" aria-label="Question text">
-                {isEditingWording ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    <label htmlFor="aiq-wording-editor" className="sr-only">
-                      Edit interview question wording
-                    </label>
-                    <textarea
-                      id="aiq-wording-editor"
-                      className="aiq-wording-textarea"
-                      value={editedWordingText}
-                      onChange={(e) => setEditedWordingText(e.target.value)}
-                      placeholder="Enter tailored question wording for this competency slot..."
-                      rows={4}
-                    />
-                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          setEditedWordingText(activeSlot.ai_wording || "");
-                          setIsEditingWording(false);
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handleDecision("EDIT", editedWordingText)}
-                        disabled={!editedWordingText.trim() || isUpdatingSlot}
-                      >
-                        Save question
-                      </button>
+              return (
+                <button
+                  key={slot.slot_id}
+                  type="button"
+                  className={`aiq-nav-item ${isActive ? "aiq-active" : ""}`}
+                  onClick={() => setActiveSlotIndex(index)}
+                >
+                  <span className="aiq-nav-num">{numStr}</span>
+                  <div className="aiq-nav-content">
+                    <div className="aiq-nav-title">{humanizeCompetency(slot.competency_name)}</div>
+                    <div className="aiq-nav-sub">
+                      {humanizeType(slot.question_type)} · {slot.estimated_time_minutes} min
                     </div>
+                    <span className={`aiq-nav-state-badge ${badgeClass}`}>
+                      {humanizeReviewState(slot.review_state)}
+                    </span>
                   </div>
-                ) : (
-                  <>
-                    <div className="aiq-wording-display">
-                      {activeSlot.ai_wording ? (
-                        activeSlot.ai_wording
-                      ) : (
-                        <span className="aiq-wording-empty">No question generated yet for this slot.</span>
-                      )}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Right: Question Editor */}
+          <main className="aiq-question-editor">
+            {activeSlot ? (
+              <>
+                <div className="aiq-editor-header">
+                  <div>
+                    <div className="aiq-editor-slot-meta">
+                      Question {activeSlotIndex + 1} of {conversationalSlots.length} · {humanizeType(activeSlot.question_type)} · {activeSlot.estimated_time_minutes} minutes
                     </div>
+                    <h2 className="aiq-editor-competency">
+                      {humanizeCompetency(activeSlot.competency_name)}
+                    </h2>
+                  </div>
 
-                    {!isApproved && (
-                      <div className="aiq-wording-tools">
-                        <button
-                          type="button"
-                          className="aiq-tool-btn"
-                          onClick={() => setIsEditingWording(true)}
-                        >
-                          <Icon name="edit" size={14} />
-                          <span>Edit question</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          className="aiq-tool-btn"
-                          onClick={handleRegenerateSlot}
-                          disabled={isRegenerating || isUpdatingSlot}
-                        >
-                          <Icon name="refresh" size={14} className={isRegenerating ? "animate-spin" : ""} />
-                          <span>{isRegenerating ? "Regenerating…" : "Regenerate"}</span>
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </section>
-
-              {/* Permitted Probes */}
-              {activeSlot.permitted_probes && activeSlot.permitted_probes.length > 0 && (
-                <section className="aiq-probes-section">
-                  <h3 className="aiq-probes-title">Permitted follow-up probes</h3>
-                  <ul className="aiq-probes-list">
-                    {activeSlot.permitted_probes.map((probe, i) => (
-                      <li key={i}>{probe}</li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {/* Decision Bottom Bar */}
-              {!isApproved && (
-                <div className="aiq-decision-bar">
-                  <span className="aiq-decision-prompt">
-                    Confirm this question is suitable for the interview.
-                  </span>
-
-                  {activeSlot.ai_wording ? (
+                  {activeSlot.rubric && (
                     <button
+                      ref={viewRubricBtnRef}
                       type="button"
-                      className={`aiq-review-btn ${activeSlot.review_state === "KEPT" ? "is-reviewed" : ""}`}
-                      onClick={() => handleDecision("KEEP")}
-                      disabled={isUpdatingSlot}
+                      className="aiq-rubric-btn"
+                      onClick={() =>
+                        setActiveRubric({
+                          rubric: activeSlot.rubric!,
+                          competencyName: activeSlot.competency_name,
+                        })
+                      }
                     >
-                      <Icon name="check" size={16} />
-                      <span>{activeSlot.review_state === "KEPT" ? "Reviewed" : "Mark as reviewed"}</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="aiq-review-btn"
-                      onClick={handleRegenerateSlot}
-                      disabled={isRegenerating}
-                    >
-                      <Icon name="sparkles" size={16} />
-                      <span>Generate this question</span>
+                      <Icon name="file-text" size={15} />
+                      <span>View rubric</span>
                     </button>
                   )}
                 </div>
-              )}
-            </>
-          ) : (
-            <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted, #64748b)" }}>
-              Select a question from the left navigation to view and review.
+
+                <section className="aiq-wording-section" aria-label="Question text">
+                  {isEditingWording ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <label htmlFor="aiq-wording-editor" className="sr-only">
+                        Edit interview question wording
+                      </label>
+                      <textarea
+                        id="aiq-wording-editor"
+                        className="aiq-wording-textarea"
+                        value={editedWordingText}
+                        onChange={(e) => setEditedWordingText(e.target.value)}
+                        placeholder="Enter tailored question wording for this competency slot..."
+                        rows={4}
+                      />
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            setEditedWordingText(activeSlot.ai_wording || "");
+                            setIsEditingWording(false);
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleDecision("EDIT", editedWordingText)}
+                          disabled={!editedWordingText.trim() || isUpdatingSlot}
+                        >
+                          Save question
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="aiq-wording-display">
+                        {activeSlot.ai_wording ? (
+                          activeSlot.ai_wording
+                        ) : (
+                          <span className="aiq-wording-empty">No question generated yet for this slot.</span>
+                        )}
+                      </div>
+
+                      {!isApproved && (
+                        <div className="aiq-wording-tools">
+                          <button
+                            type="button"
+                            className="aiq-tool-btn"
+                            onClick={() => setIsEditingWording(true)}
+                          >
+                            <Icon name="edit" size={14} />
+                            <span>Edit question</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            className="aiq-tool-btn"
+                            onClick={handleRegenerateSlot}
+                            disabled={isRegenerating || isUpdatingSlot}
+                          >
+                            <Icon name="refresh" size={14} className={isRegenerating ? "animate-spin" : ""} />
+                            <span>{isRegenerating ? "Regenerating…" : "Regenerate"}</span>
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </section>
+
+                {activeSlot.permitted_probes && activeSlot.permitted_probes.length > 0 && (
+                  <section className="aiq-probes-section">
+                    <h3 className="aiq-probes-title">Permitted follow-up probes</h3>
+                    <ul className="aiq-probes-list">
+                      {activeSlot.permitted_probes.map((probe, i) => (
+                        <li key={i}>{probe}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+
+                {!isApproved && (
+                  <div className="aiq-decision-bar">
+                    <span className="aiq-decision-prompt">
+                      Confirm this question is suitable for the interview.
+                    </span>
+
+                    {activeSlot.ai_wording ? (
+                      <button
+                        type="button"
+                        className={`aiq-review-btn ${activeSlot.review_state === "KEPT" ? "is-reviewed" : ""}`}
+                        onClick={() => handleDecision("KEEP")}
+                        disabled={isUpdatingSlot}
+                      >
+                        <Icon name="check" size={16} />
+                        <span>{activeSlot.review_state === "KEPT" ? "Reviewed" : "Mark as reviewed"}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="aiq-review-btn"
+                        onClick={handleRegenerateSlot}
+                        disabled={isRegenerating}
+                      >
+                        <Icon name="sparkles" size={16} />
+                        <span>Generate this question</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted, #64748b)" }}>
+                No conversational questions found.
+              </div>
+            )}
+          </main>
+        </div>
+      )}
+
+      {/* Tab 2: Multiple Choice Questions (Full Width View) */}
+      {activeTab === "MCQ" && (
+        <section aria-label="Multiple choice question management">
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "20px",
+              padding: "16px 20px",
+              backgroundColor: "var(--surface-base, #ffffff)",
+              borderRadius: "8px",
+              border: "1px solid var(--border-subtle, #e2e8f0)",
+            }}
+          >
+            <div>
+              <h2 style={{ fontSize: "16px", fontWeight: 600, color: "var(--text-primary, #0f172a)", margin: "0 0 4px 0" }}>
+                Multiple Choice Questions ({mcqSlots.length} / 10 max)
+              </h2>
+              <p style={{ fontSize: "13px", color: "var(--text-secondary, #64748b)", margin: 0 }}>
+                Author or generate standardized knowledge questions. Each MCQ requires 2–5 distinct options, 1 designated correct answer, and an explanation.
+              </p>
+            </div>
+
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowGenerateMcqDialog(true)}
+                disabled={mcqSlots.length >= 10 || isGeneratingMcqs}
+              >
+                <Icon name="sparkles" size={14} className={isGeneratingMcqs ? "animate-spin" : ""} />
+                <span>{isGeneratingMcqs ? "Generating..." : "Generate MCQs with AI"}</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleOpenAddMcq}
+                disabled={mcqSlots.length >= 10}
+              >
+                <Icon name="plus" size={14} />
+                <span>Add MCQ</span>
+              </button>
+            </div>
+          </div>
+
+          {/* MCQ Generation Dialog Modal */}
+          {showGenerateMcqDialog && (
+            <div
+              className="aiq-modal-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="gen-mcq-title"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setShowGenerateMcqDialog(false);
+              }}
+            >
+              <div className="aiq-modal-dialog" style={{ maxWidth: "480px" }}>
+                <div className="aiq-modal-header">
+                  <h2 id="gen-mcq-title" className="aiq-modal-title">
+                    Generate Multiple Choice Questions
+                  </h2>
+                  <button
+                    type="button"
+                    className="aiq-modal-close-btn"
+                    onClick={() => setShowGenerateMcqDialog(false)}
+                    aria-label="Close dialog"
+                  >
+                    <Icon name="x" size={18} />
+                  </button>
+                </div>
+                <div className="aiq-modal-body">
+                  <p style={{ fontSize: "14px", color: "var(--text-secondary, #475569)", marginBottom: "16px" }}>
+                    The local AI model will generate tailored, competency-grounded MCQs with plausible distractors, one unambiguous correct answer, and explanations based on the job requirements.
+                  </p>
+                  <div>
+                    <label className="aiq-form-label" htmlFor="mcq-gen-count">
+                      Number of MCQs to generate (1 to {10 - mcqSlots.length})
+                    </label>
+                    <input
+                      id="mcq-gen-count"
+                      type="number"
+                      min={1}
+                      max={Math.min(10, 10 - mcqSlots.length)}
+                      value={mcqGenerateCount}
+                      onChange={(e) => setMcqGenerateCount(Math.max(1, Math.min(10 - mcqSlots.length, Number(e.target.value))))}
+                      className="aiq-input"
+                    />
+                  </div>
+                </div>
+                <div className="aiq-modal-footer">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setShowGenerateMcqDialog(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleGenerateMcqs}
+                    disabled={isGeneratingMcqs}
+                  >
+                    <Icon name="sparkles" size={14} />
+                    <span>Generate</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
-        </main>
-      </div>
+
+          {mcqSlots.length === 0 ? (
+            <div
+              className="aiq-panel"
+              style={{
+                textAlign: "center",
+                padding: "48px 24px",
+                backgroundColor: "var(--surface-base, #ffffff)",
+              }}
+            >
+              <div style={{ margin: "0 auto 12px auto", width: "40px", height: "40px", borderRadius: "50%", backgroundColor: "var(--accent-subtle, #f0f4ff)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent-primary, #3b82f6)" }}>
+                <Icon name="badge-check" size={20} />
+              </div>
+              <h3 style={{ fontSize: "16px", fontWeight: 600, color: "var(--text-primary, #0f172a)", marginBottom: "6px" }}>
+                No Multiple Choice Questions Yet
+              </h3>
+              <p style={{ fontSize: "14px", color: "var(--text-secondary, #64748b)", maxWidth: "440px", margin: "0 auto 16px auto" }}>
+                Practice sets can contain up to 10 MCQs alongside conversational questions. Click below to author one manually or generate them with local AI.
+              </p>
+              <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowGenerateMcqDialog(true)}
+                >
+                  <Icon name="sparkles" size={14} />
+                  <span>Generate with AI</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleOpenAddMcq}
+                >
+                  <Icon name="plus" size={14} />
+                  <span>Add Manual MCQ</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {mcqSlots.map((slot, index) => (
+                <div
+                  key={slot.slot_id}
+                  className="aiq-panel"
+                  style={{
+                    backgroundColor: "var(--surface-base, #ffffff)",
+                    border: "1px solid var(--border-subtle, #e2e8f0)",
+                    padding: "20px",
+                    borderRadius: "8px",
+                  }}
+                >
+                  {/* MCQ Top Header */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          width: "28px",
+                          height: "28px",
+                          borderRadius: "6px",
+                          backgroundColor: "var(--accent-subtle, #f0f4ff)",
+                          color: "var(--accent-primary, #3b82f6)",
+                          fontWeight: 700,
+                          fontSize: "13px",
+                        }}
+                      >
+                        {index + 1}
+                      </span>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <strong style={{ fontSize: "14px", color: "var(--text-primary, #0f172a)" }}>
+                            {humanizeCompetency(slot.competency_name)}
+                          </strong>
+                          {slot.difficulty && (
+                            <span
+                              className="badge"
+                              style={{
+                                fontSize: "11px",
+                                textTransform: "uppercase",
+                                backgroundColor: slot.difficulty === "ADVANCED" ? "#fef3c7" : slot.difficulty === "INTERMEDIATE" ? "#e0f2fe" : "#ecfdf5",
+                                color: slot.difficulty === "ADVANCED" ? "#92400e" : slot.difficulty === "INTERMEDIATE" ? "#0369a1" : "#065f46",
+                                border: "1px solid transparent",
+                              }}
+                            >
+                              {slot.difficulty}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Reorder and Action Tools */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <button
+                        type="button"
+                        className="btn-icon-subtle"
+                        onClick={() => handleMoveMcq(index, "UP")}
+                        disabled={index === 0}
+                        aria-label={`Move question ${index + 1} up`}
+                        title="Move Up"
+                      >
+                        <Icon name="chevron-up" size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-icon-subtle"
+                        onClick={() => handleMoveMcq(index, "DOWN")}
+                        disabled={index === mcqSlots.length - 1}
+                        aria-label={`Move question ${index + 1} down`}
+                        title="Move Down"
+                      >
+                        <Icon name="chevron-down" size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-xs"
+                        onClick={() => handleOpenEditMcq(slot)}
+                        aria-label={`Edit question ${index + 1}`}
+                      >
+                        <Icon name="edit" size={12} />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-xs"
+                        onClick={() => handleDeleteMcq(slot.slot_id)}
+                        aria-label={`Delete question ${index + 1}`}
+                      >
+                        <Icon name="trash" size={12} />
+                        <span>Delete</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Question Text */}
+                  <p style={{ fontSize: "15px", fontWeight: 600, color: "var(--text-primary, #0f172a)", margin: "0 0 16px 0", lineHeight: 1.5 }}>
+                    {slot.ai_wording}
+                  </p>
+
+                  {/* Options List */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "16px" }}>
+                    {slot.options?.map((opt) => {
+                      const isCorrect = slot.correct_option_id === opt.option_id;
+                      return (
+                        <div
+                          key={opt.option_id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            padding: "8px 12px",
+                            borderRadius: "6px",
+                            backgroundColor: isCorrect ? "#ecfdf5" : "var(--surface-muted, #f8fafc)",
+                            border: isCorrect ? "1px solid #10b981" : "1px solid var(--border-subtle, #e2e8f0)",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontWeight: 700,
+                              fontSize: "12px",
+                              color: isCorrect ? "#065f46" : "var(--text-secondary, #475569)",
+                              minWidth: "20px",
+                            }}
+                          >
+                            {opt.option_id}.
+                          </span>
+                          <span style={{ fontSize: "13px", color: isCorrect ? "#065f46" : "var(--text-primary, #0f172a)", flex: 1 }}>
+                            {opt.text}
+                          </span>
+                          {isCorrect && (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: "#065f46",
+                                backgroundColor: "rgba(16, 185, 129, 0.15)",
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                              }}
+                            >
+                              <Icon name="check" size={11} /> Correct
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Explanation Box */}
+                  {slot.answer_explanation && (
+                    <div
+                      style={{
+                        padding: "10px 14px",
+                        borderRadius: "6px",
+                        backgroundColor: "var(--accent-subtle, #f0f4ff)",
+                        borderLeft: "3px solid var(--accent-primary, #3b82f6)",
+                        fontSize: "13px",
+                        color: "var(--text-secondary, #475569)",
+                      }}
+                    >
+                      <strong style={{ color: "var(--text-primary, #0f172a)", display: "inline-block", marginRight: "6px" }}>
+                        Explanation (Recruiter):
+                      </strong>
+                      {slot.answer_explanation}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Rubric Modal Dialog */}
       {activeRubric && (
@@ -600,6 +1122,28 @@ export function AiQuestionSetWorkspace({
           rubric={activeRubric.rubric}
           competencyName={activeRubric.competencyName}
           onClose={handleCloseRubric}
+        />
+      )}
+
+      {/* MCQ Authoring & Editing Modal */}
+      {isMcqModalOpen && (
+        <McqAuthoringModal
+          isOpen={isMcqModalOpen}
+          initialData={editingMcqData}
+          onSave={handleSaveMcq}
+          onClose={() => {
+            setIsMcqModalOpen(false);
+            setEditingMcqData(null);
+          }}
+        />
+      )}
+
+      {/* Candidate Safe Preview Modal */}
+      {isPreviewModalOpen && (
+        <CandidateSafePreviewModal
+          isOpen={isPreviewModalOpen}
+          detail={detail}
+          onClose={() => setIsPreviewModalOpen(false)}
         />
       )}
     </div>

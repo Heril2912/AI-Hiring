@@ -15,11 +15,32 @@ class QuestionType(str, enum.Enum):
     EVIDENCE_CLARIFICATION = "EVIDENCE_CLARIFICATION"
 
 
+class QuestionFormat(str, enum.Enum):
+    """Format discriminator for interview questions."""
+    CONVERSATION = "CONVERSATION"
+    MCQ_SINGLE_ANSWER = "MCQ_SINGLE_ANSWER"
+
+
+class QuestionDifficulty(str, enum.Enum):
+    """Controlled difficulty level for practice questions."""
+    FOUNDATIONAL = "FOUNDATIONAL"
+    INTERMEDIATE = "INTERMEDIATE"
+    ADVANCED = "ADVANCED"
+
+
+class PracticeReleaseStatus(str, enum.Enum):
+    """State of practice assignment released to a candidate."""
+    RELEASED = "RELEASED"
+    REVOKED = "REVOKED"
+
+
 class AuthoringOrigin(str, enum.Enum):
     """Provenance of the question text or rubric."""
     DETERMINISTIC = "DETERMINISTIC"
     AI_ASSISTED = "AI_ASSISTED"
+    AI_GENERATED = "AI_GENERATED"
     RECRUITER_EDITED = "RECRUITER_EDITED"
+    RECRUITER_AUTHORED = "RECRUITER_AUTHORED"
 
 
 class ValidationState(str, enum.Enum):

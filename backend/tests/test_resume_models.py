@@ -71,6 +71,7 @@ def test_models_exported_and_tables_registered():
         "ats_reconciliation_records",
         "candidate_invitations",
         "candidate_account_bindings",
+        "candidate_practice_releases",
     }
 
 

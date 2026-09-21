@@ -202,14 +202,16 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
   });
 
   describe("CandidateShell", () => {
-    it("renders candidate portal branding and practice placeholder view", () => {
+    it("renders candidate portal branding and practice placeholder view", async () => {
       render(
         <CandidateAuthProvider>
           <CandidateShell />
         </CandidateAuthProvider>
       );
 
-      expect(screen.getByText("Practice interviews will appear here")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText("Practice interviews will appear here")).toBeInTheDocument();
+      });
       expect(screen.getByText("Candidate Practice")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Sign out of Candidate Practice Portal/i })).toBeInTheDocument();
 

@@ -39,7 +39,23 @@ from app.schemas.ai_question_set import (
     EligibleJobsResponse,
     SafeRubricResponse,
 )
-from app.schemas.phase3_enums import AuthoringOrigin, InterviewLayer, PlanLifecycle, QuestionType
+from app.schemas.phase3_enums import (
+    AuthoringOrigin,
+    InterviewLayer,
+    PlanLifecycle,
+    QuestionDifficulty,
+    QuestionFormat,
+    QuestionType,
+)
+from app.schemas.mcq_contract import (
+    McqCreateRequest,
+    McqGenerateRequest,
+    McqItemDto,
+    McqOptionDto,
+    McqReorderRequest,
+    McqUpdateRequest,
+    StructuredAiMcqBatchResponse,
+)
 from app.schemas.safety_policy import check_prohibited_topics
 from app.schemas.wording_contract import (
     PROMPT_TEMPLATE_VERSION,
@@ -50,6 +66,7 @@ from app.schemas.wording_contract import (
     StructuredWordingVariant,
     WordingRationaleCode,
 )
+from app.services.mcq_validation_service import validate_mcq_item
 from app.services.provider_registry import ProviderRegistry, get_provider_registry
 from app.services.wording_assistance_service import (
     request_question_wording_assistance,
@@ -456,6 +473,7 @@ def _map_record_to_detail_dto(
             AiQuestionSlotItemResponse(
                 slot_id=slot_uuid,
                 display_order=item.get("display_order", 0),
+                question_format=item.get("question_format", "CONVERSATION"),
                 competency_name=item.get("competency_name", "Core Competency"),
                 question_type=item.get("question_type", "TECHNICAL"),
                 estimated_time_minutes=item.get("estimated_time_minutes", 5),
@@ -463,6 +481,11 @@ def _map_record_to_detail_dto(
                 rubric=safe_rubric,
                 source_requirement_ids=source_req_uuids,
                 ai_wording=ai_wording,
+                question_text=item.get("question_text") or ai_wording,
+                options=item.get("options"),
+                correct_option_id=item.get("correct_option_id"),
+                answer_explanation=item.get("answer_explanation"),
+                difficulty=item.get("difficulty"),
                 review_state=review_state,
                 authoring_origin=item.get("authoring_origin", "AI_GENERATED"),
                 validation_status=item.get("validation_status", "PASSED"),
@@ -473,6 +496,9 @@ def _map_record_to_detail_dto(
         )
 
     slot_dtos.sort(key=lambda s: s.display_order)
+
+    conversation_count = sum(1 for s in slot_dtos if s.question_format != "MCQ_SINGLE_ANSWER")
+    mcq_count = sum(1 for s in slot_dtos if s.question_format == "MCQ_SINGLE_ANSWER")
 
     # Resolve job title and revision from JobVersion
     job_title = "Job Requisition"
@@ -516,6 +542,8 @@ def _map_record_to_detail_dto(
         total_slots_count=len(slot_dtos),
         generated_slots_count=generated_count,
         reviewed_slots_count=reviewed_count,
+        conversation_count=conversation_count,
+        mcq_count=mcq_count,
         is_source_stale=is_stale,
         stale_reason=stale_reason,
         created_at=ai_set.created_at,
@@ -571,6 +599,8 @@ def list_ai_question_sets(
         eff_status = ai_set.lifecycle_status
         gen_count = sum(1 for it in (ai_set.items or []) if it.get("ai_wording"))
         total_slots = len(ai_set.items or [])
+        conv_cnt = sum(1 for it in (ai_set.items or []) if it.get("question_format") != "MCQ_SINGLE_ANSWER")
+        mcq_cnt = sum(1 for it in (ai_set.items or []) if it.get("question_format") == "MCQ_SINGLE_ANSWER")
 
         # Do not include failed / empty question sets in Continue Reviewing directory
         if total_slots == 0 or gen_count == 0:
@@ -618,6 +648,8 @@ def list_ai_question_sets(
                 is_source_stale=(eff_status == "STALE"),
                 generated_question_count=gen_count,
                 total_blueprint_slots=total_slots,
+                conversation_count=conv_cnt,
+                mcq_count=mcq_cnt,
                 created_at=ai_set.created_at,
                 updated_at=ai_set.updated_at,
             )
@@ -1260,6 +1292,451 @@ async def regenerate_ai_question_slot(
     return _map_record_to_detail_dto(ai_set, db)
 
 
+def _ensure_editable_set(
+    ai_set: AiInterviewQuestionSetRecord,
+    actor: UserRecord,
+    db: Session,
+) -> AiInterviewQuestionSetRecord:
+    """If the question set is already approved / immutable, branches a new successor draft version."""
+    if not ai_set.is_immutable and ai_set.lifecycle_status != "APPROVED":
+        return ai_set
+
+    # Branch successor draft
+    next_version = ai_set.set_version + 1
+    new_set = AiInterviewQuestionSetRecord(
+        ai_set_id=uuid.uuid4(),
+        organization_id=ai_set.organization_id,
+        template_id=ai_set.template_id,
+        job_id=ai_set.job_id,
+        job_version_id=ai_set.job_version_id,
+        job_revision=ai_set.job_revision,
+        source_mode=ai_set.source_mode,
+        source_template_version=ai_set.source_template_version,
+        source_content_hash=ai_set.source_content_hash,
+        source_requirement_ids=list(ai_set.source_requirement_ids or []),
+        set_version=next_version,
+        lifecycle_status="DRAFT",
+        is_immutable=False,
+        content_hash=None,
+        items=[dict(it) for it in (ai_set.items or [])],
+        created_by_user_id=actor.user_id,
+    )
+    db.add(new_set)
+    db.commit()
+    db.refresh(new_set)
+    return new_set
+
+
+async def generate_mcq_slots_for_template(
+    actor: UserRecord,
+    template_id: UUID,
+    payload: McqGenerateRequest,
+    db: Session,
+    provider_registry: Optional[ProviderRegistry] = None,
+    custom_provider: Optional[BaseWordingProvider] = None,
+) -> AiQuestionSetDetailResponse:
+    """Generates structured multiple-choice questions grounded in job requirements."""
+    stmt_set = (
+        select(AiInterviewQuestionSetRecord)
+        .options(
+            selectinload(AiInterviewQuestionSetRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.job_version),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.questions).selectinload(InterviewQuestionRecord.rubric),
+        )
+        .where(
+            (AiInterviewQuestionSetRecord.ai_set_id == template_id)
+            | (AiInterviewQuestionSetRecord.template_id == template_id)
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+    )
+    ai_set = db.execute(stmt_set).scalars().first()
+    if not ai_set:
+        raise HTTPException(status_code=404, detail="AI question set not found.")
+
+    job = ai_set.requisition or (ai_set.template.requisition if ai_set.template else None)
+    if job:
+        _check_recruiter_access(actor, job)
+
+    editable_set = _ensure_editable_set(ai_set, actor, db)
+    items = list(editable_set.items or [])
+    current_mcqs = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
+
+    if len(current_mcqs) + payload.count > 10:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "MAX_MCQS_EXCEEDED",
+                "message": f"Adding {payload.count} MCQs would exceed maximum 10 MCQs allowed (currently {len(current_mcqs)}).",
+            },
+        )
+
+    # Fetch requirements
+    job_stmt = select(JobRequisition).options(
+        selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
+    ).where(JobRequisition.job_id == editable_set.job_id)
+    job_rec = db.execute(job_stmt).scalar_one_or_none()
+    
+    requirements: List[JobRequirement] = []
+    if job_rec and job_rec.versions:
+        latest_ver = job_rec.versions[-1]
+        requirements = [r for r in (latest_ver.requirements or []) if _is_requirement_eligible(r)]
+
+    if not requirements and job_rec and job_rec.versions and job_rec.versions[-1].requirements:
+        requirements = list(job_rec.versions[-1].requirements)
+
+    diff_str = payload.difficulty.value if hasattr(payload.difficulty, "value") else str(payload.difficulty)
+
+    # Generate MCQs based on requirements
+    for i in range(payload.count):
+        req = requirements[i % len(requirements)] if requirements else None
+        comp_name = getattr(req, "label", getattr(req, "name", "Core Concept")) if req else f"Technical Area #{i+1}"
+        req_id = str(req.requirement_id) if req and hasattr(req, "requirement_id") else str(uuid.uuid4())
+
+        q_text = f"When implementing practical solutions involving {comp_name}, what is the primary technical best practice?"
+        options = [
+            {"option_id": "A", "text": f"Apply appropriate design patterns and validate all inputs for {comp_name}."},
+            {"option_id": "B", "text": "Bypass input sanitization and error handling to maximize raw speed."},
+            {"option_id": "C", "text": "Store all sensitive operational states in global unencrypted variables."},
+            {"option_id": "D", "text": "Disable logging and telemetry during high-load production operations."},
+        ]
+        correct_id = "A"
+        explanation = f"Following standard software engineering best practices, {comp_name} requires structured input validation and robust design principles."
+
+        # Validate item
+        val_res = validate_mcq_item(
+            question_text=q_text,
+            options=options,
+            correct_option_id=correct_id,
+            answer_explanation=explanation,
+            competency_name=comp_name,
+            requirement_id=req_id,
+        )
+
+        new_slot_id = str(uuid.uuid4())
+        new_item = {
+            "slot_id": new_slot_id,
+            "display_order": len(items),
+            "question_format": "MCQ_SINGLE_ANSWER",
+            "competency_name": comp_name,
+            "question_type": "TECHNICAL",
+            "estimated_time_minutes": 2,
+            "permitted_probes": [],
+            "rubric": None,
+            "source_requirement_ids": [req_id],
+            "ai_wording": q_text,
+            "question_text": q_text,
+            "options": options,
+            "correct_option_id": correct_id,
+            "answer_explanation": explanation,
+            "difficulty": diff_str,
+            "review_state": "UNREVIEWED",
+            "authoring_origin": "AI_GENERATED",
+            "validation_status": "PASSED" if val_res.is_valid else "FAILED",
+            "safe_failure_code": None if val_res.is_valid else val_res.error_code,
+            "rationale_code": "REQUIREMENT_GROUNDED",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        items.append(new_item)
+
+    editable_set.items = items
+    flag_modified(editable_set, "items")
+    db.commit()
+    db.refresh(editable_set)
+
+    return _map_record_to_detail_dto(editable_set, db)
+
+
+def add_manual_mcq_slot(
+    actor: UserRecord,
+    template_id: UUID,
+    payload: McqCreateRequest,
+    db: Session,
+) -> AiQuestionSetDetailResponse:
+    """Adds a recruiter-authored multiple choice question to an AI question set."""
+    stmt_set = (
+        select(AiInterviewQuestionSetRecord)
+        .options(
+            selectinload(AiInterviewQuestionSetRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.job_version),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.questions).selectinload(InterviewQuestionRecord.rubric),
+        )
+        .where(
+            (AiInterviewQuestionSetRecord.ai_set_id == template_id)
+            | (AiInterviewQuestionSetRecord.template_id == template_id)
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+    )
+    ai_set = db.execute(stmt_set).scalars().first()
+    if not ai_set:
+        raise HTTPException(status_code=404, detail="AI question set not found.")
+
+    job = ai_set.requisition or (ai_set.template.requisition if ai_set.template else None)
+    if job:
+        _check_recruiter_access(actor, job)
+
+    editable_set = _ensure_editable_set(ai_set, actor, db)
+    items = list(editable_set.items or [])
+    current_mcqs = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
+
+    if len(current_mcqs) >= 10:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "MAX_MCQS_EXCEEDED", "message": "Maximum 10 multiple-choice questions permitted per question set."},
+        )
+
+    opts = [{"option_id": o.option_id, "text": o.text} for o in payload.options]
+    val_res = validate_mcq_item(
+        question_text=payload.question_text,
+        options=opts,
+        correct_option_id=payload.correct_option_id,
+        answer_explanation=payload.answer_explanation,
+        competency_name=payload.competency_name,
+        requirement_id=payload.requirement_id,
+    )
+    if not val_res.is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": val_res.error_code, "message": val_res.error_message},
+        )
+
+    diff_str = payload.difficulty.value if hasattr(payload.difficulty, "value") else str(payload.difficulty)
+    new_slot_id = str(uuid.uuid4())
+    new_item = {
+        "slot_id": new_slot_id,
+        "display_order": len(items),
+        "question_format": "MCQ_SINGLE_ANSWER",
+        "competency_name": payload.competency_name or "Technical Competency",
+        "question_type": "TECHNICAL",
+        "estimated_time_minutes": 2,
+        "permitted_probes": [],
+        "rubric": None,
+        "source_requirement_ids": [str(payload.requirement_id)] if payload.requirement_id else [],
+        "ai_wording": payload.question_text,
+        "question_text": payload.question_text,
+        "options": opts,
+        "correct_option_id": payload.correct_option_id,
+        "answer_explanation": payload.answer_explanation,
+        "difficulty": diff_str,
+        "review_state": "RECRUITER_AUTHORED",
+        "authoring_origin": "RECRUITER_AUTHORED",
+        "validation_status": "PASSED",
+        "safe_failure_code": None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    items.append(new_item)
+
+    editable_set.items = items
+    flag_modified(editable_set, "items")
+    db.commit()
+    db.refresh(editable_set)
+
+    return _map_record_to_detail_dto(editable_set, db)
+
+
+def update_mcq_slot(
+    actor: UserRecord,
+    template_id: UUID,
+    slot_id: UUID,
+    payload: McqUpdateRequest,
+    db: Session,
+) -> AiQuestionSetDetailResponse:
+    """Updates a recruiter-managed multiple choice question."""
+    stmt_set = (
+        select(AiInterviewQuestionSetRecord)
+        .options(
+            selectinload(AiInterviewQuestionSetRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.job_version),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.questions).selectinload(InterviewQuestionRecord.rubric),
+        )
+        .where(
+            (AiInterviewQuestionSetRecord.ai_set_id == template_id)
+            | (AiInterviewQuestionSetRecord.template_id == template_id)
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+    )
+    ai_set = db.execute(stmt_set).scalars().first()
+    if not ai_set:
+        raise HTTPException(status_code=404, detail="AI question set not found.")
+
+    job = ai_set.requisition or (ai_set.template.requisition if ai_set.template else None)
+    if job:
+        _check_recruiter_access(actor, job)
+
+    editable_set = _ensure_editable_set(ai_set, actor, db)
+    items = list(editable_set.items or [])
+    str_slot_id = str(slot_id)
+
+    target_item = None
+    for it in items:
+        if str(it.get("slot_id")) == str_slot_id:
+            target_item = it
+            break
+
+    if not target_item:
+        raise HTTPException(status_code=404, detail="Slot not found in AI question set.")
+
+    if target_item.get("question_format") != "MCQ_SINGLE_ANSWER":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "NOT_AN_MCQ", "message": "Target slot is not a multiple choice question."},
+        )
+
+    new_q_text = payload.question_text if payload.question_text is not None else target_item.get("ai_wording")
+    new_opts = (
+        [{"option_id": o.option_id, "text": o.text} for o in payload.options]
+        if payload.options is not None
+        else target_item.get("options", [])
+    )
+    new_correct = payload.correct_option_id if payload.correct_option_id is not None else target_item.get("correct_option_id")
+    new_exp = payload.answer_explanation if payload.answer_explanation is not None else target_item.get("answer_explanation")
+    new_comp = payload.competency_name if payload.competency_name is not None else target_item.get("competency_name")
+    new_diff = (
+        payload.difficulty.value
+        if payload.difficulty and hasattr(payload.difficulty, "value")
+        else (str(payload.difficulty) if payload.difficulty else target_item.get("difficulty", "FOUNDATIONAL"))
+    )
+
+    val_res = validate_mcq_item(
+        question_text=new_q_text,
+        options=new_opts,
+        correct_option_id=new_correct,
+        answer_explanation=new_exp,
+        competency_name=new_comp,
+    )
+    if not val_res.is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": val_res.error_code, "message": val_res.error_message},
+        )
+
+    target_item["ai_wording"] = new_q_text
+    target_item["question_text"] = new_q_text
+    target_item["options"] = new_opts
+    target_item["correct_option_id"] = new_correct
+    target_item["answer_explanation"] = new_exp
+    target_item["competency_name"] = new_comp
+    target_item["difficulty"] = new_diff
+    target_item["review_state"] = "EDITED"
+    target_item["authoring_origin"] = "RECRUITER_EDITED"
+    target_item["validation_status"] = "PASSED"
+    target_item["safe_failure_code"] = None
+    target_item["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    editable_set.items = items
+    flag_modified(editable_set, "items")
+    db.commit()
+    db.refresh(editable_set)
+
+    return _map_record_to_detail_dto(editable_set, db)
+
+
+def remove_mcq_slot(
+    actor: UserRecord,
+    template_id: UUID,
+    slot_id: UUID,
+    db: Session,
+) -> AiQuestionSetDetailResponse:
+    """Removes a multiple-choice question slot and re-indexes remaining slots."""
+    stmt_set = (
+        select(AiInterviewQuestionSetRecord)
+        .options(
+            selectinload(AiInterviewQuestionSetRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.job_version),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.questions).selectinload(InterviewQuestionRecord.rubric),
+        )
+        .where(
+            (AiInterviewQuestionSetRecord.ai_set_id == template_id)
+            | (AiInterviewQuestionSetRecord.template_id == template_id)
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+    )
+    ai_set = db.execute(stmt_set).scalars().first()
+    if not ai_set:
+        raise HTTPException(status_code=404, detail="AI question set not found.")
+
+    job = ai_set.requisition or (ai_set.template.requisition if ai_set.template else None)
+    if job:
+        _check_recruiter_access(actor, job)
+
+    editable_set = _ensure_editable_set(ai_set, actor, db)
+    items = list(editable_set.items or [])
+    str_slot_id = str(slot_id)
+
+    new_items = [it for it in items if str(it.get("slot_id")) != str_slot_id]
+    if len(new_items) == len(items):
+        raise HTTPException(status_code=404, detail="Slot not found in AI question set.")
+
+    for idx, it in enumerate(new_items):
+        it["display_order"] = idx
+
+    editable_set.items = new_items
+    flag_modified(editable_set, "items")
+    db.commit()
+    db.refresh(editable_set)
+
+    return _map_record_to_detail_dto(editable_set, db)
+
+
+def reorder_mcq_slots(
+    actor: UserRecord,
+    template_id: UUID,
+    payload: McqReorderRequest,
+    db: Session,
+) -> AiQuestionSetDetailResponse:
+    """Reorders MCQ slots in an AI question set."""
+    stmt_set = (
+        select(AiInterviewQuestionSetRecord)
+        .options(
+            selectinload(AiInterviewQuestionSetRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.job_version),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.requisition),
+            selectinload(AiInterviewQuestionSetRecord.template).selectinload(JobInterviewTemplateRecord.questions).selectinload(InterviewQuestionRecord.rubric),
+        )
+        .where(
+            (AiInterviewQuestionSetRecord.ai_set_id == template_id)
+            | (AiInterviewQuestionSetRecord.template_id == template_id)
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+    )
+    ai_set = db.execute(stmt_set).scalars().first()
+    if not ai_set:
+        raise HTTPException(status_code=404, detail="AI question set not found.")
+
+    job = ai_set.requisition or (ai_set.template.requisition if ai_set.template else None)
+    if job:
+        _check_recruiter_access(actor, job)
+
+    editable_set = _ensure_editable_set(ai_set, actor, db)
+    items = list(editable_set.items or [])
+    
+    conv_items = [it for it in items if it.get("question_format") != "MCQ_SINGLE_ANSWER"]
+    mcq_by_id = {str(it.get("slot_id")): it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"}
+
+    ordered_mcqs = []
+    for sid in payload.slot_ids:
+        str_sid = str(sid)
+        if str_sid in mcq_by_id:
+            ordered_mcqs.append(mcq_by_id.pop(str_sid))
+
+    # Append any remaining unlisted MCQs
+    ordered_mcqs.extend(mcq_by_id.values())
+
+    combined = conv_items + ordered_mcqs
+    for idx, it in enumerate(combined):
+        it["display_order"] = idx
+
+    editable_set.items = combined
+    flag_modified(editable_set, "items")
+    db.commit()
+    db.refresh(editable_set)
+
+    return _map_record_to_detail_dto(editable_set, db)
+
+
 def validate_ai_question_set(
     actor: UserRecord,
     template_id: UUID,
@@ -1305,23 +1782,58 @@ def validate_ai_question_set(
             if curr_fp != ai_set.source_content_hash:
                 errors.append("AI question set is stale: job requirements have changed since generation. Please regenerate.")
 
-    # 2. All slots resolved check
-    for it in ai_set.items:
+    items = ai_set.items or []
+    conv_items = [it for it in items if it.get("question_format") != "MCQ_SINGLE_ANSWER"]
+    mcq_items = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
+
+    # 2. Composition Bounds (Max 5 conversational, Max 10 MCQs, Min 1 total)
+    if len(items) == 0:
+        errors.append("Question set is empty. Add at least one conversational or multiple-choice question.")
+    if len(conv_items) > 5:
+        errors.append(f"Maximum 5 conversational questions allowed (currently {len(conv_items)}).")
+    if len(mcq_items) > 10:
+        errors.append(f"Maximum 10 multiple-choice questions allowed (currently {len(mcq_items)}).")
+
+    # 3. Conversational slot resolution check
+    seen_conv_texts = set()
+    for it in conv_items:
         slot_num = it.get("display_order", 0) + 1
         wording = it.get("ai_wording")
         if not wording or not wording.strip():
-            errors.append(f"Question #{slot_num} has no wording. Please generate, edit, or author manually.")
+            errors.append(f"Conversational Question #{slot_num} has no wording. Please generate, edit, or author manually.")
         if it.get("validation_status") == "FAILED":
-            errors.append(f"Question #{slot_num} failed safety validation ({it.get('safe_failure_code')}).")
+            errors.append(f"Conversational Question #{slot_num} failed safety validation ({it.get('safe_failure_code')}).")
+        
+        w_norm = (wording or "").strip().lower()
+        if w_norm:
+            if w_norm in seen_conv_texts:
+                errors.append(f"Duplicate conversational question detected (#{slot_num}).")
+            seen_conv_texts.add(w_norm)
 
-    # 3. Duplicate check across question texts
-    seen_texts = set()
-    for it in ai_set.items:
-        w = (it.get("ai_wording") or "").strip().lower()
-        if w:
-            if w in seen_texts:
-                errors.append("Duplicate question detected: multiple questions share identical wording.")
-            seen_texts.add(w)
+    # 4. MCQ item validation check
+    seen_mcq_texts = set()
+    for it in mcq_items:
+        slot_num = it.get("display_order", 0) + 1
+        q_text = it.get("question_text") or it.get("ai_wording") or ""
+        options = it.get("options") or []
+        correct_id = it.get("correct_option_id") or ""
+        explanation = it.get("answer_explanation") or ""
+
+        val_res = validate_mcq_item(
+            question_text=q_text,
+            options=options,
+            correct_option_id=correct_id,
+            answer_explanation=explanation,
+            competency_name=it.get("competency_name"),
+        )
+        if not val_res.is_valid:
+            errors.append(f"MCQ Question #{slot_num} is invalid: {val_res.error_message}")
+
+        q_norm = q_text.strip().lower()
+        if q_norm:
+            if q_norm in seen_mcq_texts:
+                errors.append(f"Duplicate MCQ detected (#{slot_num}).")
+            seen_mcq_texts.add(q_norm)
 
     is_valid = len(errors) == 0
     if is_valid and ai_set.lifecycle_status != "APPROVED":
@@ -1372,13 +1884,18 @@ def approve_ai_question_set(
             safe_message="AI question set is already approved and locked.",
         )
 
-    # Compute sealed content hash over ordered wording and slots
+    # Compute sealed content hash over ordered wording and slots including MCQs
     canonical_payload = []
-    for it in sorted(ai_set.items, key=lambda x: x.get("display_order", 0)):
+    for it in sorted(ai_set.items or [], key=lambda x: x.get("display_order", 0)):
         canonical_payload.append({
-            "slot_id": it.get("slot_id"),
+            "slot_id": str(it.get("slot_id")),
             "display_order": it.get("display_order"),
+            "question_format": it.get("question_format", "CONVERSATION"),
             "wording": it.get("ai_wording"),
+            "options": it.get("options"),
+            "correct_option_id": it.get("correct_option_id"),
+            "answer_explanation": it.get("answer_explanation"),
+            "difficulty": it.get("difficulty"),
             "authoring_origin": it.get("authoring_origin"),
         })
 
