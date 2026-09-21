@@ -1,6 +1,7 @@
 import React from "react";
 import { useCandidateAuth } from "../../context/CandidateAuthContext";
 import { Icon } from "../Icon";
+import { CandidatePracticeDirectory } from "./CandidatePracticeDirectory";
 
 interface CandidateShellProps {
   onLogout?: () => void;
@@ -42,21 +43,7 @@ export function CandidateShell({ onLogout }: CandidateShellProps) {
       </header>
 
       <main className="candidate-shell-main" role="main">
-        <div className="candidate-home-container">
-          <div className="candidate-welcome-card">
-            <div className="candidate-welcome-icon-box">
-              <Icon name="message-square" className="welcome-icon" aria-hidden="true" />
-            </div>
-            <h1 className="candidate-welcome-title">Practice interviews will appear here</h1>
-            <p className="candidate-welcome-description">
-              Your recruiting team will release personalized practice interview sessions to your portal. Once assigned, you will be able to prepare, test your skills, and receive structured feedback.
-            </p>
-            <div className="candidate-status-indicator">
-              <span className="status-dot" aria-hidden="true" />
-              <span className="status-text">Practice portal is active and connected</span>
-            </div>
-          </div>
-        </div>
+        <CandidatePracticeDirectory />
       </main>
     </div>
   );

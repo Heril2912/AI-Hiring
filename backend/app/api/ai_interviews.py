@@ -16,15 +16,26 @@ from app.schemas.ai_question_set import (
     AiQuestionSlotUpdateRequest,
     EligibleJobsResponse,
 )
+from app.schemas.mcq_contract import (
+    McqCreateRequest,
+    McqGenerateRequest,
+    McqReorderRequest,
+    McqUpdateRequest,
+)
 from app.services.ai_question_set_service import (
+    add_manual_mcq_slot,
     approve_ai_question_set,
     generate_ai_questions_by_job_id,
+    generate_mcq_slots_for_template,
     generate_or_open_ai_question_set,
     get_ai_question_set_by_template,
     get_eligible_jobs_for_ai_questions,
     list_ai_question_sets,
     regenerate_ai_question_slot,
+    remove_mcq_slot,
+    reorder_mcq_slots,
     update_ai_question_slot,
+    update_mcq_slot,
     validate_ai_question_set,
 )
 
@@ -307,5 +318,142 @@ async def approve_ai_question_set_endpoint(
     return approve_ai_question_set(
         actor=auth_ctx.user,
         template_id=template_id,
+        db=db,
+    )
+
+
+@router.post(
+    "/ai-interviews/{template_id}/mcqs/generate",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generate Structured MCQs for AI Question Set",
+    description="Generates requirement-grounded multiple-choice questions using local AI.",
+)
+@router.post(
+    "/ai-question-sets/{template_id}/mcqs/generate",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def generate_mcqs_endpoint(
+    template_id: uuid.UUID,
+    payload: McqGenerateRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return await generate_mcq_slots_for_template(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        payload=payload,
+        db=db,
+    )
+
+
+@router.post(
+    "/ai-interviews/{template_id}/mcqs",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add Manual MCQ to AI Question Set",
+    description="Adds a recruiter-authored multiple choice question to the question set.",
+)
+@router.post(
+    "/ai-question-sets/{template_id}/mcqs",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+)
+async def add_manual_mcq_endpoint(
+    template_id: uuid.UUID,
+    payload: McqCreateRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return add_manual_mcq_slot(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        payload=payload,
+        db=db,
+    )
+
+
+@router.patch(
+    "/ai-interviews/{template_id}/mcqs/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update MCQ Slot in AI Question Set",
+    description="Updates a multiple choice question's text, options, correct answer, or explanation.",
+)
+@router.patch(
+    "/ai-question-sets/{template_id}/mcqs/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def update_mcq_slot_endpoint(
+    template_id: uuid.UUID,
+    slot_id: uuid.UUID,
+    payload: McqUpdateRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return update_mcq_slot(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        slot_id=slot_id,
+        payload=payload,
+        db=db,
+    )
+
+
+@router.delete(
+    "/ai-interviews/{template_id}/mcqs/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete MCQ Slot from AI Question Set",
+    description="Removes a multiple choice question from the question set.",
+)
+@router.delete(
+    "/ai-question-sets/{template_id}/mcqs/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def remove_mcq_slot_endpoint(
+    template_id: uuid.UUID,
+    slot_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return remove_mcq_slot(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        slot_id=slot_id,
+        db=db,
+    )
+
+
+@router.post(
+    "/ai-interviews/{template_id}/mcqs/reorder",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Reorder MCQ Slots in AI Question Set",
+    description="Reorders multiple choice questions according to the specified slot IDs.",
+)
+@router.post(
+    "/ai-question-sets/{template_id}/mcqs/reorder",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def reorder_mcq_slots_endpoint(
+    template_id: uuid.UUID,
+    payload: McqReorderRequest,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return reorder_mcq_slots(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        payload=payload,
         db=db,
     )

@@ -32,6 +32,8 @@ from app.schemas.phase3_enums import (
     ProviderEgressClass,
     ProviderOperation,
     ProviderType,
+    QuestionDifficulty,
+    QuestionFormat,
     QuestionType,
     ValidationState,
 )
@@ -248,6 +250,7 @@ class InterviewQuestionRecord(Base):
         ),
         Index("ix_interview_questions_template_id", "template_id"),
         Index("ix_interview_questions_layer", "layer"),
+        Index("ix_interview_questions_question_format", "question_format"),
         Index("ix_interview_questions_question_type", "question_type"),
         Index("ix_interview_questions_validation_state", "validation_state"),
     )
@@ -271,6 +274,17 @@ class InterviewQuestionRecord(Base):
         nullable=False,
         default=1,
         server_default=text("1"),
+    )
+    question_format: Mapped[QuestionFormat] = mapped_column(
+        Enum(
+            QuestionFormat,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_interview_questions_question_format_enum",
+        ),
+        nullable=False,
+        default=QuestionFormat.CONVERSATION,
+        server_default=text("'CONVERSATION'"),
     )
     layer: Mapped[InterviewLayer] = mapped_column(
         Enum(
@@ -332,6 +346,31 @@ class InterviewQuestionRecord(Base):
     question_intent: Mapped[str] = mapped_column(
         Text,
         nullable=False,
+    )
+    options: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+        JSON_TYPE,
+        nullable=True,
+        default=None,
+    )
+    correct_option_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        default=None,
+    )
+    answer_explanation: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+    )
+    difficulty: Mapped[Optional[QuestionDifficulty]] = mapped_column(
+        Enum(
+            QuestionDifficulty,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_interview_questions_difficulty_enum",
+        ),
+        nullable=True,
+        default=None,
     )
     estimated_time_minutes: Mapped[int] = mapped_column(
         Integer,

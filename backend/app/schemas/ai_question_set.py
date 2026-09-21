@@ -56,20 +56,27 @@ class SafeRubricResponse(FrozenSchema):
 class AiQuestionSlotItemResponse(FrozenSchema):
     """Safe question slot inside an AI question set.
     
+    Supports both CONVERSATION and MCQ_SINGLE_ANSWER question formats.
     Zero-leakage: deterministic_source_text and deterministic alternative texts
     are strictly omitted from this model.
     """
     slot_id: UUID
     display_order: int
+    question_format: str = "CONVERSATION"  # "CONVERSATION" or "MCQ_SINGLE_ANSWER"
     competency_name: str
-    question_type: str
-    estimated_time_minutes: int
+    question_type: str = "TECHNICAL"
+    estimated_time_minutes: int = 5
     permitted_probes: List[str] = Field(default_factory=list)
     rubric: Optional[SafeRubricResponse] = None
     source_requirement_ids: List[UUID] = Field(default_factory=list)
     
     # AI question generation & review state
     ai_wording: Optional[str] = None
+    question_text: Optional[str] = None  # Alias for ai_wording
+    options: Optional[List[Dict[str, Any]]] = None
+    correct_option_id: Optional[str] = None
+    answer_explanation: Optional[str] = None
+    difficulty: Optional[str] = None
     review_state: str = "UNREVIEWED"  # UNREVIEWED, KEPT, EDITED, REVISED, RECRUITER_AUTHORED
     authoring_origin: str = "AI_GENERATED"  # AI_GENERATED, RECRUITER_EDITED, RECRUITER_AUTHORED
     validation_status: str = "PASSED"  # PASSED, PENDING, FAILED
@@ -100,6 +107,8 @@ class AiQuestionSetDetailResponse(FrozenSchema):
     total_slots_count: int
     generated_slots_count: int
     reviewed_slots_count: int
+    conversation_count: int = 0
+    mcq_count: int = 0
     
     # Staleness check
     is_source_stale: bool = False
@@ -123,6 +132,8 @@ class AiQuestionSetSummaryResponse(FrozenSchema):
     is_source_stale: bool = False
     generated_question_count: int
     total_blueprint_slots: int
+    conversation_count: int = 0
+    mcq_count: int = 0
     created_at: datetime
     updated_at: datetime
 

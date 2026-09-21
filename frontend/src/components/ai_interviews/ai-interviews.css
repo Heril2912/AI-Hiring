@@ -121,6 +121,31 @@
   box-shadow: 0 0 0 3px var(--accent-subtle, #eef1fc);
 }
 
+.aiq-form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary, #334155);
+  margin-bottom: 6px;
+}
+
+.aiq-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid var(--border-medium, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  background-color: var(--bg-surface, #ffffff);
+  color: var(--text-primary, #0f172a);
+  transition: border-color var(--transition-fast, 150ms), box-shadow var(--transition-fast, 150ms);
+}
+
+.aiq-input:focus {
+  outline: none;
+  border-color: var(--accent-primary, #4f5bd5);
+  box-shadow: 0 0 0 3px var(--accent-subtle, #eef1fc);
+}
+
 /* Semantic Fieldset & Radio Group */
 .aiq-job-fieldset {
   border: none;
