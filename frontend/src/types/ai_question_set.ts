@@ -132,14 +132,15 @@ export interface CandidatePracticeJobSummary {
   release_id: string;
   job_id: string;
   job_title: string;
-  job_revision: number;
-  ai_set_id: string;
-  set_version: number;
-  conversation_count: number;
+  job_revision?: number;
+  ai_set_id?: string;
+  set_version?: number;
+  conversation_count?: number;
+  conversation_question_count?: number;
   mcq_count: number;
-  total_question_count: number;
+  total_question_count?: number;
   released_at: string;
-  status: "RELEASED" | "REVOKED";
+  status?: "RELEASED" | "REVOKED" | string;
 }
 
 export interface CandidatePracticeDiscoveryResponse {

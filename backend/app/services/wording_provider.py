@@ -58,6 +58,11 @@ from app.schemas.assessment_contract import (
     BoundedAssessmentResponse,
     StructuredCriterionObservation,
 )
+from app.schemas.mcq_contract import (
+    StructuredAiMcqBatchResponse,
+    StructuredAiMcqOption,
+    StructuredAiMcqQuestion,
+)
 from app.services.wording_prompt_package import (
     assemble_wording_messages,
     assemble_assessment_messages,
@@ -102,6 +107,13 @@ class BaseWordingProvider(ABC):
         """Executes strict structured provisional assessment for one submitted question answer."""
         pass
 
+    async def request_mcq_generation(
+        self,
+        request: Any,
+    ) -> StructuredAiMcqBatchResponse:
+        """Executes strict structured multiple-choice question generation for job requirements."""
+        raise NotImplementedError("Provider does not support MCQ generation.")
+
 
 
 class DisabledWordingProvider(BaseWordingProvider):
@@ -141,6 +153,15 @@ class DisabledWordingProvider(BaseWordingProvider):
         self,
         request: BoundedAssessmentRequest,
     ) -> BoundedAssessmentResponse:
+        raise ProviderTransportError(
+            error_code=ProviderErrorCode.PROVIDER_DISABLED,
+            safe_message="Model provider is disabled by system policy.",
+        )
+
+    async def request_mcq_generation(
+        self,
+        request: Any,
+    ) -> StructuredAiMcqBatchResponse:
         raise ProviderTransportError(
             error_code=ProviderErrorCode.PROVIDER_DISABLED,
             safe_message="Model provider is disabled by system policy.",
@@ -375,6 +396,68 @@ class FakeWordingProvider(BaseWordingProvider):
                 uncertainty_codes=[],
                 safe_validation_metadata={"mock": True},
             )
+        elif self.simulated_mode == "TIMEOUT":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_TIMEOUT,
+                safe_message="Simulated request timeout.",
+            )
+        elif self.simulated_mode == "UNAVAILABLE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                safe_message="Simulated provider endpoint unavailable.",
+            )
+        elif self.simulated_mode == "AUTH_FAILED":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.AUTHENTICATION_FAILED,
+                safe_message="Simulated authentication failure.",
+            )
+        elif self.simulated_mode == "MODEL_NOT_AVAILABLE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.MODEL_NOT_AVAILABLE,
+                safe_message="Simulated configured model not found on endpoint.",
+            )
+        elif self.simulated_mode == "OVERSIZED_RESPONSE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_RESPONSE_TOO_LARGE,
+                safe_message="Simulated response exceeded maximum allowed bytes.",
+            )
+        elif self.simulated_mode == "INVALID_RESPONSE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="Simulated response was malformed or failed schema.",
+            )
+        else:
+            raise ProviderTransportError(
+                error_code=self.custom_error_code or ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                safe_message=self.custom_error_message or "Simulated provider error.",
+            )
+
+    async def request_mcq_generation(
+        self,
+        request: Any,
+    ) -> StructuredAiMcqBatchResponse:
+        if self.simulated_mode == "SUCCESS":
+            count = getattr(request, "count", 5) if hasattr(request, "count") else (request.get("count", 5) if isinstance(request, dict) else 5)
+            difficulty = getattr(request, "difficulty", "FOUNDATIONAL")
+            diff_str = difficulty.value if hasattr(difficulty, "value") else str(difficulty)
+            questions: List[StructuredAiMcqQuestion] = []
+            for i in range(count):
+                questions.append(
+                    StructuredAiMcqQuestion(
+                        question_text=f"When designing scalable production systems, what is standard best practice #{i+1}?",
+                        options=[
+                            StructuredAiMcqOption(option_id="A", text="Implement structured input validation and robust error recovery."),
+                            StructuredAiMcqOption(option_id="B", text="Bypass all validation steps to reduce processing latency."),
+                            StructuredAiMcqOption(option_id="C", text="Store all secrets unencrypted in public log streams."),
+                            StructuredAiMcqOption(option_id="D", text="Disable database transactions during concurrent writes."),
+                        ],
+                        correct_option_id="A",
+                        answer_explanation="Standard engineering principles require rigorous input validation and comprehensive error handling.",
+                        difficulty=diff_str,
+                        competency_id=f"COMP-{i+1}",
+                    )
+                )
+            return StructuredAiMcqBatchResponse(questions=questions)
         elif self.simulated_mode == "TIMEOUT":
             raise ProviderTransportError(
                 error_code=ProviderErrorCode.PROVIDER_TIMEOUT,
@@ -768,6 +851,144 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
             raise ProviderTransportError(
                 error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
                 safe_message=f"Provider response schema validation failed: {str(e)}",
+            )
+
+    async def request_mcq_generation(
+        self,
+        request: Any,
+    ) -> StructuredAiMcqBatchResponse:
+        """Executes structured MCQ generation via local OpenAI-compatible endpoint."""
+        if not self.profile.enabled:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_DISABLED,
+                safe_message="Target provider profile is currently disabled.",
+            )
+
+        normalized_base = self._validate_local_endpoint()
+        chat_url = f"{normalized_base}/chat/completions"
+
+        req_texts = []
+        if hasattr(request, "requirements") and request.requirements:
+            for r in request.requirements:
+                lbl = getattr(r, "label", getattr(r, "name", "Requirement"))
+                req_texts.append(f"- Requirement ({getattr(r, 'requirement_id', '')}): {lbl}")
+        req_context = "\n".join(req_texts) if req_texts else "- General Technical & Software Engineering Fundamentals"
+
+        count = getattr(request, "count", 5) if hasattr(request, "count") else (request.get("count", 5) if isinstance(request, dict) else 5)
+        difficulty = getattr(request, "difficulty", "FOUNDATIONAL")
+        diff_str = difficulty.value if hasattr(difficulty, "value") else str(difficulty)
+
+        system_prompt = (
+            "You are an expert technical interviewer creating structured Multiple Choice Questions (MCQs) for candidate practice. "
+            "You must output ONLY valid JSON matching the exact schema provided. Do not use tools or Markdown outside JSON fences.\n"
+            "Schema:\n"
+            "{\n"
+            '  "questions": [\n'
+            "    {\n"
+            '      "question_text": "...",\n'
+            '      "options": [\n'
+            '        {"option_id": "A", "text": "..."},\n'
+            '        {"option_id": "B", "text": "..."},\n'
+            '        {"option_id": "C", "text": "..."},\n'
+            '        {"option_id": "D", "text": "..."}\n'
+            "      ],\n"
+            '      "correct_option_id": "A",\n'
+            '      "answer_explanation": "...",\n'
+            '      "requirement_id": "optional-id",\n'
+            '      "competency_id": "optional-id",\n'
+            f'      "difficulty": "{diff_str}"\n'
+            "    }\n"
+            "  ]\n"
+            "}"
+        )
+
+        user_prompt = (
+            f"Generate exactly {count} distinct multiple-choice questions ({diff_str} level) grounded strictly in these job requirements:\n"
+            f"{req_context}\n\n"
+            "Rules:\n"
+            "1. Each question must have 2 to 5 options with unique option_ids ('A', 'B', 'C', 'D').\n"
+            "2. Exactly one option must be the correct_option_id.\n"
+            "3. Provide a clear, factual answer_explanation.\n"
+            "4. Return strictly valid JSON."
+        )
+
+        payload = {
+            "model": self.profile.model_identifier or "default",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": min(self.profile.max_output_tokens, 2048),
+            "stream": False,
+        }
+
+        raw_response = await self._send_bounded_request(chat_url, payload)
+
+        choices = raw_response.get("choices")
+        if not choices or not isinstance(choices, list) or len(choices) == 0:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="OpenAI-compatible response missing 'choices' array.",
+            )
+
+        choice = choices[0]
+        finish_reason = choice.get("finish_reason")
+        message = choice.get("message", {})
+        raw_content = message.get("content")
+        raw_reasoning = message.get("reasoning_content")
+
+        content_str = (raw_content or "").strip()
+
+        if not content_str:
+            if raw_reasoning or finish_reason == "length":
+                raise ProviderTransportError(
+                    error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                    safe_message="The selected model used its response budget for reasoning and returned no final MCQ batch.",
+                )
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                safe_message="OpenAI-compatible response contained null, empty, or whitespace message content.",
+            )
+
+        if finish_reason == "length":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_TRUNCATED,
+                safe_message="Model MCQ generation response was truncated before completing structured output.",
+            )
+
+        clean_json_str = content_str
+        if clean_json_str.startswith("```json"):
+            clean_json_str = clean_json_str[7:]
+        elif clean_json_str.startswith("```"):
+            clean_json_str = clean_json_str[3:]
+        if clean_json_str.endswith("```"):
+            clean_json_str = clean_json_str[:-3]
+        clean_json_str = clean_json_str.strip()
+
+        try:
+            parsed_data = json.loads(clean_json_str)
+        except Exception as e:
+            logger.warning("Failed to parse JSON from provider MCQ response: %s", e)
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                safe_message="Provider MCQ response content could not be parsed into valid JSON structure.",
+            )
+
+        if not isinstance(parsed_data, dict):
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                safe_message="Provider MCQ response root is not a JSON object.",
+            )
+
+        try:
+            structured_response = StructuredAiMcqBatchResponse.model_validate(parsed_data)
+            return structured_response
+        except Exception as e:
+            logger.warning("Provider MCQ response failed schema validation: %s", e)
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                safe_message=f"Provider MCQ response schema validation failed: {str(e)}",
             )
 
 

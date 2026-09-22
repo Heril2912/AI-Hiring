@@ -743,6 +743,7 @@ async def get_candidate_profile(
         from app.schemas.profile_assembly import ProfileAssemblyWarning
 
         return CandidateProfileResponse(
+            candidate_id=str(profile_rec.identity_id),
             artifact_id=str(profile_rec.artifact_id),
             profile_id=str(profile_rec.profile_id),
             profile_version=profile_rec.profile_version,

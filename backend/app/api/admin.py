@@ -37,6 +37,7 @@ from app.schemas.auth import (
 from app.schemas.provider_admin import (
     ActivateProviderProfileRequest,
     AdminProviderProfileResponse,
+    ArchiveProviderProfileRequest,
     CreateProviderProfileRequest,
     DisableProviderProfileRequest,
     ProviderCompatibilityReportResponse,

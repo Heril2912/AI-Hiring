@@ -25,8 +25,8 @@ export interface CandidateAuthContextValue {
   candidateUser: CandidateAuthResponse | null;
   csrfToken: string | null;
   error: string | null;
-  login: (email: string, password: string) => Promise<void>;
-  activate: (token: string, password: string, confirmation: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<CandidateAuthResponse>;
+  activate: (token: string, password: string, confirmation: string) => Promise<CandidateAuthResponse>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
   clearError: () => void;
@@ -64,6 +64,12 @@ export function CandidateAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshSession = useCallback(async () => {
+    // Skip checking /auth/me if currently visiting the public activation page
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/candidate/activate")) {
+      setStatus("UNAUTHENTICATED");
+      return;
+    }
+
     try {
       const data = await getCandidateMe();
       if (data && data.userId && data.csrfToken) {
@@ -90,14 +96,16 @@ export function CandidateAuthProvider({ children }: { children: ReactNode }) {
     if (data && data.userId && data.csrfToken) {
       applyAuthState(data, data.csrfToken);
     }
+    return data;
   };
 
-  const activate = async (token: string, password: string, confirmation: string) => {
+  const activate = async (token: string, password: string, confirmation: string): Promise<CandidateAuthResponse> => {
     setError(null);
     const data = await activateCandidateAccount(token, password, confirmation);
     if (data && data.userId && data.csrfToken) {
       applyAuthState(data, data.csrfToken);
     }
+    return data;
   };
 
   const logout = async () => {

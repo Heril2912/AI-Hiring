@@ -638,3 +638,57 @@ def test_candidate_csrf_failure_blocks_logout(client, test_db):
     )
     assert resp_bad_csrf.status_code == status.HTTP_403_FORBIDDEN
     assert resp_bad_csrf.json()["detail"]["code"] == "CSRF_DENIED"
+
+
+def test_revoke_candidate_access_endpoint(client, test_db):
+    recruiter, rec_cookie, rec_csrf = _login_recruiter(client, test_db)
+    cand = _seed_candidate_identity(test_db, full_name="Revoke Me", email="revokeme@example.com")
+    client.cookies.set("ai_hiring_session", rec_cookie)
+
+    # 1. Create invitation
+    resp_create = client.post(
+        "/api/v1/recruiter/candidate-access/candidates/" + str(cand.identity_id) + "/invitations",
+        json={"candidate_id": str(cand.identity_id)},
+        headers={"X-CSRF-Token": rec_csrf, "Origin": "http://localhost:5173"},
+    )
+    assert resp_create.status_code == status.HTTP_201_CREATED
+    raw_token = resp_create.json()["rawToken"]
+
+    # 2. Activate candidate account
+    client.cookies.clear()
+    resp_act = client.post(
+        "/api/v1/candidate/auth/activate",
+        json={
+            "token": raw_token,
+            "password": "Password123!",
+            "password_confirmation": "Password123!",
+        },
+    )
+    assert resp_act.status_code == status.HTTP_200_OK
+
+    # 3. Check access status as recruiter -> ACTIVE
+    client.cookies.set("ai_hiring_session", rec_cookie)
+    resp_status = client.get(
+        f"/api/v1/recruiter/candidate-access/candidates/{cand.identity_id}"
+    )
+    assert resp_status.status_code == status.HTTP_200_OK
+    assert resp_status.json()["accountStatus"] == "ACTIVE"
+    assert resp_status.json()["hasActiveAccount"] is True
+
+    # 4. Revoke candidate access
+    resp_revoke = client.post(
+        f"/api/v1/recruiter/candidate-access/candidates/{cand.identity_id}/revoke",
+        headers={"X-CSRF-Token": rec_csrf, "Origin": "http://localhost:5173"},
+    )
+    assert resp_revoke.status_code == status.HTTP_200_OK
+    assert resp_revoke.json()["accountStatus"] == "SUSPENDED"
+    assert resp_revoke.json()["hasActiveAccount"] is False
+
+    # 5. Candidate login is now forbidden/denied
+    client.cookies.clear()
+    resp_login = client.post(
+        "/api/v1/candidate/auth/login",
+        json={"email": "revokeme@example.com", "password": "Password123!"},
+    )
+    assert resp_login.status_code == status.HTTP_401_UNAUTHORIZED
+

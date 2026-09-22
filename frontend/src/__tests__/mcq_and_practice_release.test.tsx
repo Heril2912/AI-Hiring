@@ -16,9 +16,16 @@ vi.mock("../api/client", () => ({
 vi.mock("../api/candidatePractice", () => ({
   listEligibleJobsForPracticeRelease: vi.fn(),
   listCandidatePracticeReleases: vi.fn(),
+  listCandidatePracticeRequestsForRecruiter: vi.fn(),
   releasePracticeToCandidate: vi.fn(),
+  releasePracticeFromRequest: vi.fn(),
+  declineCandidatePracticeRequest: vi.fn(),
   revokeCandidatePracticeRelease: vi.fn(),
   getCandidatePracticeDiscovery: vi.fn(),
+  getCandidatePracticeCatalog: vi.fn(),
+  createCandidatePracticeRequest: vi.fn(),
+  withdrawCandidatePracticeRequest: vi.fn(),
+  preparePracticeSetForRevision: vi.fn(),
 }));
 
 const mockQuestionSetDetail: AiQuestionSetDetail = {
@@ -180,21 +187,24 @@ describe("Phase 3F.2 MCQ Management & Candidate Practice Release", () => {
   describe("CandidatePracticeReleaseModal - Recruiter Release", () => {
     it("lists eligible jobs and releases practice interview to candidate", async () => {
       vi.mocked(candidatePracticeApi.listEligibleJobsForPracticeRelease).mockResolvedValue({
-        items: [
+        eligible: [
           {
             job_id: "job-101",
+            job_revision_id: "ver-101",
             job_title: "Staff Backend Engineer",
-            job_revision: 2,
-            ai_set_id: "set-101",
-            set_version: 1,
-            approved_at: new Date().toISOString(),
-            conversation_count: 5,
-            mcq_count: 5,
+            job_version: "v2",
+            question_set_id: "set-101",
+            conversational_question_count: 5,
+            mcq_question_count: 5,
             total_question_count: 10,
-            already_released: false,
+            status: "READY_TO_RELEASE",
+            has_candidate_request: false,
           },
         ],
+        ineligible: [],
+        items: [],
       });
+      vi.mocked(candidatePracticeApi.listCandidatePracticeRequestsForRecruiter).mockResolvedValue([]);
       vi.mocked(candidatePracticeApi.listCandidatePracticeReleases).mockResolvedValue([]);
       vi.mocked(candidatePracticeApi.releasePracticeToCandidate).mockResolvedValue({
         release_id: "rel-1",
@@ -222,19 +232,20 @@ describe("Phase 3F.2 MCQ Management & Candidate Practice Release", () => {
 
       await waitFor(() => {
         expect(candidatePracticeApi.listEligibleJobsForPracticeRelease).toHaveBeenCalledWith("cand-1");
-        expect(screen.getByText(/Staff Backend Engineer \(5 Conv, 5 MCQ\)/i)).toBeInTheDocument();
+        expect(screen.getByText("Staff Backend Engineer")).toBeInTheDocument();
       });
 
-      const releaseBtn = screen.getByRole("button", { name: /Release to Candidate/i });
+      const releaseBtn = screen.getByRole("button", { name: /Release Practice/i });
       fireEvent.click(releaseBtn);
 
       await waitFor(() => {
-        expect(candidatePracticeApi.releasePracticeToCandidate).toHaveBeenCalledWith("cand-1", "job-101");
+        expect(candidatePracticeApi.releasePracticeToCandidate).toHaveBeenCalledWith("cand-1", "job-101", "ver-101");
       });
     });
 
     it("allows revoking an active practice release", async () => {
-      vi.mocked(candidatePracticeApi.listEligibleJobsForPracticeRelease).mockResolvedValue({ items: [] });
+      vi.mocked(candidatePracticeApi.listEligibleJobsForPracticeRelease).mockResolvedValue({ eligible: [], ineligible: [], items: [] });
+      vi.mocked(candidatePracticeApi.listCandidatePracticeRequestsForRecruiter).mockResolvedValue([]);
       vi.mocked(candidatePracticeApi.listCandidatePracticeReleases).mockResolvedValue([
         {
           release_id: "rel-1",
@@ -295,6 +306,7 @@ describe("Phase 3F.2 MCQ Management & Candidate Practice Release", () => {
           },
         ],
       });
+      vi.mocked(candidatePracticeApi.getCandidatePracticeCatalog).mockResolvedValue({ items: [] });
 
       render(<CandidatePracticeDirectory />);
 
@@ -309,11 +321,12 @@ describe("Phase 3F.2 MCQ Management & Candidate Practice Release", () => {
 
     it("displays welcome message when no practice jobs are released", async () => {
       vi.mocked(candidatePracticeApi.getCandidatePracticeDiscovery).mockResolvedValue({ items: [] });
+      vi.mocked(candidatePracticeApi.getCandidatePracticeCatalog).mockResolvedValue({ items: [] });
 
       render(<CandidatePracticeDirectory />);
 
       await waitFor(() => {
-        expect(screen.getByText("Practice interviews will appear here")).toBeInTheDocument();
+        expect(screen.getByText("No assigned practice sessions yet")).toBeInTheDocument();
       });
     });
   });

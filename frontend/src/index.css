@@ -736,8 +736,9 @@ input, select, textarea {
   gap: var(--space-2);
 }
 
-/* Dialog Component */
-.dialog-overlay {
+/* Dialog and Modal Component */
+.dialog-overlay,
+.modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -751,7 +752,8 @@ input, select, textarea {
   padding: 24px;
 }
 
-.dialog-container {
+.dialog-container,
+.modal-container {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
@@ -8662,15 +8664,16 @@ input, select, textarea {
 
 .candidate-shell-main {
   flex: 1;
-  padding: 40px 24px;
-  max-width: 900px;
+  padding: 36px 24px;
+  max-width: 960px;
   width: 100%;
   margin: 0 auto;
 }
 
 .candidate-home-container {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  width: 100%;
 }
 
 .candidate-welcome-card {
@@ -8680,7 +8683,9 @@ input, select, textarea {
   padding: 48px 36px;
   text-align: center;
   box-shadow: var(--shadow-sm, 0 1px 3px 0 rgba(0, 0, 0, 0.05));
-  max-width: 580px;
+  max-width: 600px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .candidate-welcome-icon-box {

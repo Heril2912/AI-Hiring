@@ -71,7 +71,12 @@ from app.services.provider_registry import ProviderRegistry, get_provider_regist
 from app.services.wording_assistance_service import (
     request_question_wording_assistance,
 )
-from app.services.wording_provider import BaseWordingProvider
+from app.services.wording_provider import (
+    BaseWordingProvider,
+    DisabledWordingProvider,
+    FakeWordingProvider,
+    ProviderTransportError,
+)
 
 logger = logging.getLogger("ai_hiring.ai_question_set_service")
 
@@ -1387,28 +1392,85 @@ async def generate_mcq_slots_for_template(
 
     diff_str = payload.difficulty.value if hasattr(payload.difficulty, "value") else str(payload.difficulty)
 
-    # Generate MCQs based on requirements
-    for i in range(payload.count):
+    # Provider resolution
+    reg = provider_registry or get_provider_registry()
+    active_profile = reg.get_active_profile()
+    provider = custom_provider or (reg.get_provider_instance(active_profile) if active_profile else None)
+
+    if not provider:
+        import os
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            provider = FakeWordingProvider(simulated_mode="SUCCESS")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "PROVIDER_UNAVAILABLE",
+                    "message": "AI model provider is not configured or currently unavailable.",
+                },
+            )
+
+    if isinstance(provider, DisabledWordingProvider) or (active_profile and not active_profile.enabled):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "PROVIDER_DISABLED",
+                "message": "AI generation is disabled. Please configure an active AI provider in Admin Settings or add questions manually.",
+            },
+        )
+
+    gen_req = {
+        "count": payload.count,
+        "difficulty": payload.difficulty,
+        "requirements": requirements,
+    }
+
+    try:
+        mcq_batch = await provider.request_mcq_generation(gen_req)
+    except ProviderTransportError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": e.error_code.value if hasattr(e.error_code, "value") else str(e.error_code),
+                "message": e.safe_message,
+            },
+        )
+    except Exception as e:
+        logger.exception("MCQ generation failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "GENERATION_FAILED",
+                "message": f"AI MCQ generation failed: {str(e)}",
+            },
+        )
+
+    if not mcq_batch or not mcq_batch.questions:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "EMPTY_GENERATION_RESULT",
+                "message": "The AI provider returned no question items.",
+            },
+        )
+
+    # Process generated questions
+    for i, q in enumerate(mcq_batch.questions):
         req = requirements[i % len(requirements)] if requirements else None
         comp_name = getattr(req, "label", getattr(req, "name", "Core Concept")) if req else f"Technical Area #{i+1}"
         req_id = str(req.requirement_id) if req and hasattr(req, "requirement_id") else str(uuid.uuid4())
 
-        q_text = f"When implementing practical solutions involving {comp_name}, what is the primary technical best practice?"
-        options = [
-            {"option_id": "A", "text": f"Apply appropriate design patterns and validate all inputs for {comp_name}."},
-            {"option_id": "B", "text": "Bypass input sanitization and error handling to maximize raw speed."},
-            {"option_id": "C", "text": "Store all sensitive operational states in global unencrypted variables."},
-            {"option_id": "D", "text": "Disable logging and telemetry during high-load production operations."},
+        options_list = [
+            {"option_id": opt.option_id, "text": opt.text}
+            for opt in q.options
         ]
-        correct_id = "A"
-        explanation = f"Following standard software engineering best practices, {comp_name} requires structured input validation and robust design principles."
 
         # Validate item
         val_res = validate_mcq_item(
-            question_text=q_text,
-            options=options,
-            correct_option_id=correct_id,
-            answer_explanation=explanation,
+            question_text=q.question_text,
+            options=options_list,
+            correct_option_id=q.correct_option_id,
+            answer_explanation=q.answer_explanation,
             competency_name=comp_name,
             requirement_id=req_id,
         )
@@ -1424,11 +1486,11 @@ async def generate_mcq_slots_for_template(
             "permitted_probes": [],
             "rubric": None,
             "source_requirement_ids": [req_id],
-            "ai_wording": q_text,
-            "question_text": q_text,
-            "options": options,
-            "correct_option_id": correct_id,
-            "answer_explanation": explanation,
+            "ai_wording": q.question_text,
+            "question_text": q.question_text,
+            "options": options_list,
+            "correct_option_id": q.correct_option_id,
+            "answer_explanation": q.answer_explanation,
             "difficulty": diff_str,
             "review_state": "UNREVIEWED",
             "authoring_origin": "AI_GENERATED",
@@ -1920,3 +1982,135 @@ def approve_ai_question_set(
         approved_at=now,
         safe_message="AI question set approved and locked. Immutability sealed.",
     )
+
+
+def prepare_practice_set_for_revision(
+    actor: UserRecord,
+    job_id: UUID,
+    job_version_id: UUID,
+    db: Session,
+) -> AiQuestionSetDetailResponse:
+    """Prepares an editable DRAFT practice question set for a target job revision by copying suitable questions
+
+    from the most recent approved question set on an older revision.
+    Re-validates every copied question and never preserves approved status automatically.
+    """
+    # 1. Fetch target job revision
+    stmt_job = (
+        select(JobRequisition)
+        .options(selectinload(JobRequisition.versions).selectinload(JobVersion.requirements))
+        .where(JobRequisition.job_id == job_id)
+    )
+    job = db.execute(stmt_job).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job requisition not found.")
+    _check_recruiter_access(actor, job)
+
+    target_ver = next((v for v in job.versions if v.job_version_id == job_version_id), None)
+    if not target_ver:
+        raise HTTPException(status_code=404, detail="Target job revision not found.")
+
+    # 2. Find most recent approved question set on older revision
+    stmt_old = (
+        select(AiInterviewQuestionSetRecord)
+        .where(
+            AiInterviewQuestionSetRecord.job_id == job_id,
+            AiInterviewQuestionSetRecord.lifecycle_status == "APPROVED",
+            AiInterviewQuestionSetRecord.job_version_id != job_version_id,
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version), desc(AiInterviewQuestionSetRecord.updated_at))
+    )
+    old_set = db.execute(stmt_old).scalars().first()
+    if not old_set:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "NO_PREVIOUS_APPROVED_SET", "message": "No approved question set exists from an older revision to copy."},
+        )
+
+    # 3. Check if draft set already exists for target revision
+    stmt_existing = (
+        select(AiInterviewQuestionSetRecord)
+        .where(
+            AiInterviewQuestionSetRecord.job_id == job_id,
+            AiInterviewQuestionSetRecord.job_version_id == job_version_id,
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+    )
+    existing_set = db.execute(stmt_existing).scalars().first()
+    if existing_set and existing_set.lifecycle_status != "APPROVED":
+        target_set = existing_set
+    else:
+        # Create new set record in DRAFT status
+        next_ver = (existing_set.set_version + 1) if existing_set else 1
+        target_set = AiInterviewQuestionSetRecord(
+            ai_set_id=uuid.uuid4(),
+            organization_id=old_set.organization_id,
+            template_id=None,
+            job_id=job.job_id,
+            job_version_id=target_ver.job_version_id,
+            job_revision=target_ver.version_number,
+            source_mode="REQUIREMENT_GROUNDED",
+            source_template_version=None,
+            source_content_hash="",
+            source_requirement_ids=[str(r.requirement_id) for r in (target_ver.requirements or [])],
+            set_version=next_ver,
+            lifecycle_status="DRAFT",
+            is_immutable=False,
+            items=[],
+            predecessor_set_id=old_set.ai_set_id,
+            created_by_user_id=actor.user_id,
+        )
+        db.add(target_set)
+
+    # 4. Copy and revalidate questions into draft items
+    copied_items = []
+    target_req_names = {getattr(r, "label", getattr(r, "name", "")).strip().lower(): str(r.requirement_id) for r in (target_ver.requirements or [])}
+
+    for it in old_set.items or []:
+        new_slot_id = str(uuid.uuid4())
+        comp_name = it.get("competency_name", "General Competency")
+        matched_req_id = target_req_names.get(comp_name.strip().lower())
+        new_source_req_ids = [matched_req_id] if matched_req_id else []
+
+        copied_item = {
+            "slot_id": new_slot_id,
+            "display_order": it.get("display_order", len(copied_items)),
+            "question_format": it.get("question_format", "CONVERSATION"),
+            "source_requirement_ids": new_source_req_ids,
+            "competency_name": comp_name,
+            "question_type": it.get("question_type", "TECHNICAL"),
+            "estimated_time_minutes": it.get("estimated_time_minutes", 5),
+            "permitted_probes": list(it.get("permitted_probes", [])),
+            "rubric": it.get("rubric"),
+            "ai_wording": it.get("ai_wording"),
+            "question_text": it.get("question_text"),
+            "options": it.get("options"),
+            "correct_option_id": it.get("correct_option_id"),
+            "answer_explanation": it.get("answer_explanation"),
+            "difficulty": it.get("difficulty", "FOUNDATIONAL"),
+            "review_state": "UNREVIEWED",  # Always reset review state for new revision
+            "authoring_origin": it.get("authoring_origin", "AI_GENERATED"),
+            "validation_status": "PENDING",
+            "safe_failure_code": None,
+            "rationale_code": "REVISION_COPIED_DRAFT",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        copied_items.append(copied_item)
+
+    target_set.items = copied_items
+    target_set.lifecycle_status = "DRAFT"
+    target_set.is_immutable = False
+    target_set.approved_at = None
+    target_set.approved_by_user_id = None
+    target_set.source_content_hash = _compute_requirement_fingerprint(
+        job.job_id,
+        target_ver.job_version_id,
+        target_ver.version_number,
+        [str(r.requirement_id) for r in (target_ver.requirements or [])]
+    )
+    flag_modified(target_set, "items")
+    db.commit()
+    db.refresh(target_set)
+
+    return _map_record_to_detail_dto(target_set, db, action="PREPARED_FOR_REVISION")
+

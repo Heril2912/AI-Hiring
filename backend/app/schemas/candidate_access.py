@@ -7,11 +7,27 @@ from app.schemas.candidate import StrictSchema
 
 
 class CreateCandidateInvitationRequest(StrictSchema):
-    candidate_id: uuid.UUID
+    candidate_id: Optional[uuid.UUID] = None
     organization_id: Optional[uuid.UUID] = None
     application_id: Optional[uuid.UUID] = None
     purpose: str = Field(default="CANDIDATE_ACCESS", max_length=50)
     valid_hours: int = Field(default=24, ge=1, le=168)
+
+
+class CandidateAccessInvitationInfo(StrictSchema):
+    invitation_id: uuid.UUID
+    status: str  # "ACTIVE", "EXPIRED", "CONSUMED", "REVOKED"
+    expires_at: datetime
+    created_at: datetime
+
+
+class CandidateAccessStatusResponse(StrictSchema):
+    candidate_id: uuid.UUID
+    account_status: str  # "NOT_INVITED", "INVITED", "ACTIVE", "SUSPENDED"
+    has_active_account: bool
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    invitation: Optional[CandidateAccessInvitationInfo] = None
 
 
 class CreateCandidateInvitationResponse(StrictSchema):

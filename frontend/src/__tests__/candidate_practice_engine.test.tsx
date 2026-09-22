@@ -8,6 +8,9 @@ import * as practiceSessionApi from "../api/candidatePracticeSession";
 
 vi.mock("../api/candidatePractice", () => ({
   getCandidatePracticeDiscovery: vi.fn(),
+  getCandidatePracticeCatalog: vi.fn().mockResolvedValue({ items: [] }),
+  createCandidatePracticeRequest: vi.fn(),
+  withdrawCandidatePracticeRequest: vi.fn(),
 }));
 
 vi.mock("../api/candidatePracticeSession", () => ({

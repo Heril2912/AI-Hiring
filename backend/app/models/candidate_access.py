@@ -765,3 +765,225 @@ class CandidatePracticeMcqAnswerRecord(Base):
         "CandidatePracticeSessionRecord",
         back_populates="mcq_answers",
     )
+
+
+class CandidatePracticeRequestStatus(str, enum.Enum):
+    REQUESTED = "REQUESTED"
+    RELEASED = "RELEASED"
+    DECLINED = "DECLINED"
+    WITHDRAWN = "WITHDRAWN"
+
+
+class CandidatePracticeRequestRecord(Base):
+    __tablename__ = "candidate_practice_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('REQUESTED', 'RELEASED', 'DECLINED', 'WITHDRAWN')",
+            name="ck_candidate_practice_requests_status",
+        ),
+        Index("ix_candidate_practice_requests_candidate_id", "candidate_id"),
+        Index("ix_candidate_practice_requests_org_id", "organization_id"),
+        Index("ix_candidate_practice_requests_job_id", "job_id"),
+        Index("ix_candidate_practice_requests_job_version_id", "job_version_id"),
+        Index("ix_candidate_practice_requests_status", "status"),
+    )
+
+    request_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_identities.identity_id",
+            ondelete="CASCADE",
+            name="fk_candidate_practice_requests_candidate_id",
+        ),
+        nullable=False,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_requisitions.job_id",
+            ondelete="CASCADE",
+            name="fk_candidate_practice_requests_job_id",
+        ),
+        nullable=False,
+    )
+    job_version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_versions.job_version_id",
+            ondelete="CASCADE",
+            name="fk_candidate_practice_requests_job_version_id",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default=CandidatePracticeRequestStatus.REQUESTED.value,
+        server_default=text("'REQUESTED'"),
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    processed_by_recruiter_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "users.user_id",
+            ondelete="SET NULL",
+            name="fk_candidate_practice_requests_processed_by",
+        ),
+        nullable=True,
+    )
+    resulting_release_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_practice_releases.release_id",
+            ondelete="SET NULL",
+            name="fk_candidate_practice_requests_resulting_release_id",
+        ),
+        nullable=True,
+    )
+    decline_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    candidate: Mapped["CandidateIdentityRecord"] = relationship(
+        "CandidateIdentityRecord",
+    )
+    job: Mapped["JobRequisition"] = relationship(
+        "JobRequisition",
+    )
+    job_version: Mapped["JobVersion"] = relationship(
+        "JobVersion",
+    )
+    processed_by_recruiter: Mapped[Optional["UserRecord"]] = relationship(
+        "UserRecord",
+        foreign_keys=[processed_by_recruiter_id],
+    )
+    resulting_release: Mapped[Optional["CandidatePracticeReleaseRecord"]] = relationship(
+        "CandidatePracticeReleaseRecord",
+        foreign_keys=[resulting_release_id],
+    )
+
+
+class JobPracticeCatalogRecord(Base):
+    __tablename__ = "job_practice_catalogs"
+    __table_args__ = (
+        UniqueConstraint("job_version_id", name="uq_job_practice_catalogs_job_version_id"),
+        Index("ix_job_practice_catalogs_org_id", "organization_id"),
+        Index("ix_job_practice_catalogs_job_id", "job_id"),
+        Index("ix_job_practice_catalogs_is_published", "is_published"),
+    )
+
+    catalog_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_requisitions.job_id",
+            ondelete="CASCADE",
+            name="fk_job_practice_catalogs_job_id",
+        ),
+        nullable=False,
+    )
+    job_version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_versions.job_version_id",
+            ondelete="CASCADE",
+            name="fk_job_practice_catalogs_job_version_id",
+        ),
+        nullable=False,
+    )
+    safe_title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    safe_summary: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    skill_labels: Mapped[List[str]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    is_published: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    published_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "users.user_id",
+            ondelete="RESTRICT",
+            name="fk_job_practice_catalogs_published_by",
+        ),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    job: Mapped["JobRequisition"] = relationship(
+        "JobRequisition",
+    )
+    job_version: Mapped["JobVersion"] = relationship(
+        "JobVersion",
+    )
+    published_by_user: Mapped["UserRecord"] = relationship(
+        "UserRecord",
+        foreign_keys=[published_by_user_id],
+    )
+

@@ -17,6 +17,8 @@ vi.mock("../api/candidateAuth", () => ({
   createCandidateInvitation: vi.fn(),
   listCandidateInvitations: vi.fn(),
   revokeCandidateInvitation: vi.fn(),
+  revokeCandidateAccess: vi.fn(),
+  getCandidateAccessStatus: vi.fn(),
 }));
 
 describe("Candidate Portal Authentication & Lifecycle", () => {
@@ -210,7 +212,7 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("Practice interviews will appear here")).toBeInTheDocument();
+        expect(screen.getByText("No assigned practice sessions yet")).toBeInTheDocument();
       });
       expect(screen.getByText("Candidate Practice")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Sign out of Candidate Practice Portal/i })).toBeInTheDocument();
@@ -244,6 +246,18 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
 
   describe("CandidateInvitationModal (Recruiter UI)", () => {
     it("loads and displays existing candidate invitations", async () => {
+      vi.mocked(candidateAuthApi.getCandidateAccessStatus).mockResolvedValueOnce({
+        candidateId: "cand-1",
+        accountStatus: "INVITED",
+        hasActiveAccount: false,
+        email: "alex@example.com",
+        invitation: {
+          invitationId: "inv-1",
+          status: "ACTIVE",
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      });
       vi.mocked(candidateAuthApi.listCandidateInvitations).mockResolvedValueOnce([
         {
           invitationId: "inv-1",
@@ -270,11 +284,17 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
 
       await waitFor(() => {
         expect(candidateAuthApi.listCandidateInvitations).toHaveBeenCalledWith("cand-1");
-        expect(screen.getByText("ACTIVE")).toBeInTheDocument();
+        expect(screen.getByText("INVITED")).toBeInTheDocument();
       });
     });
 
     it("generates a new 24h invitation link and displays raw URL", async () => {
+      vi.mocked(candidateAuthApi.getCandidateAccessStatus).mockResolvedValueOnce({
+        candidateId: "cand-1",
+        accountStatus: "NOT_INVITED",
+        hasActiveAccount: false,
+        invitation: null,
+      });
       vi.mocked(candidateAuthApi.listCandidateInvitations).mockResolvedValueOnce([]);
       vi.mocked(candidateAuthApi.createCandidateInvitation).mockResolvedValueOnce({
         invitationId: "inv-2",
@@ -295,7 +315,7 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
         />
       );
 
-      const generateBtn = screen.getByRole("button", { name: /Create Candidate Access/i });
+      const generateBtn = await screen.findByRole("button", { name: /Create access link/i });
       fireEvent.click(generateBtn);
 
       await waitFor(() => {
@@ -306,7 +326,18 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
     });
 
     it("revokes an active invitation", async () => {
-      vi.mocked(candidateAuthApi.listCandidateInvitations).mockResolvedValueOnce([
+      vi.mocked(candidateAuthApi.getCandidateAccessStatus).mockResolvedValue({
+        candidateId: "cand-1",
+        accountStatus: "INVITED",
+        hasActiveAccount: false,
+        invitation: {
+          invitationId: "inv-1",
+          status: "ACTIVE",
+          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      });
+      vi.mocked(candidateAuthApi.listCandidateInvitations).mockResolvedValue([
         {
           invitationId: "inv-1",
           candidateId: "cand-1",
@@ -342,11 +373,74 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
         />
       );
 
-      const revokeBtn = await screen.findByRole("button", { name: /Revoke/i });
-      fireEvent.click(revokeBtn);
+      const revokeBtns = await screen.findAllByRole("button", { name: /Revoke/i });
+      fireEvent.click(revokeBtns[0]);
 
       await waitFor(() => {
         expect(candidateAuthApi.revokeCandidateInvitation).toHaveBeenCalledWith("inv-1");
+      });
+    });
+
+    it("displays candidate portal access link when account is active", async () => {
+      vi.mocked(candidateAuthApi.getCandidateAccessStatus).mockResolvedValue({
+        candidateId: "cand-active-1",
+        accountStatus: "ACTIVE",
+        hasActiveAccount: true,
+        email: "alex.smith@example.com",
+        displayName: "Alex Smith",
+      });
+      vi.mocked(candidateAuthApi.listCandidateInvitations).mockResolvedValue([]);
+
+      render(
+        <CandidateInvitationModal
+          candidateId="cand-active-1"
+          candidateName="Alex Smith"
+          isOpen={true}
+          onClose={vi.fn()}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/Candidate Practice Portal Link/i)).toBeInTheDocument();
+        expect(screen.getByDisplayValue(/\/candidate\/login/)).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Copy Portal Link/i })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Revoke Access/i })).toBeInTheDocument();
+      });
+    });
+
+    it("handles full revoke flow for active candidate access", async () => {
+      vi.mocked(candidateAuthApi.getCandidateAccessStatus).mockResolvedValue({
+        candidateId: "cand-active-1",
+        accountStatus: "ACTIVE",
+        hasActiveAccount: true,
+        email: "alex.smith@example.com",
+        displayName: "Alex Smith",
+      });
+      vi.mocked(candidateAuthApi.listCandidateInvitations).mockResolvedValue([]);
+      vi.mocked(candidateAuthApi.revokeCandidateAccess).mockResolvedValue({
+        candidateId: "cand-active-1",
+        accountStatus: "SUSPENDED",
+        hasActiveAccount: false,
+        email: "alex.smith@example.com",
+      });
+
+      render(
+        <CandidateInvitationModal
+          candidateId="cand-active-1"
+          candidateName="Alex Smith"
+          isOpen={true}
+          onClose={vi.fn()}
+        />
+      );
+
+      const revokeBtn = await screen.findByRole("button", { name: /Revoke Access/i });
+      fireEvent.click(revokeBtn);
+
+      const confirmBtn = await screen.findByRole("button", { name: /Confirm Revoke/i });
+      fireEvent.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(candidateAuthApi.revokeCandidateAccess).toHaveBeenCalledWith("cand-active-1");
       });
     });
   });

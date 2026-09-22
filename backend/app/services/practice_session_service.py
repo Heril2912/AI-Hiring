@@ -69,7 +69,7 @@ def _compute_snapshot_hash(snapshot: List[Dict[str, Any]]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _map_session_to_dto(session: CandidatePracticeSessionRecord) -> PracticeSessionDetailResponse:
+def _map_session_to_dto(session: CandidatePracticeSessionRecord, db: Optional[Session] = None) -> PracticeSessionDetailResponse:
     now = datetime.now(timezone.utc)
     
     # Auto-expire if in progress but past expiry
@@ -119,9 +119,20 @@ def _map_session_to_dto(session: CandidatePracticeSessionRecord) -> PracticeSess
                     total_in_section=len(mcq_questions),
                 )
 
-    # Format safe message transcript
+    # Format safe message transcript - query directly from db in chronological order if db is available
     messages_dto: List[PracticeMessageDto] = []
-    for msg in session.messages or []:
+    if db:
+        stmt_msgs = (
+            select(CandidatePracticeMessageRecord)
+            .where(CandidatePracticeMessageRecord.session_id == session.session_id)
+            .order_by(CandidatePracticeMessageRecord.sequence_number.asc(), CandidatePracticeMessageRecord.created_at.asc())
+        )
+        msgs = db.execute(stmt_msgs).scalars().all()
+    else:
+        msgs = list(session.messages or [])
+        msgs.sort(key=lambda m: (m.sequence_number or 0, m.created_at if m.created_at else now))
+
+    for msg in msgs:
         messages_dto.append(
             PracticeMessageDto(
                 message_id=msg.message_id,
@@ -218,7 +229,7 @@ def start_or_resume_practice_session(
     if existing_session:
         exp = existing_session.expires_at if existing_session.expires_at.tzinfo else existing_session.expires_at.replace(tzinfo=timezone.utc)
         if now <= exp:
-            return _map_session_to_dto(existing_session)
+            return _map_session_to_dto(existing_session, db=db)
         else:
             existing_session.lifecycle_status = PracticeSessionLifecycle.EXPIRED.value
             existing_session.expired_at = now
@@ -257,11 +268,11 @@ def start_or_resume_practice_session(
         if (it.get("question_format") or it.get("format")) == QuestionFormat.MCQ_SINGLE_ANSWER.value
     ]
 
-    # Bound checks: max 5 conversation, max 10 MCQ
-    if len(conv_items) > 5 or len(mcq_items) > 10:
+    # Bound checks: max 30 conversation, max 50 MCQ
+    if len(conv_items) > 30 or len(mcq_items) > 50:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "INVALID_QUESTION_SET_BOUNDS", "message": "Practice question set exceeds allowable bounds."},
+            detail={"code": "INVALID_QUESTION_SET_BOUNDS", "message": "Practice question set exceeds allowable bounds (max 30 conversational, 50 MCQs)."},
         )
 
     if not conv_items and not mcq_items:
@@ -382,7 +393,7 @@ def start_or_resume_practice_session(
         .where(CandidatePracticeSessionRecord.session_id == new_session.session_id)
     )
     full_session = db.execute(stmt_full).scalar_one()
-    return _map_session_to_dto(full_session)
+    return _map_session_to_dto(full_session, db=db)
 
 
 def get_practice_session_state(
@@ -412,7 +423,7 @@ def get_practice_session_state(
             detail={"code": "SESSION_NOT_FOUND", "message": "Practice session not found."},
         )
 
-    return _map_session_to_dto(session)
+    return _map_session_to_dto(session, db=db)
 
 
 async def submit_conversational_answer(
@@ -644,7 +655,7 @@ async def submit_conversational_answer(
     session.updated_at = now
     db.commit()
 
-    return _map_session_to_dto(session)
+    return _map_session_to_dto(session, db=db)
 
 
 def submit_mcq_answer(
@@ -752,7 +763,7 @@ def submit_mcq_answer(
     session.updated_at = now
     db.commit()
 
-    return _map_session_to_dto(session)
+    return _map_session_to_dto(session, db=db)
 
 
 def abandon_practice_session(
