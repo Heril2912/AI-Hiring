@@ -303,11 +303,8 @@ describe("Phase 3F.2 MCQ Management & Candidate Practice Release", () => {
         expect(screen.getByText("Staff Backend Engineer")).toBeInTheDocument();
         const counts = screen.getAllByText(/5 Questions/i);
         expect(counts.length).toBe(2);
-        expect(screen.getByText("Practice Ready")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /Start Practice Interview/i })).toBeInTheDocument();
       });
-
-      // Confirm no dead "Start" button in Phase 3F.2
-      expect(screen.queryByRole("button", { name: /^Start/i })).not.toBeInTheDocument();
     });
 
     it("displays welcome message when no practice jobs are released", async () => {

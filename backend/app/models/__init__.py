@@ -18,7 +18,10 @@ from app.models.candidate_access import (
     CandidateAccountBindingRecord,
     CandidateBindingStatus,
     CandidateInvitationRecord,
+    CandidatePracticeMcqAnswerRecord,
+    CandidatePracticeMessageRecord,
     CandidatePracticeReleaseRecord,
+    CandidatePracticeSessionRecord,
 )
 from app.models.extraction import BlockType, ExtractionBlock, ExtractionMethod, ResumeExtraction
 from app.models.job import (
@@ -177,4 +180,7 @@ __all__ = [
     "CandidateAccountBindingRecord",
     "CandidateBindingStatus",
     "CandidatePracticeReleaseRecord",
+    "CandidatePracticeSessionRecord",
+    "CandidatePracticeMessageRecord",
+    "CandidatePracticeMcqAnswerRecord",
 ]
