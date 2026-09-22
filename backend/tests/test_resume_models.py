@@ -72,6 +72,9 @@ def test_models_exported_and_tables_registered():
         "candidate_invitations",
         "candidate_account_bindings",
         "candidate_practice_releases",
+        "candidate_practice_sessions",
+        "candidate_practice_messages",
+        "candidate_practice_mcq_answers",
     }
 
 

@@ -8812,3 +8812,347 @@ input, select, textarea {
   border: 1px solid #e2e8f0;
 }
 
+/* Phase 3F.3: Candidate Practice Room Styling */
+.practice-room-layout {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 80px);
+  max-width: 960px;
+  margin: 0 auto;
+  background-color: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-sm, 0 1px 3px 0 rgba(0, 0, 0, 0.05));
+  overflow: hidden;
+}
+
+.practice-room-header {
+  padding: 16px 24px;
+  background-color: var(--bg-surface, #ffffff);
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.practice-header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.practice-header-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.practice-header-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.practice-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.practice-timer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.practice-progress-strip {
+  height: 4px;
+  background-color: #f1f5f9;
+  width: 100%;
+}
+
+.practice-progress-fill {
+  height: 100%;
+  background-color: var(--brand-primary, #4f46e5);
+  transition: width 0.3s ease;
+}
+
+.practice-chat-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background-color: #f8fafc;
+}
+
+.practice-message-bubble {
+  display: flex;
+  gap: 12px;
+  max-width: 85%;
+}
+
+.practice-message-bubble.interviewer {
+  align-self: flex-start;
+}
+
+.practice-message-bubble.candidate {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.practice-message-bubble.system {
+  align-self: center;
+  max-width: 90%;
+}
+
+.practice-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.practice-avatar.interviewer {
+  background-color: #e0e7ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+}
+
+.practice-avatar.candidate {
+  background-color: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.practice-bubble-content-card {
+  background-color: #ffffff;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 12px;
+  padding: 14px 18px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.practice-message-bubble.candidate .practice-bubble-content-card {
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.practice-bubble-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.practice-bubble-sender {
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+.practice-bubble-kind-chip {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.practice-bubble-kind-chip.primary {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+}
+
+.practice-bubble-kind-chip.follow-up {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.practice-bubble-kind-chip.ack {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+
+.practice-bubble-kind-chip.answer {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.practice-bubble-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary, #0f172a);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.practice-composer-panel {
+  background-color: #ffffff;
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+  padding: 20px 24px;
+}
+
+.practice-composer-textarea {
+  width: 100%;
+  min-height: 110px;
+  max-height: 240px;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  resize: vertical;
+  background-color: #ffffff;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.practice-composer-textarea:focus {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.practice-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+.practice-mcq-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.practice-mcq-question-box {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 8px;
+}
+
+.practice-mcq-question-wording {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+}
+
+.practice-mcq-options-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.practice-mcq-option-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background-color: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.practice-mcq-option-item:hover {
+  border-color: #4f46e5;
+  background-color: #f5f3ff;
+}
+
+.practice-mcq-option-item.selected {
+  border-color: #4f46e5;
+  background-color: #eef2ff;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+}
+
+.practice-mcq-option-letter {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: #f1f5f9;
+  color: #475569;
+  font-weight: 700;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.practice-mcq-option-item.selected .practice-mcq-option-letter {
+  background-color: #4f46e5;
+  color: #ffffff;
+}
+
+.practice-mcq-option-label {
+  font-size: 14px;
+  color: #1e293b;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.practice-completed-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  gap: 20px;
+}
+
+.practice-completed-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-color: #ecfdf5;
+  color: #059669;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.practice-fallback-banner {
+  background-color: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  padding: 8px 16px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+

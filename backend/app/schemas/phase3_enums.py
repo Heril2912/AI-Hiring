@@ -118,6 +118,37 @@ class PrivacyReviewStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class PracticeSessionLifecycle(str, enum.Enum):
+    """Lifecycle states for candidate practice interview sessions."""
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    ABANDONED = "ABANDONED"
+    EXPIRED = "EXPIRED"
+    REVOKED = "REVOKED"
+
+
+class PracticeSection(str, enum.Enum):
+    """Current section within an active candidate practice session."""
+    CONVERSATION = "CONVERSATION"
+    MCQ = "MCQ"
+    COMPLETE = "COMPLETE"
+
+
+class PracticeMessageRole(str, enum.Enum):
+    """Author role for practice conversation messages."""
+    INTERVIEWER = "INTERVIEWER"
+    CANDIDATE = "CANDIDATE"
+
+
+class PracticeMessageKind(str, enum.Enum):
+    """Semantic category of conversation turn messages."""
+    GREETING = "GREETING"
+    PRIMARY_QUESTION = "PRIMARY_QUESTION"
+    ANSWER = "ANSWER"
+    ACKNOWLEDGEMENT = "ACKNOWLEDGEMENT"
+    FOLLOW_UP = "FOLLOW_UP"
+
+
 class ProviderOperation(str, enum.Enum):
     """Strictly allowlisted model capability operations.
     
@@ -127,6 +158,7 @@ class ProviderOperation(str, enum.Enum):
     CREATE_BOUNDED_VARIANTS = "CREATE_BOUNDED_VARIANTS"
     STRUCTURE_PROVISIONAL_ASSESSMENT = "STRUCTURE_PROVISIONAL_ASSESSMENT"
     SUMMARIZE_SELECTED_EVIDENCE = "SUMMARIZE_SELECTED_EVIDENCE"
+    PRACTICE_CONVERSATION_FOLLOW_UP = "PRACTICE_CONVERSATION_FOLLOW_UP"
 
 
 class AuditRetentionClass(str, enum.Enum):

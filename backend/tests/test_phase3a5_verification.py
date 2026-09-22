@@ -442,6 +442,7 @@ def test_step1_only_capability_specific_operations_exist():
         "CREATE_BOUNDED_VARIANTS",
         "STRUCTURE_PROVISIONAL_ASSESSMENT",
         "SUMMARIZE_SELECTED_EVIDENCE",
+        "PRACTICE_CONVERSATION_FOLLOW_UP",
     }
     assert allowed_ops == expected_ops
 

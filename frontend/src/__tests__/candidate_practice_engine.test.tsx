@@ -1,0 +1,295 @@
+import React from "react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { vi, describe, it, expect, beforeEach } from "vitest";
+import { CandidatePracticeRoom } from "../components/candidate/CandidatePracticeRoom";
+import { CandidatePracticeDirectory } from "../components/candidate/CandidatePracticeDirectory";
+import * as candidatePracticeApi from "../api/candidatePractice";
+import * as practiceSessionApi from "../api/candidatePracticeSession";
+
+vi.mock("../api/candidatePractice", () => ({
+  getCandidatePracticeDiscovery: vi.fn(),
+}));
+
+vi.mock("../api/candidatePracticeSession", () => ({
+  startOrResumePracticeSession: vi.fn(),
+  getPracticeSessionState: vi.fn(),
+  submitConversationalAnswer: vi.fn(),
+  submitMcqAnswer: vi.fn(),
+  abandonPracticeSession: vi.fn(),
+}));
+
+const mockDiscoveryData = {
+  items: [
+    {
+      release_id: "rel-123",
+      job_id: "job-101",
+      job_title: "Senior Backend Engineer",
+      job_revision: 1,
+      released_at: new Date().toISOString(),
+      conversation_count: 2,
+      mcq_count: 1,
+      total_question_count: 3,
+    },
+  ],
+};
+
+const mockInitialSessionState: practiceSessionApi.PracticeSessionDetailResponse = {
+  session_id: "session-123",
+  release_id: "rel-123",
+  job_id: "job-101",
+  lifecycle_status: "IN_PROGRESS",
+  current_section: "CONVERSATION",
+  current_conv_index: 0,
+  total_conv_count: 2,
+  current_mcq_index: 0,
+  total_mcq_count: 1,
+  total_response_count: 0,
+  turn_count_for_question: 0,
+  time_remaining_seconds: 86400,
+  expires_at: new Date(Date.now() + 86400000).toISOString(),
+  active_question: {
+    question_id: "q-conv-1",
+    question_format: "CONVERSATION",
+    wording: "How do you optimize slow database queries in PostgreSQL?",
+    competency_name: "PostgreSQL Optimization",
+    difficulty: "INTERMEDIATE",
+    turn_count_for_question: 0,
+    follow_up_available: true,
+  },
+  messages: [
+    {
+      message_id: "msg-1",
+      sequence_number: 1,
+      role: "INTERVIEWER",
+      message_kind: "GREETING",
+      text: "Welcome to your practice session! Take your time to answer each question.",
+      created_at: new Date().toISOString(),
+    },
+    {
+      message_id: "msg-2",
+      sequence_number: 2,
+      role: "INTERVIEWER",
+      message_kind: "PRIMARY_QUESTION",
+      text: "How do you optimize slow database queries in PostgreSQL?",
+      source_question_id: "q-conv-1",
+      created_at: new Date().toISOString(),
+    },
+  ],
+};
+
+describe("Candidate Practice Engine & Room", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // jsdom scrollIntoView mock
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("renders practice directory with Start Practice Interview action and launches session", async () => {
+    vi.mocked(candidatePracticeApi.getCandidatePracticeDiscovery).mockResolvedValue(mockDiscoveryData as any);
+    vi.mocked(practiceSessionApi.startOrResumePracticeSession).mockResolvedValue(mockInitialSessionState);
+    vi.mocked(practiceSessionApi.getPracticeSessionState).mockResolvedValue(mockInitialSessionState);
+
+    render(<CandidatePracticeDirectory />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
+    });
+
+    const startBtn = screen.getByRole("button", { name: /Start Practice Interview/i });
+    expect(startBtn).toBeInTheDocument();
+
+    fireEvent.click(startBtn);
+
+    await waitFor(() => {
+      expect(practiceSessionApi.startOrResumePracticeSession).toHaveBeenCalledWith("rel-123");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Welcome to your practice session! Take your time to answer each question.")).toBeInTheDocument();
+      expect(screen.getByText("How do you optimize slow database queries in PostgreSQL?")).toBeInTheDocument();
+    });
+  });
+
+  it("submits conversational answer and displays follow-up question", async () => {
+    const onExit = vi.fn();
+    vi.mocked(practiceSessionApi.getPracticeSessionState).mockResolvedValue(mockInitialSessionState);
+
+    const mockFollowUpState: practiceSessionApi.PracticeSessionDetailResponse = {
+      ...mockInitialSessionState,
+      turn_count_for_question: 1,
+      total_response_count: 1,
+      active_question: {
+        ...mockInitialSessionState.active_question!,
+        turn_count_for_question: 1,
+      },
+      messages: [
+        ...mockInitialSessionState.messages,
+        {
+          message_id: "msg-3",
+          sequence_number: 3,
+          role: "CANDIDATE",
+          message_kind: "ANSWER",
+          text: "I start with EXPLAIN ANALYZE to identify sequential scans.",
+          created_at: new Date().toISOString(),
+        },
+        {
+          message_id: "msg-4",
+          sequence_number: 4,
+          role: "INTERVIEWER",
+          message_kind: "FOLLOW_UP",
+          text: "Could you elaborate on how composite indexes affect that query?",
+          source_question_id: "q-conv-1",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    };
+
+    vi.mocked(practiceSessionApi.submitConversationalAnswer).mockResolvedValue(mockFollowUpState);
+
+    render(<CandidatePracticeRoom sessionId="session-123" onExit={onExit} />);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Type your structured response here/i)).toBeInTheDocument();
+    });
+
+    const textarea = screen.getByPlaceholderText(/Type your structured response here/i);
+    fireEvent.change(textarea, {
+      target: { value: "I start with EXPLAIN ANALYZE to identify sequential scans." },
+    });
+
+    const submitBtn = screen.getByRole("button", { name: /Submit Response/i });
+    expect(submitBtn).toBeEnabled();
+
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(practiceSessionApi.submitConversationalAnswer).toHaveBeenCalledWith(
+        "session-123",
+        "q-conv-1",
+        "I start with EXPLAIN ANALYZE to identify sequential scans."
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Could you elaborate on how composite indexes affect that query?")).toBeInTheDocument();
+      expect(screen.getByText("Final Turn on this Question")).toBeInTheDocument();
+    });
+  });
+
+  it("renders MCQ question and allows option selection and submission", async () => {
+    const onExit = vi.fn();
+    const mockMcqState: practiceSessionApi.PracticeSessionDetailResponse = {
+      session_id: "session-123",
+      release_id: "rel-123",
+      job_id: "job-101",
+      lifecycle_status: "IN_PROGRESS",
+      current_section: "MCQ",
+      current_conv_index: 2,
+      total_conv_count: 2,
+      current_mcq_index: 0,
+      total_mcq_count: 1,
+      total_response_count: 2,
+      turn_count_for_question: 0,
+      time_remaining_seconds: 80000,
+      expires_at: new Date(Date.now() + 80000000).toISOString(),
+      active_question: {
+        question_id: "q-mcq-1",
+        question_format: "MCQ_SINGLE_ANSWER",
+        wording: "Which index type is best for range queries in PostgreSQL?",
+        competency_name: "PostgreSQL Indexing",
+        options: [
+          { option_id: "opt-1", text: "B-Tree Index", display_order: 1 },
+          { option_id: "opt-2", text: "Hash Index", display_order: 2 },
+          { option_id: "opt-3", text: "Bloom Filter Index", display_order: 3 },
+        ],
+        turn_count_for_question: 0,
+        follow_up_available: false,
+      },
+      messages: [],
+    };
+
+    const mockCompletedState: practiceSessionApi.PracticeSessionDetailResponse = {
+      ...mockMcqState,
+      lifecycle_status: "COMPLETED",
+      current_section: "COMPLETE",
+      total_response_count: 3,
+      active_question: null,
+    };
+
+    vi.mocked(practiceSessionApi.getPracticeSessionState).mockResolvedValue(mockMcqState);
+    vi.mocked(practiceSessionApi.submitMcqAnswer).mockResolvedValue(mockCompletedState);
+
+    render(<CandidatePracticeRoom sessionId="session-123" onExit={onExit} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Which index type is best for range queries in PostgreSQL?")).toBeInTheDocument();
+      expect(screen.getByText("B-Tree Index")).toBeInTheDocument();
+      expect(screen.getByText("Hash Index")).toBeInTheDocument();
+    });
+
+    const submitBtn = screen.getByRole("button", { name: /Submit Answer & Continue/i });
+    expect(submitBtn).toBeDisabled();
+
+    // Select Option A (B-Tree Index)
+    const optionA = screen.getByText("B-Tree Index");
+    fireEvent.click(optionA);
+
+    expect(submitBtn).toBeEnabled();
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(practiceSessionApi.submitMcqAnswer).toHaveBeenCalledWith(
+        "session-123",
+        "q-mcq-1",
+        "opt-1"
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Practice Interview Completed!")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Return to Practice Directory/i })).toBeInTheDocument();
+    });
+  });
+
+  it("displays safe fallback notice banner when present in response", async () => {
+    const onExit = vi.fn();
+    const mockFallbackState: practiceSessionApi.PracticeSessionDetailResponse = {
+      ...mockInitialSessionState,
+      safe_fallback_notice: "AI assistance adjusted to standard neutral pacing.",
+    };
+
+    vi.mocked(practiceSessionApi.getPracticeSessionState).mockResolvedValue(mockFallbackState);
+
+    render(<CandidatePracticeRoom sessionId="session-123" onExit={onExit} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("AI assistance adjusted to standard neutral pacing.")).toBeInTheDocument();
+    });
+  });
+
+  it("handles abandon session confirmation and exits room", async () => {
+    const onExit = vi.fn();
+    vi.mocked(practiceSessionApi.getPracticeSessionState).mockResolvedValue(mockInitialSessionState);
+    vi.mocked(practiceSessionApi.abandonPracticeSession).mockResolvedValue({
+      session_id: "session-123",
+      lifecycle_status: "ABANDONED",
+      message: "Practice session abandoned.",
+    });
+
+    // Mock window.confirm to return true
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<CandidatePracticeRoom sessionId="session-123" onExit={onExit} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Exit Session/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Exit Session/i }));
+
+    await waitFor(() => {
+      expect(practiceSessionApi.abandonPracticeSession).toHaveBeenCalledWith("session-123");
+      expect(onExit).toHaveBeenCalled();
+    });
+  });
+});
