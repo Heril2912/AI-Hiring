@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     login_failure_threshold: int = 5
     login_cooldown_seconds: int = 900
     frontend_origin: str = "http://localhost:5173"
-    allowed_frontend_origins: str = "http://localhost:5173,http://admin.localhost:5173,http://recruiter.localhost:5173,http://candidate.localhost:5173"
+    allowed_frontend_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://admin.localhost:5173,http://recruiter.localhost:5173,http://candidate.localhost:5173,http://localhost:3000,http://127.0.0.1:3000"
     scrypt_n: int = 16384
     scrypt_r: int = 8
     scrypt_p: int = 1

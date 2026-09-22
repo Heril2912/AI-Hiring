@@ -792,6 +792,7 @@ def _build_correction_response(
 ) -> ProfileCorrectionResponse:
     identity_payload = profile_rec.identity.identity_payload
     profile_resp = CandidateProfileResponse(
+        candidate_id=str(profile_rec.identity_id),
         artifact_id=str(profile_rec.artifact_id),
         profile_id=str(profile_rec.profile_id),
         profile_version=profile_rec.profile_version,

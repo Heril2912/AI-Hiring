@@ -14,6 +14,7 @@ from app.models.auth import (
     AuditReasonCode,
     AuditResult,
     SecurityAuditEventRecord,
+    SessionRevokeReason,
     UserRecord,
     UserRole,
     UserSessionRecord,
@@ -25,6 +26,8 @@ from app.models.candidate_access import (
     CandidateInvitationRecord,
 )
 from app.schemas.candidate_access import (
+    CandidateAccessInvitationInfo,
+    CandidateAccessStatusResponse,
     CandidateActivationRequest,
     CandidateInvitationSummary,
     CreateCandidateInvitationRequest,
@@ -234,6 +237,98 @@ def revoke_candidate_invitation(
     return invitation
 
 
+def revoke_candidate_access(
+    db: Session,
+    recruiter_user: UserRecord,
+    candidate_id: uuid.UUID,
+) -> CandidateAccessStatusResponse:
+    """
+    Revokes and suspends all portal access for a candidate:
+    - Suspends active candidate account bindings
+    - Deactivates candidate UserRecord and revokes all active sessions
+    - Revokes pending unconsumed invitations
+    - Emits audit events and returns updated CandidateAccessStatusResponse
+    """
+    now = datetime.now(timezone.utc)
+
+    # 1. Verify candidate identity exists
+    cand_stmt = select(CandidateIdentityRecord).where(
+        CandidateIdentityRecord.identity_id == candidate_id
+    )
+    candidate = db.execute(cand_stmt).scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "CANDIDATE_NOT_FOUND",
+                "message": f"Candidate with ID '{candidate_id}' does not exist.",
+            },
+        )
+
+    # 2. Find and suspend active bindings and deactivate candidate user
+    binding_stmt = (
+        select(CandidateAccountBindingRecord)
+        .options(selectinload(CandidateAccountBindingRecord.user))
+        .where(
+            CandidateAccountBindingRecord.candidate_id == candidate_id,
+            CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
+        )
+    )
+    bindings = db.execute(binding_stmt).scalars().all()
+    for b in bindings:
+        b.status = CandidateBindingStatus.SUSPENDED.value
+        b.updated_at = now
+        if b.user:
+            b.user.is_active = False
+            b.user.updated_at = now
+            # Revoke all active sessions
+            db.execute(
+                update(UserSessionRecord)
+                .where(
+                    UserSessionRecord.user_id == b.user_id,
+                    UserSessionRecord.revoked_at.is_(None),
+                )
+                .values(
+                    revoked_at=now,
+                    revoke_reason=SessionRevokeReason.ADMIN_REVOKED.value,
+                )
+            )
+
+    # 3. Revoke any pending invitations
+    inv_stmt = (
+        select(CandidateInvitationRecord)
+        .where(
+            CandidateInvitationRecord.candidate_id == candidate_id,
+            CandidateInvitationRecord.consumed_at.is_(None),
+            CandidateInvitationRecord.revoked_at.is_(None),
+        )
+    )
+    invitations = db.execute(inv_stmt).scalars().all()
+    for inv in invitations:
+        inv.revoked_at = now
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.CANDIDATE_BINDING_UPDATED,
+        result=AuditResult.SUCCESS,
+        reason_code=AuditReasonCode.BINDING_SUSPENDED,
+        actor_user_id=recruiter_user.user_id,
+        resource_type="candidate_access",
+        resource_id=str(candidate_id),
+        safe_metadata={
+            "candidate_id": str(candidate_id),
+            "revoked_by_user_id": str(recruiter_user.user_id),
+        },
+    )
+
+    db.commit()
+    return get_candidate_access_status(
+        db=db,
+        candidate_id=candidate_id,
+        recruiter_user=recruiter_user,
+    )
+
+
 def list_candidate_invitations_summary(
     db: Session,
     candidate_id: uuid.UUID,
@@ -280,6 +375,104 @@ def list_candidate_invitations_summary(
             )
         )
     return results
+
+
+def get_candidate_access_status(
+    db: Session,
+    candidate_id: uuid.UUID,
+    recruiter_user: Optional[UserRecord] = None,
+) -> CandidateAccessStatusResponse:
+    """
+    Returns strict recruiter-safe account-binding and invitation status for a candidate.
+    An accessible candidate without an account or invitation returns 200 with NOT_INVITED.
+    """
+    now = datetime.now(timezone.utc)
+
+    # 1. Verify candidate identity exists
+    cand_stmt = select(CandidateIdentityRecord).where(
+        CandidateIdentityRecord.identity_id == candidate_id
+    )
+    candidate = db.execute(cand_stmt).scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "CANDIDATE_NOT_FOUND",
+                "message": f"Candidate with ID '{candidate_id}' does not exist.",
+            },
+        )
+
+    # 2. Check for account binding (ACTIVE or SUSPENDED)
+    binding_stmt = (
+        select(CandidateAccountBindingRecord)
+        .options(selectinload(CandidateAccountBindingRecord.user))
+        .where(
+            CandidateAccountBindingRecord.candidate_id == candidate_id,
+        )
+        .order_by(CandidateAccountBindingRecord.updated_at.desc())
+    )
+    binding = db.execute(binding_stmt).scalars().first()
+
+    has_active_account = False
+    account_status = "NOT_INVITED"
+    email = None
+    display_name = candidate.full_name or "Candidate"
+
+    if binding and binding.user:
+        user = binding.user
+        email = user.email
+        display_name = user.display_name or candidate.full_name or "Candidate"
+        if binding.status == CandidateBindingStatus.ACTIVE.value and user.is_active:
+            has_active_account = True
+            account_status = "ACTIVE"
+        else:
+            has_active_account = False
+            account_status = "SUSPENDED"
+
+    # 3. Check for latest invitation
+    inv_stmt = (
+        select(CandidateInvitationRecord)
+        .where(CandidateInvitationRecord.candidate_id == candidate_id)
+        .order_by(CandidateInvitationRecord.created_at.desc())
+    )
+    latest_inv = db.execute(inv_stmt).scalars().first()
+
+    inv_info: Optional[CandidateAccessInvitationInfo] = None
+    if latest_inv:
+        exp_utc = latest_inv.expires_at
+        if exp_utc.tzinfo is None:
+            exp_utc = exp_utc.replace(tzinfo=timezone.utc)
+
+        if latest_inv.revoked_at is not None:
+            inv_status = "REVOKED"
+        elif latest_inv.consumed_at is not None:
+            inv_status = "CONSUMED"
+        elif now >= exp_utc:
+            inv_status = "EXPIRED"
+        else:
+            inv_status = "ACTIVE"
+
+        inv_info = CandidateAccessInvitationInfo(
+            invitation_id=latest_inv.invitation_id,
+            status=inv_status,
+            expires_at=latest_inv.expires_at,
+            created_at=latest_inv.created_at,
+        )
+
+        if not has_active_account and account_status != "SUSPENDED":
+            if inv_status == "ACTIVE":
+                account_status = "INVITED"
+            else:
+                account_status = "NOT_INVITED"
+
+    return CandidateAccessStatusResponse(
+        candidate_id=candidate_id,
+        account_status=account_status,
+        has_active_account=has_active_account,
+        email=email,
+        display_name=display_name,
+        invitation=inv_info,
+    )
 
 
 def activate_candidate_account(

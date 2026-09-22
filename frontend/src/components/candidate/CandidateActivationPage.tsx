@@ -13,55 +13,54 @@ export function CandidateActivationPage({
 }: CandidateActivationPageProps) {
   const { activate } = useCandidateAuth();
 
-  const [token, setToken] = useState<string>("");
-  const [hasToken, setHasToken] = useState<boolean>(true);
+  // Capture token immediately on component initialization before any URL rewrite or auth probes
+  const [token, setToken] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      const hashStr = window.location.hash.replace(/^#/, "");
+      const fragmentParams = new URLSearchParams(hashStr);
+      const queryParams = new URLSearchParams(window.location.search);
+      const extracted = fragmentParams.get("token") || queryParams.get("token") || "";
+      return extracted.trim();
+    } catch {
+      return "";
+    }
+  });
+
+  const [hasToken, setHasToken] = useState<boolean>(() => Boolean(token));
   const [password, setPassword] = useState<string>("");
   const [confirmation, setConfirmation] = useState<string>("");
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showConfirmation, setShowConfirmation] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activatedEmail, setActivatedEmail] = useState<string | null>(null);
 
-  // Read fragment token once on mount and immediately strip it from displayed URL
+  // Strip token from visible URL bar once captured into component memory
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    let extractedToken = "";
-    const hash = window.location.hash;
-    if (hash && hash.includes("token=")) {
-      const match = hash.match(/token=([^&]+)/);
-      if (match && match[1]) {
-        extractedToken = decodeURIComponent(match[1]);
-      }
-    }
-
-    if (extractedToken) {
-      setToken(extractedToken);
-      setHasToken(true);
-      // Remove hash from URL without reloading page or polluting browser history
+    if (token) {
       try {
-        window.history.replaceState(
-          null,
-          "",
-          window.location.pathname + window.location.search
-        );
+        const cleanUrl = window.location.pathname + window.location.search;
+        window.history.replaceState(null, "", cleanUrl);
       } catch {
-        // Fallback for non-standard environments
+        // Safe ignore in non-browser test runners
       }
     } else {
       setHasToken(false);
       setErrorMessage(
-        "No activation token detected. Please ensure you clicked the full activation link provided by your recruiter."
+        "No activation token detected. Please ensure you clicked the complete activation link provided by your recruiter."
       );
     }
-  }, []);
+  }, [token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
     if (!token) {
-      setErrorMessage("Activation token is missing. Please check your link.");
+      setErrorMessage("Activation token is missing. Please ask your recruiter for a new link.");
       return;
     }
 
@@ -77,15 +76,28 @@ export function CandidateActivationPage({
 
     setIsSubmitting(true);
     try {
-      await activate(token, password, confirmation);
+      const res = await activate(token, password, confirmation);
+      if (res?.email) {
+        setActivatedEmail(res.email);
+      }
       if (onSuccess) {
         onSuccess();
       }
     } catch (err: any) {
-      setErrorMessage(
-        err.message ||
-          "Unable to activate account. The invitation may be invalid, expired, or already used."
-      );
+      const errMsg = err?.message || "";
+      const errCode = err?.code || "";
+
+      if (errCode === "INVITATION_ALREADY_CONSUMED" || errMsg.includes("already been used")) {
+        setErrorMessage("This invitation link has already been used. Please sign in with your registered password or request a new link.");
+      } else if (errCode === "INVITATION_EXPIRED" || errMsg.includes("expired")) {
+        setErrorMessage("This invitation link has expired. Please ask your recruiter to generate a new activation link.");
+      } else if (errCode === "INVITATION_REVOKED" || errMsg.includes("revoked")) {
+        setErrorMessage("This invitation link has been revoked. Please contact your recruiter for a replacement link.");
+      } else {
+        setErrorMessage(
+          errMsg || "Unable to activate practice account. Please verify your link and try again."
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -115,7 +127,22 @@ export function CandidateActivationPage({
           </div>
         )}
 
-        {!hasToken ? (
+        {activatedEmail ? (
+          <div className="candidate-auth-success-state" style={{ textAlign: "center", padding: "16px 0" }}>
+            <div style={{ display: "inline-flex", padding: "12px", borderRadius: "50%", backgroundColor: "#f0fdf4", color: "#16a34a", marginBottom: "12px" }}>
+              <Icon name="check-circle" size={32} aria-hidden="true" />
+            </div>
+            <h2 style={{ fontSize: "18px", fontWeight: 700, color: "var(--text-primary, #0f172a)", marginBottom: "8px" }}>
+              Account Activated!
+            </h2>
+            <p style={{ fontSize: "14px", color: "var(--text-secondary, #475569)", marginBottom: "16px" }}>
+              Your candidate practice account is ready. Future sign-in email: <strong>{activatedEmail}</strong>
+            </p>
+            <p style={{ fontSize: "13px", color: "var(--text-tertiary, #94a3b8)" }}>
+              Redirecting you to the candidate practice portal...
+            </p>
+          </div>
+        ) : !hasToken ? (
           <div className="candidate-auth-empty-state">
             <p className="empty-description">
               If your link expired or is invalid, please ask your recruiter to generate a fresh invitation.

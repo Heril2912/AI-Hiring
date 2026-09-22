@@ -92,34 +92,35 @@ async def request_practice_conversation_follow_up(
         )
 
     # 2. Check if active provider profile is enabled
+    from app.config import get_settings
+    settings = get_settings()
+
     stmt = (
         select(ProviderProfileRecord)
         .where(
-            ProviderProfileRecord.is_active.is_(True),
+            ProviderProfileRecord.enabled.is_(True),
             ProviderProfileRecord.is_archived.is_(False),
-            ProviderProfileRecord.provider_type == ProviderType.LOCAL_OPENAI_COMPATIBLE.value,
         )
         .order_by(ProviderProfileRecord.created_at.desc())
     )
     active_profile = db.execute(stmt).scalars().first()
 
-    if not active_profile and not custom_endpoint_url:
-        logger.info("AI provider is not configured or disabled. Using deterministic continuation.")
-        return BoundedPracticeFollowUpResponse(
-            action="ACKNOWLEDGE_AND_CONTINUE",
-            source_question_id=request.source_question_id,
-            acknowledgement=DEFAULT_FALLBACK_ACKNOWLEDGEMENT,
-            follow_up_question=None,
-            validation_passed=True,
-            safe_fallback_used=True,
-        )
-
-    endpoint_url = custom_endpoint_url or active_profile.base_url
+    endpoint_url = (
+        custom_endpoint_url
+        or (active_profile.base_url if active_profile and active_profile.base_url else None)
+        or (settings.llm_base_url if settings.llm_base_url else "http://localhost:1234/v1")
+    )
     if not endpoint_url.endswith("/chat/completions"):
         endpoint_url = endpoint_url.rstrip("/") + "/chat/completions"
 
-    model_name = active_profile.model_name if active_profile else "qwen3-4b-thinking"
-    timeout_sec = min(active_profile.timeout_seconds if active_profile else 10.0, 15.0)
+    model_name = (
+        (active_profile.model_identifier if active_profile and active_profile.model_identifier else None)
+        or (settings.llm_model if settings.llm_model else "local-model")
+    )
+    timeout_sec = min(
+        active_profile.request_timeout_seconds if active_profile and active_profile.request_timeout_seconds else 15.0,
+        30.0,
+    )
 
     # 3. Assemble prompt
     system_prompt = (

@@ -122,12 +122,16 @@ class CandidatePracticeJobSummary(FrozenSchema):
     """Safe job discovery card for candidates."""
     release_id: UUID
     job_id: UUID
+    job_version_id: Optional[UUID] = None
     job_title: str
+    job_revision: Optional[int] = 1
     department: Optional[str] = None
     location: Optional[str] = None
     summary: Optional[str] = None
     conversation_question_count: int
+    conversation_count: Optional[int] = None
     mcq_count: int
+    total_question_count: Optional[int] = None
     released_at: datetime
     status_label: str = "Practice content ready"
 
@@ -135,3 +139,135 @@ class CandidatePracticeJobSummary(FrozenSchema):
 class CandidatePracticeDiscoveryResponse(FrozenSchema):
     """List of active released practice jobs for authenticated candidate."""
     items: List[CandidatePracticeJobSummary]
+
+
+# Phase 3F.3: Practice Diagnostic & Candidate Request Contracts
+
+class PracticeEligibilityReasonCode(str):
+    JOB_NOT_READY = "JOB_NOT_READY"
+    NO_PRACTICE_SET = "NO_PRACTICE_SET"
+    DRAFT_SET_EXISTS = "DRAFT_SET_EXISTS"
+    APPROVED_SET_ON_OLDER_REVISION = "APPROVED_SET_ON_OLDER_REVISION"
+    NO_VALID_QUESTIONS = "NO_VALID_QUESTIONS"
+    ALREADY_RELEASED = "ALREADY_RELEASED"
+    CANDIDATE_NOT_ELIGIBLE = "CANDIDATE_NOT_ELIGIBLE"
+    ELIGIBLE = "ELIGIBLE"
+
+
+class PracticeEligibleItem(StrictSchema):
+    """Eligible practice set linked to exact locked job revision."""
+    job_id: UUID
+    job_revision_id: UUID
+    job_title: str
+    job_version: str  # e.g. "v3"
+    question_set_id: UUID
+    template_id: Optional[UUID] = None
+    conversational_question_count: int
+    mcq_question_count: int
+    total_question_count: int
+    status: str = "READY_TO_RELEASE"
+    approved_at: Optional[datetime] = None
+    has_candidate_request: bool = False
+    candidate_request_id: Optional[UUID] = None
+
+
+class PracticeIneligibleItem(StrictSchema):
+    """Diagnostic detail for why a job revision cannot be released."""
+    job_id: UUID
+    job_revision_id: Optional[UUID] = None
+    job_title: str
+    job_version: str  # e.g. "v3"
+    reason_code: str
+    message: str
+    question_set_id: Optional[UUID] = None
+    template_id: Optional[UUID] = None
+    older_revision: Optional[int] = None
+    action: str  # e.g. "OPEN_QUESTION_SET", "PREPARE_PRACTICE_SET", "CREATE_PRACTICE_SET", "NONE"
+
+
+class PracticeEligibleJob(StrictSchema):
+    """Legacy backward-compatible adapter item for recruiter release modal."""
+    job_id: UUID
+    job_version_id: Optional[UUID] = None
+    job_title: str
+    job_revision: int
+    ai_set_id: UUID
+    set_version: int
+    approved_at: datetime
+    conversation_count: int
+    mcq_count: int
+    total_question_count: int
+    already_released: bool
+    has_candidate_request: bool = False
+    candidate_request_id: Optional[UUID] = None
+
+
+class PracticeEligibilityDiagnosticResponse(StrictSchema):
+    """Structured diagnostic response containing both eligible and ineligible practice opportunities."""
+    eligible: List[PracticeEligibleItem]
+    ineligible: List[PracticeIneligibleItem]
+    items: List[PracticeEligibleJob] = Field(default_factory=list)  # Backwards compatibility
+
+
+class PracticeEligibleJobsResponse(StrictSchema):
+    """Backward compatibility response model."""
+    items: List[PracticeEligibleJob]
+
+
+# Candidate Practice Catalog & Request Contracts
+
+class CandidatePracticeCatalogItem(FrozenSchema):
+    """Candidate-safe published catalog job revision item."""
+    catalog_id: UUID
+    job_id: UUID
+    job_version_id: UUID
+    safe_title: str
+    safe_summary: Optional[str] = None
+    skill_labels: List[str] = Field(default_factory=list)
+    published_at: datetime
+    request_status: str  # "NOT_REQUESTED", "REQUESTED", "RELEASED", "DECLINED"
+    active_request_id: Optional[UUID] = None
+    release_id: Optional[UUID] = None
+    decline_reason: Optional[str] = None
+
+
+class CandidatePracticeCatalogResponse(FrozenSchema):
+    """List of candidate practice catalog entries."""
+    items: List[CandidatePracticeCatalogItem]
+
+
+class CandidatePracticeRequestCreatePayload(StrictSchema):
+    """Candidate creates a practice request."""
+    job_version_id: UUID
+
+
+class CandidatePracticeRequestDeclinePayload(StrictSchema):
+    """Recruiter declines a practice request."""
+    decline_reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class CandidatePracticeRequestDto(StrictSchema):
+    """Candidate practice request representation."""
+    request_id: UUID
+    organization_id: UUID
+    candidate_id: UUID
+    candidate_name: Optional[str] = None
+    job_id: UUID
+    job_version_id: UUID
+    job_title: str
+    job_revision: int
+    status: str
+    requested_at: datetime
+    processed_at: Optional[datetime] = None
+    resulting_release_id: Optional[UUID] = None
+    decline_reason: Optional[str] = None
+
+
+class PublishPracticeCatalogPayload(StrictSchema):
+    """Recruiter publishes a job revision to the practice catalog."""
+    job_version_id: UUID
+    safe_title: Optional[str] = None
+    safe_summary: Optional[str] = None
+    skill_labels: Optional[List[str]] = None
+
+

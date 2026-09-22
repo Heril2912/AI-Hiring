@@ -98,6 +98,7 @@ export type ProfileWarning = {
 };
 
 export type CandidateProfileData = {
+  candidateId?: string;
   artifactId: string;
   profileId: string;
   profileVersion: number;
@@ -2025,7 +2026,7 @@ export function CandidateProfileReview({
       {isInvitationModalOpen && (
         <CandidateInvitationModal
           isOpen={isInvitationModalOpen}
-          candidateId={currentProfile.profileId}
+          candidateId={currentProfile.candidateId || currentProfile.profileId}
           candidateName={currentProfile.identity?.fullName?.value || "Candidate"}
           onClose={() => setIsInvitationModalOpen(false)}
         />
@@ -2034,7 +2035,7 @@ export function CandidateProfileReview({
       {isPracticeReleaseModalOpen && (
         <CandidatePracticeReleaseModal
           isOpen={isPracticeReleaseModalOpen}
-          candidateId={currentProfile.profileId}
+          candidateId={currentProfile.candidateId || currentProfile.profileId}
           candidateName={currentProfile.identity?.fullName?.value || "Candidate"}
           onClose={() => setIsPracticeReleaseModalOpen(false)}
         />

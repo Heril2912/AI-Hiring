@@ -51,6 +51,7 @@ class ProfileAssemblyResult(StrictSchema):
 
 
 class CandidateProfileResponse(StrictSchema):
+    candidate_id: Optional[str] = None
     artifact_id: str
     profile_id: str
     profile_version: int

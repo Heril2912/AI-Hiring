@@ -330,7 +330,19 @@ async def approve_ai_question_set_endpoint(
     description="Generates requirement-grounded multiple-choice questions using local AI.",
 )
 @router.post(
+    "/ai-interviews/{template_id}/generate-mcqs",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.post(
     "/ai-question-sets/{template_id}/mcqs/generate",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.post(
+    "/ai-question-sets/{template_id}/generate-mcqs",
     response_model=AiQuestionSetDetailResponse,
     status_code=status.HTTP_200_OK,
     include_in_schema=False,
@@ -357,7 +369,19 @@ async def generate_mcqs_endpoint(
     description="Adds a recruiter-authored multiple choice question to the question set.",
 )
 @router.post(
+    "/ai-interviews/{template_id}/mcq-slots",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+)
+@router.post(
     "/ai-question-sets/{template_id}/mcqs",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+)
+@router.post(
+    "/ai-question-sets/{template_id}/mcq-slots",
     response_model=AiQuestionSetDetailResponse,
     status_code=status.HTTP_201_CREATED,
     include_in_schema=False,
@@ -384,7 +408,19 @@ async def add_manual_mcq_endpoint(
     description="Updates a multiple choice question's text, options, correct answer, or explanation.",
 )
 @router.patch(
+    "/ai-interviews/{template_id}/mcq-slots/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.patch(
     "/ai-question-sets/{template_id}/mcqs/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.patch(
+    "/ai-question-sets/{template_id}/mcq-slots/{slot_id}",
     response_model=AiQuestionSetDetailResponse,
     status_code=status.HTTP_200_OK,
     include_in_schema=False,
@@ -413,7 +449,19 @@ async def update_mcq_slot_endpoint(
     description="Removes a multiple choice question from the question set.",
 )
 @router.delete(
+    "/ai-interviews/{template_id}/mcq-slots/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.delete(
     "/ai-question-sets/{template_id}/mcqs/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.delete(
+    "/ai-question-sets/{template_id}/mcq-slots/{slot_id}",
     response_model=AiQuestionSetDetailResponse,
     status_code=status.HTTP_200_OK,
     include_in_schema=False,
@@ -440,7 +488,19 @@ async def remove_mcq_slot_endpoint(
     description="Reorders multiple choice questions according to the specified slot IDs.",
 )
 @router.post(
+    "/ai-interviews/{template_id}/reorder-mcqs",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.post(
     "/ai-question-sets/{template_id}/mcqs/reorder",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.post(
+    "/ai-question-sets/{template_id}/reorder-mcqs",
     response_model=AiQuestionSetDetailResponse,
     status_code=status.HTTP_200_OK,
     include_in_schema=False,
@@ -457,3 +517,26 @@ async def reorder_mcq_slots_endpoint(
         payload=payload,
         db=db,
     )
+
+
+@router.post(
+    "/ai-interviews/jobs/{job_id}/prepare-for-revision/{job_version_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Prepare Practice Set For New Revision",
+    description="Copies approved questions from older revision into a new draft set for the target job revision.",
+)
+async def prepare_practice_set_endpoint(
+    job_id: uuid.UUID,
+    job_version_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    from app.services.ai_question_set_service import prepare_practice_set_for_revision
+    return prepare_practice_set_for_revision(
+        actor=auth_ctx.user,
+        job_id=job_id,
+        job_version_id=job_version_id,
+        db=db,
+    )
+

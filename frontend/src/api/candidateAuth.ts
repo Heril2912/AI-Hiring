@@ -36,17 +36,44 @@ export interface CandidateAuthResponse {
   absoluteExpiresAt?: string;
 }
 
+export interface CandidateAccessInvitationInfo {
+  invitationId: string;
+  status: "ACTIVE" | "EXPIRED" | "CONSUMED" | "REVOKED";
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface CandidateAccessStatusResponse {
+  candidateId: string;
+  accountStatus: "NOT_INVITED" | "INVITED" | "ACTIVE" | "SUSPENDED";
+  hasActiveAccount: boolean;
+  email?: string | null;
+  displayName?: string | null;
+  invitation?: CandidateAccessInvitationInfo | null;
+}
+
+export async function getCandidateAccessStatus(
+  candidateId: string
+): Promise<CandidateAccessStatusResponse> {
+  return apiFetch<CandidateAccessStatusResponse>(
+    `/api/v1/recruiter/candidate-access/candidates/${candidateId}`
+  );
+}
+
 export async function createCandidateInvitation(
   candidateId: string,
   validHours: number = 24
 ): Promise<CreateInvitationResponse> {
-  return apiFetch<CreateInvitationResponse>("/api/v1/recruiter/candidate-invitations", {
-    method: "POST",
-    body: JSON.stringify({
-      candidate_id: candidateId,
-      valid_hours: validHours,
-    }),
-  });
+  return apiFetch<CreateInvitationResponse>(
+    `/api/v1/recruiter/candidate-access/candidates/${candidateId}/invitations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        candidate_id: candidateId,
+        valid_hours: validHours,
+      }),
+    }
+  );
 }
 
 export async function listCandidateInvitations(
@@ -61,7 +88,18 @@ export async function revokeCandidateInvitation(
   invitationId: string
 ): Promise<CandidateInvitationSummary> {
   return apiFetch<CandidateInvitationSummary>(
-    `/api/v1/recruiter/candidate-invitations/${invitationId}/revoke`,
+    `/api/v1/recruiter/candidate-access/invitations/${invitationId}/revoke`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+export async function revokeCandidateAccess(
+  candidateId: string
+): Promise<CandidateAccessStatusResponse> {
+  return apiFetch<CandidateAccessStatusResponse>(
+    `/api/v1/recruiter/candidate-access/candidates/${candidateId}/revoke`,
     {
       method: "POST",
     }

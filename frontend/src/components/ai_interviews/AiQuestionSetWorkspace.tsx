@@ -231,10 +231,10 @@ export function AiQuestionSetWorkspace({
       setError(null);
       setShowGenerateMcqDialog(false);
       const updated = await apiFetch<AiQuestionSetDetail>(
-        `/api/v1/ai-interviews/${templateId}/generate-mcqs`,
+        `/api/v1/ai-interviews/${templateId}/mcqs/generate`,
         {
           method: "POST",
-          body: JSON.stringify({ target_count: mcqGenerateCount }),
+          body: JSON.stringify({ count: mcqGenerateCount, difficulty: "FOUNDATIONAL" }),
         }
       );
       setDetail(updated);
@@ -247,81 +247,90 @@ export function AiQuestionSetWorkspace({
   };
 
   const handleSaveMcq = async (formData: McqFormData) => {
-    if (formData.slot_id) {
-      // Edit existing MCQ
-      const updated = await apiFetch<AiQuestionSetDetail>(
-        `/api/v1/ai-interviews/${templateId}/mcq-slots/${formData.slot_id}`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            competency_name: formData.competency_name,
-            question_text: formData.question_text,
-            difficulty: formData.difficulty,
-            estimated_time_minutes: formData.estimated_time_minutes,
-            options: formData.options,
-            correct_option_id: formData.correct_option_id,
-            answer_explanation: formData.answer_explanation,
-          }),
-        }
-      );
-      setDetail(updated);
-      setActionFeedback("Multiple choice question updated.");
-    } else {
-      // Add manual MCQ
-      const updated = await apiFetch<AiQuestionSetDetail>(
-        `/api/v1/ai-interviews/${templateId}/mcq-slots`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            competency_name: formData.competency_name,
-            question_text: formData.question_text,
-            difficulty: formData.difficulty,
-            estimated_time_minutes: formData.estimated_time_minutes,
-            options: formData.options,
-            correct_option_id: formData.correct_option_id,
-            answer_explanation: formData.answer_explanation,
-          }),
-        }
-      );
-      setDetail(updated);
-      setActionFeedback("New multiple choice question added.");
+    try {
+      setError(null);
+      if (formData.slot_id) {
+        // Edit existing MCQ
+        const updated = await apiFetch<AiQuestionSetDetail>(
+          `/api/v1/ai-interviews/${templateId}/mcqs/${formData.slot_id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              competency_name: formData.competency_name,
+              question_text: formData.question_text,
+              difficulty: formData.difficulty,
+              options: formData.options,
+              correct_option_id: formData.correct_option_id,
+              answer_explanation: formData.answer_explanation,
+            }),
+          }
+        );
+        setDetail(updated);
+        setActionFeedback("Multiple choice question updated.");
+      } else {
+        // Add manual MCQ
+        const updated = await apiFetch<AiQuestionSetDetail>(
+          `/api/v1/ai-interviews/${templateId}/mcqs`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              competency_name: formData.competency_name,
+              question_text: formData.question_text,
+              difficulty: formData.difficulty,
+              options: formData.options,
+              correct_option_id: formData.correct_option_id,
+              answer_explanation: formData.answer_explanation,
+            }),
+          }
+        );
+        setDetail(updated);
+        setActionFeedback("Multiple choice question added.");
+      }
+      setEditingMcqData(null);
+      setIsMcqModalOpen(false);
+    } catch (err: any) {
+      setError(err?.message || "Failed to save multiple choice question.");
     }
   };
 
   const handleDeleteMcq = async (slotId: string) => {
+    if (!window.confirm("Are you sure you want to remove this multiple-choice question?")) return;
     try {
       setError(null);
       const updated = await apiFetch<AiQuestionSetDetail>(
-        `/api/v1/ai-interviews/${templateId}/mcq-slots/${slotId}`,
+        `/api/v1/ai-interviews/${templateId}/mcqs/${slotId}`,
         { method: "DELETE" }
       );
       setDetail(updated);
       setActionFeedback("Multiple choice question removed.");
     } catch (err: any) {
-      setError(err?.message || "Failed to remove MCQ.");
+      setError(err?.message || "Failed to delete multiple choice question.");
     }
   };
 
   const handleMoveMcq = async (index: number, direction: "UP" | "DOWN") => {
     if (
+      index < 0 ||
       (direction === "UP" && index === 0) ||
       (direction === "DOWN" && index === mcqSlots.length - 1)
     ) {
       return;
     }
-    const targetIdx = direction === "UP" ? index - 1 : index + 1;
-    const reordered = [...mcqSlots];
-    const [moved] = reordered.splice(index, 1);
-    reordered.splice(targetIdx, 0, moved);
 
-    const orderedSlotIds = reordered.map((s) => s.slot_id);
+    const reordered = [...mcqSlots];
+    const targetIndex = direction === "UP" ? index - 1 : index + 1;
+    const [moved] = reordered.splice(index, 1);
+    reordered.splice(targetIndex, 0, moved);
+
+    const newSlotIds = reordered.map((s) => s.slot_id);
+
     try {
       setError(null);
       const updated = await apiFetch<AiQuestionSetDetail>(
-        `/api/v1/ai-interviews/${templateId}/reorder-mcqs`,
+        `/api/v1/ai-interviews/${templateId}/mcqs/reorder`,
         {
-          method: "PATCH",
-          body: JSON.stringify({ ordered_slot_ids: orderedSlotIds }),
+          method: "POST",
+          body: JSON.stringify({ slot_ids: newSlotIds }),
         }
       );
       setDetail(updated);
@@ -810,27 +819,29 @@ export function AiQuestionSetWorkspace({
               </p>
             </div>
 
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setShowGenerateMcqDialog(true)}
-                disabled={mcqSlots.length >= 10 || isGeneratingMcqs}
-              >
-                <Icon name="sparkles" size={14} className={isGeneratingMcqs ? "animate-spin" : ""} />
-                <span>{isGeneratingMcqs ? "Generating..." : "Generate MCQs with AI"}</span>
-              </button>
+            {mcqSlots.length > 0 && (
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowGenerateMcqDialog(true)}
+                  disabled={mcqSlots.length >= 10 || isGeneratingMcqs}
+                >
+                  <Icon name="sparkles" size={14} className={isGeneratingMcqs ? "animate-spin" : ""} />
+                  <span>{isGeneratingMcqs ? "Generating..." : "Generate MCQs with AI"}</span>
+                </button>
 
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleOpenAddMcq}
-                disabled={mcqSlots.length >= 10}
-              >
-                <Icon name="plus" size={14} />
-                <span>Add MCQ</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleOpenAddMcq}
+                  disabled={mcqSlots.length >= 10}
+                >
+                  <Icon name="plus" size={14} />
+                  <span>Add MCQ</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* MCQ Generation Dialog Modal */}
