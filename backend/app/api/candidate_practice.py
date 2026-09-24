@@ -28,8 +28,11 @@ from app.schemas.mcq_contract import (
     StrictSchema,
 )
 from app.schemas.practice_session_contract import (
+    PracticeAdvanceQuestionRequest,
     PracticeConversationAnswerRequest,
     PracticeMcqAnswerRequest,
+    PracticeQuestionRetryRequest,
+    PracticeReviewRetryRequest,
     PracticeSessionAbandonResponse,
     PracticeSessionDetailResponse,
     PracticeSessionStartRequest,
@@ -43,7 +46,9 @@ from app.services.candidate_practice_service import (
 )
 from app.services.practice_session_service import (
     abandon_practice_session,
+    advance_practice_question,
     get_practice_session_state,
+    retry_answer_review,
     start_or_resume_practice_session,
     submit_conversational_answer,
     submit_mcq_answer,
@@ -400,14 +405,14 @@ async def get_candidate_practice_jobs_endpoint(
     response_model=PracticeSessionDetailResponse,
     status_code=status.HTTP_200_OK,
     summary="Start or Resume Practice Session",
-    description="Initializes or resumes an active practice session with immutable question snapshots.",
+    description="Initializes or resumes an active live practice session with live AI generated questions.",
 )
 async def start_practice_session_endpoint(
     payload: PracticeSessionStartRequest,
     cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
     db: Session = Depends(get_db),
 ) -> PracticeSessionDetailResponse:
-    return start_or_resume_practice_session(
+    return await start_or_resume_practice_session(
         candidate_user=cand_ctx.user,
         release_id=payload.release_id,
         db=db,
@@ -438,7 +443,7 @@ async def get_practice_session_endpoint(
     response_model=PracticeSessionDetailResponse,
     status_code=status.HTTP_200_OK,
     summary="Submit Conversational Answer",
-    description="Submits a candidate conversational answer and triggers bounded AI follow-up or advances to next question.",
+    description="Submits a candidate conversational answer, persists it immediately, and generates next question or final evaluation.",
 )
 async def answer_conversation_endpoint(
     session_id: UUID,
@@ -450,6 +455,48 @@ async def answer_conversation_endpoint(
         candidate_user=cand_ctx.user,
         session_id=session_id,
         payload=payload,
+        db=db,
+    )
+
+
+@router.post(
+    "/candidate/practice-sessions/{session_id}/retry-question",
+    response_model=PracticeSessionDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Retry Live Question Generation",
+    description="Retries AI question generation on failure without skipping or inserting deterministic templates.",
+)
+async def retry_question_endpoint(
+    session_id: UUID,
+    payload: PracticeQuestionRetryRequest,
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+) -> PracticeSessionDetailResponse:
+    from app.services.practice_session_service import retry_question_generation
+    return await retry_question_generation(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
+        payload=payload,
+        db=db,
+    )
+
+
+@router.post(
+    "/candidate/practice-sessions/{session_id}/retry-final-review",
+    response_model=PracticeSessionDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Retry Final AI Interview Review",
+    description="Retries final evaluation on complete transcript on failure.",
+)
+async def retry_final_review_endpoint(
+    session_id: UUID,
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+) -> PracticeSessionDetailResponse:
+    from app.services.practice_session_service import retry_final_review
+    return await retry_final_review(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
         db=db,
     )
 
@@ -476,6 +523,47 @@ async def answer_mcq_endpoint(
 
 
 @router.post(
+    "/candidate/practice-sessions/{session_id}/retry-review",
+    response_model=PracticeSessionDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Retry Conversational Review",
+    description="Retries review generation on a previously saved answer without modifying the answer text.",
+)
+async def retry_review_endpoint(
+    session_id: UUID,
+    payload: PracticeReviewRetryRequest,
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+) -> PracticeSessionDetailResponse:
+    return await retry_answer_review(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
+        payload=payload,
+        db=db,
+    )
+
+
+@router.post(
+    "/candidate/practice-sessions/{session_id}/advance-question",
+    response_model=PracticeSessionDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Advance to Next Question",
+    description="Advances to the next primary question or completes conversational section without generating another follow-up.",
+)
+async def advance_question_endpoint(
+    session_id: UUID,
+    payload: Optional[PracticeAdvanceQuestionRequest] = None,
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+) -> PracticeSessionDetailResponse:
+    return advance_practice_question(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
+        db=db,
+    )
+
+
+@router.post(
     "/candidate/practice-sessions/{session_id}/abandon",
     response_model=PracticeSessionAbandonResponse,
     status_code=status.HTTP_200_OK,
@@ -492,3 +580,43 @@ async def abandon_practice_session_endpoint(
         session_id=session_id,
         db=db,
     )
+
+
+@router.get(
+    "/candidate/practice-sessions/{session_id}/report",
+    status_code=status.HTTP_200_OK,
+    summary="Get or Generate Practice Coaching Report",
+    description="Retrieves the completed practice coaching report or generates it from validated reviews and deterministic aggregates.",
+)
+async def get_practice_report_endpoint(
+    session_id: UUID,
+    cand_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+    db: Session = Depends(get_db),
+):
+    from app.services.practice_session_service import get_or_generate_practice_report
+    return await get_or_generate_practice_report(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
+        db=db,
+    )
+
+
+@router.post(
+    "/candidate/practice-sessions/{session_id}/retry-report",
+    status_code=status.HTTP_200_OK,
+    summary="Retry Practice Coaching Report Summary",
+    description="Retries AI coaching summary generation for a completed practice report without duplicating data.",
+)
+async def retry_practice_report_endpoint(
+    session_id: UUID,
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+):
+    from app.services.practice_session_service import retry_practice_report
+    return await retry_practice_report(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
+        db=db,
+    )
+
+

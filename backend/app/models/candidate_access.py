@@ -394,7 +394,7 @@ class CandidatePracticeSessionRecord(Base):
     __tablename__ = "candidate_practice_sessions"
     __table_args__ = (
         CheckConstraint(
-            "lifecycle_status IN ('IN_PROGRESS', 'COMPLETED', 'ABANDONED', 'EXPIRED', 'REVOKED')",
+            "lifecycle_status IN ('IN_PROGRESS', 'QUESTION_GENERATING', 'AWAITING_ANSWER', 'ANSWER_SAVING', 'QUESTION_GENERATION_FAILED_RETRYABLE', 'FINAL_ANSWER_SAVING', 'FINAL_REVIEW_GENERATING', 'FINAL_REVIEW_FAILED_RETRYABLE', 'COMPLETED', 'ABANDONED', 'EXPIRED', 'REVOKED')",
             name="ck_candidate_practice_sessions_lifecycle",
         ),
         CheckConstraint(
@@ -501,13 +501,13 @@ class CandidatePracticeSessionRecord(Base):
         nullable=False,
     )
     lifecycle_status: Mapped[str] = mapped_column(
-        String(30),
+        String(50),
         nullable=False,
         default="IN_PROGRESS",
         server_default=text("'IN_PROGRESS'"),
     )
     current_section: Mapped[str] = mapped_column(
-        String(30),
+        String(50),
         nullable=False,
         default="CONVERSATION",
         server_default=text("'CONVERSATION'"),
@@ -645,6 +645,18 @@ class CandidatePracticeSessionRecord(Base):
         cascade="all, delete-orphan",
         order_by="CandidatePracticeMcqAnswerRecord.submitted_at",
     )
+    answer_reviews: Mapped[List["CandidatePracticeAnswerReviewRecord"]] = relationship(
+        "CandidatePracticeAnswerReviewRecord",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="CandidatePracticeAnswerReviewRecord.created_at",
+    )
+    reports: Mapped[List["CandidatePracticeReportRecord"]] = relationship(
+        "CandidatePracticeReportRecord",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="CandidatePracticeReportRecord.report_version",
+    )
 
 
 class CandidatePracticeMessageRecord(Base):
@@ -714,6 +726,234 @@ class CandidatePracticeMessageRecord(Base):
     session: Mapped["CandidatePracticeSessionRecord"] = relationship(
         "CandidatePracticeSessionRecord",
         back_populates="messages",
+    )
+
+
+class CandidatePracticeAnswerSegmentRecord(Base):
+    __tablename__ = "candidate_practice_answer_segments"
+    __table_args__ = (
+        UniqueConstraint(
+            "answer_id",
+            "sequence_order",
+            name="uq_candidate_practice_segments_answer_seq",
+        ),
+        Index("ix_cand_practice_segments_answer_id", "answer_id"),
+        Index("ix_cand_practice_segments_session_id", "session_id"),
+        Index("ix_cand_practice_segments_question_id", "question_id"),
+    )
+
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_practice_sessions.session_id",
+            ondelete="CASCADE",
+            name="fk_cand_practice_segments_session_id",
+        ),
+        nullable=False,
+    )
+    answer_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_practice_messages.message_id",
+            ondelete="CASCADE",
+            name="fk_cand_practice_segments_answer_id",
+        ),
+        nullable=False,
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    sequence_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    start_char: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    end_char: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    segment_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    segmentation_version: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="1.0.0",
+        server_default=text("'1.0.0'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class CandidatePracticeAnswerReviewRecord(Base):
+    __tablename__ = "candidate_practice_answer_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "answer_id",
+            name="uq_candidate_practice_answer_reviews_answer_id",
+        ),
+        UniqueConstraint(
+            "session_id",
+            "idempotency_key",
+            name="uq_candidate_practice_answer_reviews_idempotency",
+        ),
+        Index("ix_cand_practice_reviews_session_id", "session_id"),
+        Index("ix_cand_practice_reviews_question_id", "question_id"),
+        Index("ix_cand_practice_reviews_answer_id", "answer_id"),
+        Index("ix_cand_practice_reviews_status", "lifecycle_status"),
+    )
+
+    review_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_practice_sessions.session_id",
+            ondelete="CASCADE",
+            name="fk_cand_practice_reviews_session_id",
+        ),
+        nullable=False,
+    )
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    answer_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_practice_messages.message_id",
+            ondelete="CASCADE",
+            name="fk_cand_practice_reviews_answer_id",
+        ),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+    )
+    schema_version: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="practice-answer-review.v1",
+        server_default=text("'practice-answer-review.v1'"),
+    )
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="REVIEW_READY",
+        server_default=text("'REVIEW_READY'"),
+    )
+    answer_status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="ASSESSABLE",
+        server_default=text("'ASSESSABLE'"),
+    )
+    acknowledgement: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    strengths: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    improvement_areas: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    next_steps: Mapped[List[str]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    stronger_structure: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    dimension_levels: Mapped[Dict[str, str]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+    follow_up_needed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    follow_up_question: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    uncertainty_codes: Mapped[List[str]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    provider_class: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    model_identifier: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    prompt_template_version: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    guardrail_policy_version: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    validation_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="PASSED",
+        server_default=text("'PASSED'"),
+    )
+    retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    session: Mapped["CandidatePracticeSessionRecord"] = relationship(
+        "CandidatePracticeSessionRecord",
+        back_populates="answer_reviews",
     )
 
 
@@ -986,4 +1226,213 @@ class JobPracticeCatalogRecord(Base):
         "UserRecord",
         foreign_keys=[published_by_user_id],
     )
+
+
+class CandidatePracticeReportRecord(Base):
+    __tablename__ = "candidate_practice_reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "report_version",
+            name="uq_candidate_practice_reports_session_version",
+        ),
+        UniqueConstraint(
+            "session_id",
+            "source_review_hash",
+            name="uq_candidate_practice_reports_session_hash",
+        ),
+        Index("ix_cand_practice_reports_session_id", "session_id"),
+        Index("ix_cand_practice_reports_candidate_id", "candidate_id"),
+        Index("ix_cand_practice_reports_org_id", "organization_id"),
+        Index("ix_cand_practice_reports_status", "lifecycle_status"),
+    )
+
+    report_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_practice_sessions.session_id",
+            ondelete="CASCADE",
+            name="fk_cand_practice_reports_session_id",
+        ),
+        nullable=False,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_identities.identity_id",
+            ondelete="CASCADE",
+            name="fk_cand_practice_reports_candidate_id",
+        ),
+        nullable=False,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    report_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    schema_version: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="practice-coaching-summary.v1",
+        server_default=text("'practice-coaching-summary.v1'"),
+    )
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="SUMMARY_READY",
+        server_default=text("'SUMMARY_READY'"),
+    )
+    source_review_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    aggregation_policy_version: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="1.0.0",
+        server_default=text("'1.0.0'"),
+    )
+    summary_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    strongest_areas: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    priority_improvements: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    competency_commentary: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    response_patterns: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    next_practice_plan: Mapped[List[str]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    competency_aggregates: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    dimension_aggregates: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    question_trend: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'"),
+    )
+    trend_classification: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="NOT_ENOUGH_ASSESSABLE_DATA",
+        server_default=text("'NOT_ENOUGH_ASSESSABLE_DATA'"),
+    )
+    mcq_breakdown: Mapped[Dict[str, Any]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+    completion_counts: Mapped[Dict[str, Any]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+    disclaimer: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="This is practice coaching and not a hiring decision.",
+        server_default=text("'This is practice coaching and not a hiring decision.'"),
+    )
+    provider_class: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    model_identifier: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    prompt_template_version: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    guardrail_policy_version: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    validation_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="PASSED",
+        server_default=text("'PASSED'"),
+    )
+    retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    is_current: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+    superseded_by_report_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    finalized_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Relationships
+    session: Mapped["CandidatePracticeSessionRecord"] = relationship(
+        "CandidatePracticeSessionRecord",
+        back_populates="reports",
+    )
+    candidate: Mapped["CandidateIdentityRecord"] = relationship(
+        "CandidateIdentityRecord",
+    )
+
 

@@ -410,6 +410,19 @@ def release_practice_to_candidate(
             },
         )
 
+    # Phase 3G.1: Authoritative release eligibility verification
+    from app.services.ai_provenance_service import evaluate_release_eligibility
+    eligibility_result = evaluate_release_eligibility(ai_set, target_version)
+    if not eligibility_result.is_eligible:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": eligibility_result.reason_code.value if eligibility_result.reason_code else "INELIGIBLE_FOR_RELEASE",
+                "message": eligibility_result.safe_message or "Question set is ineligible for Phase 3G practice release.",
+                "blocking_items": eligibility_result.blocking_items,
+            },
+        )
+
     # Check question set contains at least 1 valid question
     items = ai_set.items or []
     conv_count = sum(1 for it in items if it.get("question_format", "CONVERSATION") == "CONVERSATION")

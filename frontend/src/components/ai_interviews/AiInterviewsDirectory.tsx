@@ -129,14 +129,16 @@ export function AiInterviewsDirectory({
     job.job_title.toLowerCase().includes(searchQuery.toLowerCase().trim())
   );
 
-  const formatStatus = (status: string, isStale?: boolean) => {
+  const formatStatus = (status: string, isStale?: boolean, isLegacy?: boolean) => {
+    if (isLegacy) return "Legacy set";
     if (isStale || status === "STALE") return "Stale";
     if (status === "APPROVED") return "Approved";
     if (status === "VALIDATED") return "Ready for Review";
     return "Draft";
   };
 
-  const formatLifecycleAction = (status: string, isStale?: boolean) => {
+  const formatLifecycleAction = (status: string, isStale?: boolean, isLegacy?: boolean) => {
+    if (isLegacy) return "Review / Upgrade";
     if (isStale || status === "STALE") return "Update questions";
     if (status === "APPROVED") return "View questions";
     if (status === "VALIDATED") return "Review and approve";
@@ -421,10 +423,13 @@ export function AiInterviewsDirectory({
 
           <div className="aiq-recent-list">
             {recentDirectory.sets.map((set) => {
-              const status = formatStatus(set.lifecycle_status, set.is_source_stale);
-              const actionLabel = formatLifecycleAction(set.lifecycle_status, set.is_source_stale);
+              const isLegacy = set.is_legacy;
+              const status = formatStatus(set.lifecycle_status, set.is_source_stale, isLegacy);
+              const actionLabel = formatLifecycleAction(set.lifecycle_status, set.is_source_stale, isLegacy);
               const badgeClass =
-                status === "Approved"
+                isLegacy
+                  ? "legacy"
+                  : status === "Approved"
                   ? "approved"
                   : status === "Ready for Review"
                   ? "validated"

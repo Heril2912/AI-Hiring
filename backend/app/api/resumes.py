@@ -831,13 +831,19 @@ async def get_candidate_profiles_history(
                     "operationCount": len(corr.operations_payload),
                 }
 
+            provenance_enum = ProfileProvenance.PARSER_EXTRACTED
+            try:
+                provenance_enum = ProfileProvenance(p.provenance)
+            except (ValueError, KeyError):
+                pass
+
             results.append(
                 ProfileSummaryResponse(
                     profile_id=str(p.profile_id),
                     profile_version=p.profile_version,
                     schema_version=p.schema_version,
                     parser_pipeline_version=p.parser_pipeline_version,
-                    provenance=ProfileProvenance(p.provenance),
+                    provenance=provenance_enum,
                     review_required=p.review_required,
                     created_at=p.created_at.isoformat(),
                     parent_profile_id=str(p.parent_profile_id) if p.parent_profile_id else None,

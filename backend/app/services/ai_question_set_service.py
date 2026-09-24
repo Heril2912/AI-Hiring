@@ -37,6 +37,7 @@ from app.schemas.ai_question_set import (
     AiQuestionSlotUpdateRequest,
     EligibleJobItemResponse,
     EligibleJobsResponse,
+    ReleaseEligibilitySummaryDto,
     SafeRubricResponse,
 )
 from app.schemas.phase3_enums import (
@@ -297,6 +298,9 @@ async def _generate_requirement_grounded_slots(
     except Exception:
         pass
 
+    model_id = active_profile.model_identifier if active_profile else "qwen/qwen3-4b-2507"
+    prov_class = active_profile.provider_type.value if (active_profile and hasattr(active_profile.provider_type, "value")) else "LOCAL_OPENAI_COMPATIBLE"
+
     for slot in plan["slots"]:
         item: Dict[str, Any] = {
             "slot_id": slot["slot_id"],
@@ -309,10 +313,12 @@ async def _generate_requirement_grounded_slots(
             "rubric": slot.get("rubric"),
             "ai_wording": None,
             "review_state": "UNREVIEWED",
-            "authoring_origin": "AI_GENERATED",
+            "authoring_origin": AuthoringOrigin.LOCAL_LLM_GENERATED.value,
             "validation_status": "PENDING",
             "safe_failure_code": None,
             "rationale_code": "REQUIREMENT_GROUNDED",
+            "model_identifier": model_id,
+            "provider_class": prov_class,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -528,6 +534,40 @@ def _map_record_to_detail_dto(
         for rid in (ai_set.source_requirement_ids or [])
     ]
 
+    # Compute release eligibility and legacy check
+    from app.services.ai_provenance_service import evaluate_release_eligibility
+    elig_summary = None
+    target_job_ver = None
+    if ver_id:
+        stmt_ver = select(JobVersion).where(JobVersion.job_version_id == ver_id)
+        target_job_ver = db.execute(stmt_ver).scalar_one_or_none()
+    elif ai_set.job_id:
+        stmt_ver = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number))
+        target_job_ver = db.execute(stmt_ver).scalars().first()
+
+    is_legacy = any(
+        it.get("authoring_origin") in ("LEGACY_DETERMINISTIC", "LEGACY_MANUAL", "DETERMINISTIC", "RECRUITER_AUTHORED")
+        for it in (ai_set.items or [])
+    ) or (ai_set.source_mode == "BLUEPRINT_GROUNDED" and not ai_set.model_identifier)
+
+    if target_job_ver:
+        temp_status = ai_set.lifecycle_status
+        ai_set.lifecycle_status = "APPROVED"
+        elig_res = evaluate_release_eligibility(ai_set, target_job_ver)
+        ai_set.lifecycle_status = temp_status
+        elig_summary = ReleaseEligibilitySummaryDto(
+            is_eligible=elig_res.is_eligible,
+            reason_code=elig_res.reason_code.value if elig_res.reason_code else None,
+            safe_message=elig_res.safe_message,
+            blocking_items=elig_res.blocking_items or [],
+        )
+
+    model_name = ai_set.model_identifier or "Qwen3-4B"
+    if "qwen" in model_name.lower():
+        model_display = "Qwen3-4B MLX"
+    else:
+        model_display = model_name
+
     return AiQuestionSetDetailResponse(
         ai_set_id=ai_set.ai_set_id,
         set_version=ai_set.set_version,
@@ -543,6 +583,13 @@ def _map_record_to_detail_dto(
         is_immutable=ai_set.is_immutable,
         content_hash=ai_set.content_hash,
         action=action,
+        provider_class=ai_set.provider_class,
+        model_identifier=ai_set.model_identifier,
+        model_display_name=model_display,
+        prompt_template_version=ai_set.prompt_template_version,
+        guardrail_policy_version=ai_set.guardrail_policy_version,
+        schema_version=ai_set.schema_version,
+        predecessor_set_id=ai_set.predecessor_set_id,
         slots=slot_dtos,
         total_slots_count=len(slot_dtos),
         generated_slots_count=generated_count,
@@ -551,6 +598,8 @@ def _map_record_to_detail_dto(
         mcq_count=mcq_count,
         is_source_stale=is_stale,
         stale_reason=stale_reason,
+        release_eligibility=elig_summary,
+        is_legacy=is_legacy,
         created_at=ai_set.created_at,
         updated_at=ai_set.updated_at,
         approved_at=ai_set.approved_at,
@@ -640,6 +689,13 @@ def list_ai_question_sets(
             if eff_status.upper() != status_filter.upper():
                 continue
 
+        is_leg = any(
+            it.get("authoring_origin") in ("LEGACY_DETERMINISTIC", "LEGACY_MANUAL", "DETERMINISTIC", "RECRUITER_AUTHORED")
+            for it in (ai_set.items or [])
+        ) or (ai_set.source_mode == "BLUEPRINT_GROUNDED" and not ai_set.model_identifier)
+
+        m_display = "Qwen3-4B MLX" if (ai_set.model_identifier and "qwen" in ai_set.model_identifier.lower()) else (ai_set.model_identifier or "Local LLM")
+
         summaries.append(
             AiQuestionSetSummaryResponse(
                 ai_set_id=ai_set.ai_set_id,
@@ -651,6 +707,8 @@ def list_ai_question_sets(
                 lifecycle_status=eff_status,
                 is_immutable=ai_set.is_immutable,
                 is_source_stale=(eff_status == "STALE"),
+                is_legacy=is_leg,
+                model_display_name=m_display,
                 generated_question_count=gen_count,
                 total_blueprint_slots=total_slots,
                 conversation_count=conv_cnt,
@@ -906,6 +964,13 @@ async def generate_ai_questions_by_job_id(
 
     next_version = (existing_set.set_version + 1) if (existing_set and force_regenerate) else 1
 
+    reg = provider_registry or get_provider_registry()
+    active_prof = None
+    try:
+        active_prof = reg.get_active_profile()
+    except Exception:
+        pass
+
     org_id = getattr(actor, "organization_id", getattr(job, "organization_id", None)) or uuid.uuid4()
     new_set = AiInterviewQuestionSetRecord(
         ai_set_id=uuid.uuid4(),
@@ -921,6 +986,12 @@ async def generate_ai_questions_by_job_id(
         set_version=next_version,
         lifecycle_status="DRAFT",
         is_immutable=False,
+        provider_profile_id=active_prof.profile_id if active_prof else None,
+        provider_class=active_prof.provider_type.value if (active_prof and hasattr(active_prof.provider_type, "value")) else "LOCAL_OPENAI_COMPATIBLE",
+        model_identifier=active_prof.model_identifier if active_prof else "qwen/qwen3-4b-2507",
+        prompt_template_version="practice-question.v1",
+        guardrail_policy_version="1.0.0",
+        schema_version="practice-question.v1",
         items=items,
         created_by_user_id=actor.user_id,
     )
@@ -1096,15 +1167,11 @@ def update_ai_question_slot(
     if job:
         _check_recruiter_access(actor, job)
 
-    if ai_set.is_immutable:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "SET_IS_IMMUTABLE", "message": "Approved AI question sets cannot be modified in-place."},
-        )
+    editable_set = _ensure_editable_set(ai_set, actor, db)
 
     str_slot_id = str(slot_id)
     target_item = None
-    items_copy = list(ai_set.items)
+    items_copy = list(editable_set.items or [])
     for it in items_copy:
         if str(it.get("slot_id")) == str_slot_id:
             target_item = it
@@ -1122,11 +1189,28 @@ def update_ai_question_slot(
     elif decision == "EDIT":
         if not payload.wording or not payload.wording.strip():
             raise HTTPException(status_code=422, detail="Edited wording cannot be empty.")
-        target_item["ai_wording"] = payload.wording.strip()
+        edited_text = payload.wording.strip()
+        from app.services.ai_provenance_service import validate_conversational_question_text
+        val_outcome = validate_conversational_question_text(
+            question_text=edited_text,
+            competency_name=target_item.get("competency_name", ""),
+            job_version=editable_set.job_version,
+            source_requirement_ids=[str(r) for r in (target_item.get("source_requirement_ids") or [])],
+        )
+        if not val_outcome.is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": val_outcome.error_code, "message": val_outcome.error_message},
+            )
+        target_item["ai_wording"] = edited_text
+        target_item["question_text"] = edited_text
         target_item["review_state"] = "EDITED"
-        target_item["authoring_origin"] = "RECRUITER_EDITED"
+        target_item["authoring_origin"] = AuthoringOrigin.LOCAL_LLM_GENERATED_RECRUITER_EDITED.value
         target_item["validation_status"] = "PASSED"
         target_item["safe_failure_code"] = None
+        target_item["is_edited"] = True
+        target_item["reviewer_user_id"] = str(actor.user_id)
+        target_item["reviewed_at"] = datetime.now(timezone.utc).isoformat()
         target_item["updated_at"] = datetime.now(timezone.utc).isoformat()
     elif decision == "REVISE":
         target_item["review_state"] = "REVISED"
@@ -1135,20 +1219,21 @@ def update_ai_question_slot(
         if not payload.wording or not payload.wording.strip():
             raise HTTPException(status_code=422, detail="Manual question wording cannot be empty.")
         target_item["ai_wording"] = payload.wording.strip()
+        target_item["question_text"] = payload.wording.strip()
         target_item["review_state"] = "RECRUITER_AUTHORED"
-        target_item["authoring_origin"] = "RECRUITER_AUTHORED"
+        target_item["authoring_origin"] = AuthoringOrigin.LEGACY_MANUAL.value
         target_item["validation_status"] = "PASSED"
         target_item["safe_failure_code"] = None
         target_item["updated_at"] = datetime.now(timezone.utc).isoformat()
     else:
         raise HTTPException(status_code=422, detail=f"Unsupported review decision '{payload.decision}'.")
 
-    ai_set.items = items_copy
-    flag_modified(ai_set, "items")
+    editable_set.items = items_copy
+    flag_modified(editable_set, "items")
     db.commit()
-    db.refresh(ai_set)
+    db.refresh(editable_set)
 
-    return _map_record_to_detail_dto(ai_set, db)
+    return _map_record_to_detail_dto(editable_set, db)
 
 
 async def regenerate_ai_question_slot(
@@ -1493,15 +1578,21 @@ async def generate_mcq_slots_for_template(
             "answer_explanation": q.answer_explanation,
             "difficulty": diff_str,
             "review_state": "UNREVIEWED",
-            "authoring_origin": "AI_GENERATED",
+            "authoring_origin": AuthoringOrigin.LOCAL_LLM_GENERATED.value,
             "validation_status": "PASSED" if val_res.is_valid else "FAILED",
             "safe_failure_code": None if val_res.is_valid else val_res.error_code,
             "rationale_code": "REQUIREMENT_GROUNDED",
+            "model_identifier": active_profile.model_identifier if active_profile else "qwen/qwen3-4b-2507",
+            "provider_class": active_profile.provider_type.value if (active_profile and hasattr(active_profile.provider_type, "value")) else "LOCAL_OPENAI_COMPATIBLE",
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         items.append(new_item)
 
     editable_set.items = items
+    if active_profile:
+        editable_set.provider_profile_id = active_profile.profile_id
+        editable_set.provider_class = active_profile.provider_type.value if hasattr(active_profile.provider_type, "value") else str(active_profile.provider_type)
+        editable_set.model_identifier = active_profile.model_identifier
     flag_modified(editable_set, "items")
     db.commit()
     db.refresh(editable_set)
@@ -1582,7 +1673,7 @@ def add_manual_mcq_slot(
         "answer_explanation": payload.answer_explanation,
         "difficulty": diff_str,
         "review_state": "RECRUITER_AUTHORED",
-        "authoring_origin": "RECRUITER_AUTHORED",
+        "authoring_origin": AuthoringOrigin.LEGACY_MANUAL.value,
         "validation_status": "PASSED",
         "safe_failure_code": None,
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -1682,9 +1773,12 @@ def update_mcq_slot(
     target_item["competency_name"] = new_comp
     target_item["difficulty"] = new_diff
     target_item["review_state"] = "EDITED"
-    target_item["authoring_origin"] = "RECRUITER_EDITED"
+    target_item["authoring_origin"] = AuthoringOrigin.LOCAL_LLM_GENERATED_RECRUITER_EDITED.value
     target_item["validation_status"] = "PASSED"
     target_item["safe_failure_code"] = None
+    target_item["is_edited"] = True
+    target_item["reviewer_user_id"] = str(actor.user_id)
+    target_item["reviewed_at"] = datetime.now(timezone.utc).isoformat()
     target_item["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     editable_set.items = items
@@ -1897,6 +1991,35 @@ def validate_ai_question_set(
                 errors.append(f"Duplicate MCQ detected (#{slot_num}).")
             seen_mcq_texts.add(q_norm)
 
+    # 5. Phase 3G.1 Server-side strict provenance & release eligibility check
+    from app.services.ai_provenance_service import evaluate_release_eligibility, ReleaseEligibilityResult
+    
+    elig_summary = None
+    target_job_ver = ai_set.job_version
+    if not target_job_ver and ai_set.job_id:
+        stmt_jv = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number))
+        target_job_ver = db.execute(stmt_jv).scalars().first()
+
+    if target_job_ver:
+        # Evaluate eligibility (ignoring approval status during pre-approval validation)
+        temp_status = ai_set.lifecycle_status
+        ai_set.lifecycle_status = "APPROVED"  # test eligibility if approved
+        elig_res = evaluate_release_eligibility(ai_set, target_job_ver)
+        ai_set.lifecycle_status = temp_status
+
+        if not elig_res.is_eligible:
+            for b in (elig_res.blocking_items or []):
+                errors.append(b.get("message") or f"Slot #{b.get('slot_number')} is ineligible for release.")
+            if not elig_res.blocking_items and elig_res.safe_message:
+                errors.append(elig_res.safe_message)
+
+        elig_summary = ReleaseEligibilitySummaryDto(
+            is_eligible=elig_res.is_eligible,
+            reason_code=elig_res.reason_code.value if elig_res.reason_code else None,
+            safe_message=elig_res.safe_message,
+            blocking_items=elig_res.blocking_items or [],
+        )
+
     is_valid = len(errors) == 0
     if is_valid and ai_set.lifecycle_status != "APPROVED":
         ai_set.lifecycle_status = "VALIDATED"
@@ -1907,6 +2030,7 @@ def validate_ai_question_set(
         lifecycle_status=ai_set.lifecycle_status,
         blocking_errors=errors,
         safe_message="AI question set successfully validated." if is_valid else "Validation failed with blocking issues.",
+        release_eligibility=elig_summary,
     )
 
 
@@ -1925,6 +2049,7 @@ def approve_ai_question_set(
 
     stmt_set = (
         select(AiInterviewQuestionSetRecord)
+        .options(selectinload(AiInterviewQuestionSetRecord.job_version))
         .where(
             (AiInterviewQuestionSetRecord.ai_set_id == template_id)
             | (AiInterviewQuestionSetRecord.template_id == template_id)
@@ -1934,6 +2059,29 @@ def approve_ai_question_set(
     ai_set = db.execute(stmt_set).scalars().first()
     if not ai_set:
         raise HTTPException(status_code=404, detail="AI question set not found.")
+
+    # Phase 3G.1 Server-side strict origin and provenance check on all items before approving
+    items = ai_set.items or []
+    for idx, it in enumerate(items):
+        slot_num = idx + 1
+        origin_val = it.get("authoring_origin") or "LEGACY_DETERMINISTIC"
+        norm_origin = AuthoringOrigin.normalize_to_canonical(origin_val)
+        if not AuthoringOrigin.is_eligible_for_release(norm_origin):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "INELIGIBLE_PROVENANCE",
+                    "message": f"Question #{slot_num} has origin '{norm_origin.value}' and cannot be approved for an AI practice set.",
+                },
+            )
+        if it.get("validation_status") == "FAILED":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "VALIDATION_FAILED",
+                    "message": f"Question #{slot_num} failed validation and cannot be approved.",
+                },
+            )
 
     if ai_set.is_immutable:
         return AiQuestionSetApproveResponse(
@@ -2072,6 +2220,29 @@ def prepare_practice_set_for_revision(
         matched_req_id = target_req_names.get(comp_name.strip().lower())
         new_source_req_ids = [matched_req_id] if matched_req_id else []
 
+        # Revalidate copied item
+        is_item_valid = True
+        err_code = None
+        if it.get("question_format") == "MCQ_SINGLE_ANSWER":
+            from app.services.ai_provenance_service import validate_mcq_structure_and_safety
+            m_res = validate_mcq_structure_and_safety(
+                stem=it.get("question_text") or it.get("ai_wording") or "",
+                options=it.get("options") or [],
+                correct_option_id=it.get("correct_option_id") or "",
+                explanation=it.get("answer_explanation") or "",
+                competency_name=comp_name,
+            )
+            is_item_valid = m_res.is_valid
+            err_code = m_res.error_code
+        else:
+            from app.services.ai_provenance_service import validate_conversational_question_text
+            c_res = validate_conversational_question_text(
+                question_text=it.get("ai_wording") or it.get("question_text") or "",
+                competency_name=comp_name,
+            )
+            is_item_valid = c_res.is_valid
+            err_code = c_res.error_code
+
         copied_item = {
             "slot_id": new_slot_id,
             "display_order": it.get("display_order", len(copied_items)),
@@ -2089,10 +2260,11 @@ def prepare_practice_set_for_revision(
             "answer_explanation": it.get("answer_explanation"),
             "difficulty": it.get("difficulty", "FOUNDATIONAL"),
             "review_state": "UNREVIEWED",  # Always reset review state for new revision
-            "authoring_origin": it.get("authoring_origin", "AI_GENERATED"),
-            "validation_status": "PENDING",
-            "safe_failure_code": None,
+            "authoring_origin": it.get("authoring_origin", "LOCAL_LLM_GENERATED"),
+            "validation_status": "PASSED" if is_item_valid else "FAILED",
+            "safe_failure_code": err_code,
             "rationale_code": "REVISION_COPIED_DRAFT",
+            "model_identifier": it.get("model_identifier") or old_set.model_identifier or "qwen/qwen3-4b-2507",
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         copied_items.append(copied_item)

@@ -426,6 +426,12 @@
   color: var(--status-warn, #92400e);
 }
 
+.aiq-status-badge.legacy {
+  background-color: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #d1d5db;
+}
+
 /* ==========================================================================
    Question Review Workspace Layout
    ========================================================================== */

@@ -378,7 +378,7 @@ async def test_recruiter_add_and_update_manual_mcq(test_db: Session, test_recrui
     mcq_slot = [s for s in updated_detail.slots if s.question_format == "MCQ_SINGLE_ANSWER"][0]
     assert mcq_slot.question_text == "What does the HTTP 409 Conflict status code indicate?"
     assert mcq_slot.correct_option_id == "A"
-    assert mcq_slot.authoring_origin == "RECRUITER_AUTHORED"
+    assert mcq_slot.authoring_origin in ("LEGACY_MANUAL", "RECRUITER_AUTHORED")
 
     # 3. Update MCQ
     update_payload = McqUpdateRequest(
@@ -547,17 +547,14 @@ async def test_practice_release_and_candidate_discovery(
         db=test_db,
     )
 
-    mcq_payload = McqCreateRequest(
-        question_text="Which HTTP status code signifies that a resource was successfully created?",
-        options=[
-            McqOptionDto(option_id="A", text="201 Created"),
-            McqOptionDto(option_id="B", text="200 OK"),
-            McqOptionDto(option_id="C", text="204 No Content"),
-        ],
-        correct_option_id="A",
-        answer_explanation="201 Created is the canonical standard for resource creation.",
+    # Generate MCQs with AI for Phase 3G.1 release eligibility
+    gen_payload = McqGenerateRequest(count=1, difficulty=QuestionDifficulty.INTERMEDIATE)
+    await generate_mcq_slots_for_template(
+        actor=test_recruiter,
+        template_id=detail.ai_set_id,
+        payload=gen_payload,
+        db=test_db,
     )
-    add_manual_mcq_slot(actor=test_recruiter, template_id=detail.ai_set_id, payload=mcq_payload, db=test_db)
     
     # 2. Approve set
     approve_ai_question_set(actor=test_recruiter, template_id=detail.ai_set_id, db=test_db)

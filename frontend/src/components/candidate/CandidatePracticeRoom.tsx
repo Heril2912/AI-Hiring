@@ -4,10 +4,13 @@ import {
   PracticeSessionDetailResponse,
   abandonPracticeSession,
   getPracticeSessionState,
+  retryFinalReview,
+  retryQuestionGeneration,
   submitConversationalAnswer,
   submitMcqAnswer,
 } from "../../api/candidatePracticeSession";
 import { Icon } from "../Icon";
+import { CandidatePracticeReport } from "./CandidatePracticeReport";
 
 interface CandidatePracticeRoomProps {
   sessionId: string;
@@ -18,19 +21,19 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
   const [session, setSession] = useState<PracticeSessionDetailResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   // Conversational response state
   const [answerText, setAnswerText] = useState<string>("");
-
-  // MCQ response state
-  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [selectedOptionId, setSelectedOptionId] = useState<string>("");
 
   // Timer countdown
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
 
-  // Auto-scroll ref
+  // Auto-scroll ref and textarea ref for focus management
   const chatStreamEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchSessionState = async () => {
     try {
@@ -50,22 +53,37 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
     fetchSessionState();
   }, [sessionId]);
 
-  // Scroll to bottom when messages update
+  // Scroll to bottom when messages or state updates
   useEffect(() => {
-    if (chatStreamEndRef.current) {
+    if (chatStreamEndRef.current && typeof chatStreamEndRef.current.scrollIntoView === "function") {
       chatStreamEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [session?.messages]);
+  }, [session?.messages, session?.lifecycle_status]);
+
+  // Focus textarea when awaiting answer
+  useEffect(() => {
+    if (session?.lifecycle_status === "AWAITING_ANSWER" && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [session?.lifecycle_status, session?.current_conv_index]);
 
   // Countdown timer effect
   useEffect(() => {
-    if (timeRemaining <= 0 || session?.lifecycle_status !== "IN_PROGRESS") return;
+    if (timeRemaining <= 0) return;
+    const activeStates = [
+      "IN_PROGRESS",
+      "QUESTION_GENERATING",
+      "AWAITING_ANSWER",
+      "ANSWER_SAVING",
+      "FINAL_ANSWER_SAVING",
+      "FINAL_REVIEW_GENERATING",
+    ];
+    if (!session || !activeStates.includes(session.lifecycle_status)) return;
 
     const timer = setInterval(() => {
       setTimeRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          // Refresh state on expiration
           fetchSessionState();
           return 0;
         }
@@ -114,24 +132,33 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
     }
   };
 
-  const handleMcqSubmit = async () => {
-    if (!session || !session.active_question || !selectedOptionId || isSubmitting) return;
-
+  const handleRetryQuestion = async () => {
+    if (!session || isRetrying) return;
     try {
-      setIsSubmitting(true);
+      setIsRetrying(true);
       setError(null);
-      const updated = await submitMcqAnswer(
-        session.session_id,
-        session.active_question.question_id,
-        selectedOptionId
-      );
+      const updated = await retryQuestionGeneration(session.session_id);
       setSession(updated);
       setTimeRemaining(updated.time_remaining_seconds || 0);
-      setSelectedOptionId(null);
     } catch (err: any) {
-      setError(err?.message || "Failed to submit your selection.");
+      setError(err?.message || "Retry question generation failed.");
     } finally {
-      setIsSubmitting(false);
+      setIsRetrying(false);
+    }
+  };
+
+  const handleRetryFinalReview = async () => {
+    if (!session || isRetrying) return;
+    try {
+      setIsRetrying(true);
+      setError(null);
+      const updated = await retryFinalReview(session.session_id);
+      setSession(updated);
+      setTimeRemaining(updated.time_remaining_seconds || 0);
+    } catch (err: any) {
+      setError(err?.message || "Retry final evaluation failed.");
+    } finally {
+      setIsRetrying(false);
     }
   };
 
@@ -175,7 +202,7 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
   if (error && !session) {
     return (
       <div className="candidate-home-container" style={{ padding: "40px 20px" }}>
-        <div className="feedback-box error" role="alert" style={{ marginBottom: "20px" }}>
+        <div className="feedback-box warning" role="alert" style={{ marginBottom: "20px" }}>
           <Icon name="alert-triangle" size={16} />
           <span>{error}</span>
         </div>
@@ -189,16 +216,80 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
   if (!session) return null;
 
   // Calculate Progress Percentage
-  const totalQuestions = (session.total_conv_count || 0) + (session.total_mcq_count || 0);
-  let completedCount = session.total_response_count || 0;
+  const totalQuestions = session.total_conv_count || 1;
+  let completedCount = session.current_conv_index;
   if (session.lifecycle_status === "COMPLETED") {
     completedCount = totalQuestions;
   }
-  const progressPercent =
-    totalQuestions > 0 ? Math.min(100, Math.round((completedCount / totalQuestions) * 100)) : 0;
+  const progressPercent = Math.min(100, Math.round((completedCount / totalQuestions) * 100));
+
+  const isLiveActive =
+    session.lifecycle_status === "AWAITING_ANSWER" ||
+    session.lifecycle_status === "QUESTION_GENERATING" ||
+    session.lifecycle_status === "ANSWER_SAVING" ||
+    session.lifecycle_status === "QUESTION_GENERATION_FAILED_RETRYABLE" ||
+    session.lifecycle_status === "FINAL_ANSWER_SAVING" ||
+    session.lifecycle_status === "FINAL_REVIEW_GENERATING" ||
+    session.lifecycle_status === "FINAL_REVIEW_FAILED_RETRYABLE" ||
+    session.lifecycle_status === "IN_PROGRESS";
+
+  // When session is completed, render the full dedicated scrollable coaching report
+  if (session.lifecycle_status === "COMPLETED") {
+    return (
+      <div className="practice-report-page-wrapper">
+        <CandidatePracticeReport
+          sessionId={session.session_id}
+          onExit={onExit}
+        />
+      </div>
+    );
+  }
+
+  // When session is abandoned or expired, render the standalone status view
+  if (session.lifecycle_status === "ABANDONED" || session.lifecycle_status === "EXPIRED") {
+    return (
+      <div className="practice-room-layout">
+        <div className="practice-completed-view">
+          <div
+            style={{
+              width: "56px",
+              height: "56px",
+              borderRadius: "50%",
+              backgroundColor: "#f1f5f9",
+              color: "#475569",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon name="alert-circle" size={28} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#0f172a", margin: "0 0 8px 0" }}>
+              {session.lifecycle_status === "ABANDONED" ? "Session Abandoned" : "Session Expired"}
+            </h2>
+            <p style={{ fontSize: "14px", color: "#64748b", maxWidth: "440px", margin: "0 auto", lineHeight: 1.5 }}>
+              This practice session is closed. You can start a fresh session from your practice directory at any time (up to 3 attempts per 24 hours).
+            </p>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={onExit}>
+            Return to Directory
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="practice-room-layout">
+      {/* Live Region for Accessible Announcements */}
+      <div className="sr-only" role="status" aria-live="polite">
+        {isSubmitting && "Saving your response..."}
+        {session.lifecycle_status === "QUESTION_GENERATING" && "Preparing your next question..."}
+        {session.lifecycle_status === "FINAL_REVIEW_GENERATING" && "Generating final interview evaluation..."}
+        {session.lifecycle_status === "AWAITING_ANSWER" && `Question ${session.current_conv_index + 1} of ${totalQuestions} is ready.`}
+      </div>
+
       {/* Header */}
       <header className="practice-room-header">
         <div className="practice-header-meta">
@@ -217,50 +308,26 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
             </span>
           </h1>
           <div className="practice-header-subtitle">
-            {session.current_section === "CONVERSATION" && (
-              <span>
-                Conversational Section • Question {session.current_conv_index + 1} of{" "}
-                {session.total_conv_count}
-              </span>
-            )}
-            {session.current_section === "MCQ" && (
-              <span>
-                Multiple Choice Section • Question {session.current_mcq_index + 1} of{" "}
-                {session.total_mcq_count}
-              </span>
-            )}
-            {session.current_section === "COMPLETE" && (
-              <span>Practice Completed • All Sections Finished</span>
-            )}
+            <span>
+              Question {Math.min(session.current_conv_index + 1, totalQuestions)} of {totalQuestions}
+            </span>
           </div>
         </div>
 
         <div className="practice-header-actions">
-          {session.lifecycle_status === "IN_PROGRESS" && (
-            <div className="practice-timer-badge" title="Session expires in 24 hours">
-              <Icon name="clock" size={13} />
-              <span>{formatTimer(timeRemaining)}</span>
-            </div>
-          )}
+          <div className="practice-timer-badge" title="Session expires in 24 hours">
+            <Icon name="clock" size={13} />
+            <span>{formatTimer(timeRemaining)}</span>
+          </div>
 
-          {session.lifecycle_status === "IN_PROGRESS" ? (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleAbandon}
-              title="Abandon practice session"
-            >
-              Exit Session
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={onExit}
-            >
-              Back to Directory
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleAbandon}
+            title="Abandon practice session"
+          >
+            Exit Session
+          </button>
         </div>
       </header>
 
@@ -269,16 +336,29 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
         <div className="practice-progress-fill" style={{ width: `${progressPercent}%` }} />
       </div>
 
-      {/* Optional Safe Fallback Banner */}
       {session.safe_fallback_notice && (
-        <div className="practice-fallback-banner" role="status">
+        <div
+          role="status"
+          style={{
+            margin: "12px 24px 0 24px",
+            padding: "10px 14px",
+            backgroundColor: "var(--bg-elevated, #f8fafc)",
+            border: "1px solid var(--border-color, #e2e8f0)",
+            borderRadius: "6px",
+            fontSize: "13px",
+            color: "var(--text-secondary, #475569)",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
           <Icon name="info" size={14} />
           <span>{session.safe_fallback_notice}</span>
         </div>
       )}
 
       {/* Chat Stream Transcript */}
-      <div className="practice-chat-stream" role="log" aria-label="Practice transcript">
+      <div className="practice-chat-stream" role="log" aria-label="Live interview transcript">
         {session.messages.map((msg: PracticeMessageDto) => {
           const isInterviewer = msg.role === "INTERVIEWER";
           const isCandidate = msg.role === "CANDIDATE";
@@ -289,14 +369,8 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
             kindLabel = "Welcome";
             kindClass = "ack";
           } else if (msg.message_kind === "PRIMARY_QUESTION") {
-            kindLabel = "Primary Prompt";
+            kindLabel = "AI-generated question";
             kindClass = "primary";
-          } else if (msg.message_kind === "FOLLOW_UP") {
-            kindLabel = "Follow-up Prompt";
-            kindClass = "follow-up";
-          } else if (msg.message_kind === "ACKNOWLEDGEMENT") {
-            kindLabel = "Interviewer Note";
-            kindClass = "ack";
           } else if (msg.message_kind === "ANSWER") {
             kindLabel = "Your Answer";
             kindClass = "answer";
@@ -327,40 +401,188 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
             </div>
           );
         })}
+
+        {/* Live Generation Indicator */}
+        {(session.lifecycle_status === "QUESTION_GENERATING" || isSubmitting) && (
+          <div className="practice-message-bubble interviewer">
+            <div className="practice-avatar interviewer">
+              <Icon name="sparkles" size={16} />
+            </div>
+            <div className="practice-bubble-content-card" style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 18px" }}>
+              <div className="loading-spinner-sm" />
+              <span style={{ fontSize: "14px", color: "var(--text-secondary, #475569)" }}>
+                {isSubmitting ? "Saving your response..." : "Preparing your next question…"}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Final Review Generating Indicator */}
+        {session.lifecycle_status === "FINAL_REVIEW_GENERATING" && (
+          <div className="practice-message-bubble interviewer">
+            <div className="practice-avatar interviewer">
+              <Icon name="sparkles" size={16} />
+            </div>
+            <div className="practice-bubble-content-card" style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 18px" }}>
+              <div className="loading-spinner-sm" />
+              <span style={{ fontSize: "14px", color: "var(--text-secondary, #475569)" }}>
+                Evaluating interview transcript and preparing final coaching report…
+              </span>
+            </div>
+          </div>
+        )}
+
         <div ref={chatStreamEndRef} />
       </div>
 
       {/* Error banner if submission failed */}
       {error && (
         <div style={{ padding: "0 24px" }}>
-          <div className="feedback-box error" role="alert" style={{ margin: "12px 0 0 0" }}>
+          <div className="feedback-box warning" role="alert" style={{ margin: "12px 0 0 0" }}>
             <Icon name="alert-triangle" size={14} />
             <span>{error}</span>
           </div>
         </div>
       )}
 
-      {/* Input / Composer Area */}
-      {session.lifecycle_status === "IN_PROGRESS" && (
+      {/* Question Generation Failed Retry Banner */}
+      {session.lifecycle_status === "QUESTION_GENERATION_FAILED_RETRYABLE" && (
+        <div style={{ padding: "12px 24px" }}>
+          <div className="feedback-box warning" role="alert" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Icon name="alert-triangle" size={16} />
+              <span>The next question could not be generated.</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleRetryQuestion}
+              disabled={isRetrying}
+            >
+              {isRetrying ? "Retrying..." : "Retry Question Generation"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Final Review Failed Retry Banner */}
+      {session.lifecycle_status === "FINAL_REVIEW_FAILED_RETRYABLE" && (
+        <div style={{ padding: "12px 24px" }}>
+          <div className="feedback-box warning" role="alert" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Icon name="alert-triangle" size={16} />
+              <span>The final evaluation could not be generated.</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleRetryFinalReview}
+              disabled={isRetrying}
+            >
+              {isRetrying ? "Retrying..." : "Retry Final Review"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Answer Composer Area (Rendered ONLY when Awaiting Answer) */}
+      {(session.lifecycle_status === "AWAITING_ANSWER" || session.lifecycle_status === "IN_PROGRESS") && session.active_question && (
         <div className="practice-composer-panel">
-          {session.current_section === "CONVERSATION" && session.active_question && (
-            <form onSubmit={handleConversationalSubmit}>
-              <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary, #475569)" }}>
+          {session.active_question.question_format === "MCQ_SINGLE_ANSWER" ? (
+            <div>
+              <div style={{ marginBottom: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-secondary, #475569)" }}>
                   Competency: {session.active_question.competency_name}
                 </span>
-                {session.active_question.turn_count_for_question === 0 ? (
-                  <span style={{ fontSize: "11px", color: "var(--text-muted, #64748b)" }}>
-                    Initial Response (1 follow-up possible)
-                  </span>
-                ) : (
-                  <span style={{ fontSize: "11px", color: "#92400e", fontWeight: 600 }}>
-                    Final Turn on this Question
-                  </span>
-                )}
+                <span style={{ fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
+                  Multiple Choice Question
+                </span>
+              </div>
+
+              <div style={{ marginBottom: "14px", fontSize: "15px", fontWeight: 500, color: "var(--text-primary, #0f172a)" }}>
+                {session.active_question.wording}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+                {(session.active_question.options || []).map((opt) => (
+                  <label
+                    key={opt.option_id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      padding: "10px 14px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border-color, #cbd5e1)",
+                      cursor: "pointer",
+                      backgroundColor: selectedOptionId === opt.option_id ? "var(--bg-elevated, #f1f5f9)" : "transparent",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="mcq-option"
+                      value={opt.option_id}
+                      checked={selectedOptionId === opt.option_id}
+                      onChange={() => setSelectedOptionId(opt.option_id)}
+                      disabled={isSubmitting}
+                    />
+                    <span style={{ fontSize: "14px" }}>{opt.text}</span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="practice-composer-footer">
+                <span />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={isSubmitting || !selectedOptionId}
+                  onClick={async () => {
+                    if (!session || !session.active_question || !selectedOptionId) return;
+                    try {
+                      setIsSubmitting(true);
+                      setError(null);
+                      const updated = await submitMcqAnswer(
+                        session.session_id,
+                        session.active_question.question_id,
+                        selectedOptionId
+                      );
+                      setSession(updated);
+                      setSelectedOptionId("");
+                    } catch (err: any) {
+                      setError(err?.message || "Failed to submit MCQ answer.");
+                    } finally {
+                      setIsSubmitting(false);
+                    }
+                  }}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="loading-spinner-sm" style={{ marginRight: "6px" }} />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Submit Answer & Continue</span>
+                      <Icon name="chevron-right" size={14} />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleConversationalSubmit}>
+              <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-secondary, #475569)" }}>
+                  Competency: {session.active_question.competency_name}
+                </span>
+                <span style={{ fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
+                  Question {session.current_conv_index + 1} of {totalQuestions}
+                </span>
               </div>
 
               <textarea
+                ref={textareaRef}
                 className="practice-composer-textarea"
                 placeholder="Type your structured response here... (Press Ctrl+Enter or Cmd+Enter to submit)"
                 value={answerText}
@@ -372,9 +594,7 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
               />
 
               <div className="practice-composer-footer">
-                <span>
-                  {answerText.length} / 2000 characters
-                </span>
+                <span>{answerText.length} / 2000 characters</span>
 
                 <button
                   type="submit"
@@ -384,7 +604,7 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
                   {isSubmitting ? (
                     <>
                       <div className="loading-spinner-sm" style={{ marginRight: "6px" }} />
-                      <span>Submitting...</span>
+                      <span>Saving response...</span>
                     </>
                   ) : (
                     <>
@@ -396,154 +616,9 @@ export function CandidatePracticeRoom({ sessionId, onExit }: CandidatePracticeRo
               </div>
             </form>
           )}
-
-          {session.current_section === "MCQ" && session.active_question && (
-            <div className="practice-mcq-container">
-              <div className="practice-mcq-question-box">
-                <div style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#4f46e5", marginBottom: "4px" }}>
-                  Knowledge Check • {session.active_question.competency_name}
-                </div>
-                <h3 className="practice-mcq-question-wording">
-                  {session.active_question.wording}
-                </h3>
-              </div>
-
-              <div className="practice-mcq-options-grid" role="radiogroup" aria-label="Multiple choice options">
-                {(session.active_question.options || []).map((opt, index) => {
-                  const letter = String.fromCharCode(65 + index);
-                  const isSelected = selectedOptionId === opt.option_id;
-
-                  return (
-                    <div
-                      key={opt.option_id}
-                      className={`practice-mcq-option-item ${isSelected ? "selected" : ""}`}
-                      onClick={() => !isSubmitting && setSelectedOptionId(opt.option_id)}
-                      role="radio"
-                      aria-checked={isSelected}
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === " " || e.key === "Enter") {
-                          e.preventDefault();
-                          setSelectedOptionId(opt.option_id);
-                        }
-                      }}
-                    >
-                      <span className="practice-mcq-option-letter">{letter}</span>
-                      <span className="practice-mcq-option-label">{opt.text}</span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "14px" }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleMcqSubmit}
-                  disabled={isSubmitting || !selectedOptionId}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <div className="loading-spinner-sm" style={{ marginRight: "6px" }} />
-                      <span>Saving Selection...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Submit Answer & Continue</span>
-                      <Icon name="chevron-right" size={14} />
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
-      {/* Completion View */}
-      {session.lifecycle_status === "COMPLETED" && (
-        <div className="practice-completed-view">
-          <div className="practice-completed-icon">
-            <Icon name="check-circle" size={32} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a", margin: "0 0 8px 0" }}>
-              Practice Interview Completed!
-            </h2>
-            <p style={{ fontSize: "14px", color: "#64748b", maxWidth: "480px", margin: "0 auto", lineHeight: 1.5 }}>
-              You have completed all conversational questions and multiple-choice knowledge checks for this session.
-            </p>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: "24px",
-              backgroundColor: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              borderRadius: "8px",
-              padding: "16px 24px",
-            }}
-          >
-            <div>
-              <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: 600, display: "block" }}>
-                Conversational Turns
-              </span>
-              <span style={{ fontSize: "18px", fontWeight: 700, color: "#0f172a" }}>
-                {session.total_conv_count} Questions
-              </span>
-            </div>
-            <div style={{ borderLeft: "1px solid #e2e8f0", paddingLeft: "24px" }}>
-              <span style={{ fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: 600, display: "block" }}>
-                MCQ Checks
-              </span>
-              <span style={{ fontSize: "18px", fontWeight: 700, color: "#0f172a" }}>
-                {session.total_mcq_count} Questions
-              </span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onExit}
-            style={{ marginTop: "12px" }}
-          >
-            Return to Practice Directory
-          </button>
-        </div>
-      )}
-
-      {/* Abandoned or Expired View */}
-      {(session.lifecycle_status === "ABANDONED" || session.lifecycle_status === "EXPIRED") && (
-        <div className="practice-completed-view">
-          <div
-            style={{
-              width: "56px",
-              height: "56px",
-              borderRadius: "50%",
-              backgroundColor: "#f1f5f9",
-              color: "#475569",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Icon name="alert-circle" size={28} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#0f172a", margin: "0 0 8px 0" }}>
-              {session.lifecycle_status === "ABANDONED" ? "Session Abandoned" : "Session Expired"}
-            </h2>
-            <p style={{ fontSize: "14px", color: "#64748b", maxWidth: "440px", margin: "0 auto", lineHeight: 1.5 }}>
-              This practice session is closed. You can start a fresh session from your practice directory at any time (up to 3 attempts per 24 hours).
-            </p>
-          </div>
-          <button type="button" className="btn btn-secondary" onClick={onExit}>
-            Return to Directory
-          </button>
-        </div>
-      )}
     </div>
   );
 }

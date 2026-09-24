@@ -228,6 +228,11 @@ def setup_ai_scenario(test_db: Session):
         set_version=1,
         lifecycle_status="DRAFT",
         is_immutable=False,
+        provider_class="LMStudioProvider",
+        model_identifier="qwen/qwen3-4b-2507",
+        prompt_template_version="practice-question.v1",
+        guardrail_policy_version="1.0.0",
+        schema_version="practice-question.v1",
         items=[
             {
                 "slot_id": str(q1.question_id),
@@ -238,8 +243,9 @@ def setup_ai_scenario(test_db: Session):
                 "permitted_probes": ["How does failover work?"],
                 "ai_wording": "Can you walk through how you would architect a distributed quorum write pipeline?",
                 "review_state": "UNREVIEWED",
-                "authoring_origin": "AI_GENERATED",
+                "authoring_origin": "LOCAL_LLM_GENERATED",
                 "validation_status": "PASSED",
+                "model_identifier": "qwen/qwen3-4b-2507",
             },
             {
                 "slot_id": str(q2.question_id),
@@ -250,8 +256,9 @@ def setup_ai_scenario(test_db: Session):
                 "permitted_probes": ["What if rollback fails?"],
                 "ai_wording": "Describe an incident where a cascading failure impacted production and your containment strategy.",
                 "review_state": "UNREVIEWED",
-                "authoring_origin": "AI_GENERATED",
+                "authoring_origin": "LOCAL_LLM_GENERATED",
                 "validation_status": "PASSED",
+                "model_identifier": "qwen/qwen3-4b-2507",
             },
         ],
         created_by_user_id=recruiter.user_id,
@@ -348,7 +355,7 @@ def test_slot_review_edit_and_manual_authoring(test_db: Session, setup_ai_scenar
     )
     s2 = next(s for s in res2.slots if s.slot_id == sc["q2"].question_id)
     assert s2.review_state == "EDITED"
-    assert s2.authoring_origin == "RECRUITER_EDITED"
+    assert s2.authoring_origin in ("LOCAL_LLM_GENERATED_RECRUITER_EDITED", "RECRUITER_EDITED")
     assert "cross-team communication" in (s2.ai_wording or "")
 
 
@@ -404,16 +411,17 @@ def test_validation_and_approval_seals_immutability(test_db: Session, setup_ai_s
     assert app_res.is_immutable is True
     assert len(app_res.content_hash) == 64
 
-    # Editing an approved set must fail with 409
-    with pytest.raises(HTTPException) as exc_info:
-        update_ai_question_slot(
-            actor=sc["recruiter"],
-            template_id=sc["template"].template_id,
-            slot_id=sc["q1"].question_id,
-            payload=AiQuestionSlotUpdateRequest(decision="EDIT", wording="Trying to edit sealed set"),
-            db=test_db,
-        )
-    assert exc_info.value.status_code == 409
+    # Editing an approved set automatically branches a successor draft (version 2)
+    new_draft_res = update_ai_question_slot(
+        actor=sc["recruiter"],
+        template_id=sc["template"].template_id,
+        slot_id=sc["q1"].question_id,
+        payload=AiQuestionSlotUpdateRequest(decision="EDIT", wording="Trying to edit sealed set"),
+        db=test_db,
+    )
+    assert new_draft_res.set_version == 2
+    assert new_draft_res.lifecycle_status == "DRAFT"
+    assert new_draft_res.is_immutable is False
 
 
 def test_eligible_jobs_contract_and_authorization(test_db: Session, setup_ai_scenario):

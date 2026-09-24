@@ -17,6 +17,8 @@ from app.schemas.profile_assembly import CandidateProfileResponse
 class ProfileProvenance(str, Enum):
     PARSER_EXTRACTED = "PARSER_EXTRACTED"
     HUMAN_CORRECTED = "HUMAN_CORRECTED"
+    LOCAL_ATS_DEMO = "Local ATS Demo"
+    ATS_IMPORTED = "ATS_IMPORTED"
 
 
 class CorrectionReasonCategory(str, Enum):

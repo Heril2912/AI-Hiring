@@ -77,7 +77,11 @@ def test_models_exported_and_tables_registered():
         "candidate_practice_mcq_answers",
         "candidate_practice_requests",
         "job_practice_catalogs",
+        "candidate_practice_answer_reviews",
+        "candidate_practice_answer_segments",
+        "candidate_practice_reports",
     }
+
 
 
 

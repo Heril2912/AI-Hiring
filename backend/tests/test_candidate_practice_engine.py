@@ -29,6 +29,7 @@ from app.models.job import JobLifecycleStatus, JobRequisition, JobRequirement, J
 from app.models.resume import ArtifactFormat, ArtifactValidationStatus, ResumeArtifact
 from app.schemas.mcq_contract import McqOptionDto
 from app.schemas.phase3_enums import (
+    AuthoringOrigin,
     PracticeMessageKind,
     PracticeMessageRole,
     PracticeReleaseStatus,
@@ -210,6 +211,9 @@ def test_released_job(test_db: Session, test_recruiter: UserRecord, test_candida
             "competency": "PostgreSQL Optimization",
             "difficulty": QuestionDifficulty.INTERMEDIATE.value,
             "display_order": 1,
+            "authoring_origin": AuthoringOrigin.LOCAL_LLM_GENERATED.value,
+            "validation_status": "PASSED",
+            "model_identifier": "qwen/qwen3-4b-2507",
         },
         {
             "question_id": str(uuid.uuid4()),
@@ -219,6 +223,9 @@ def test_released_job(test_db: Session, test_recruiter: UserRecord, test_candida
             "competency": "System Design",
             "difficulty": QuestionDifficulty.ADVANCED.value,
             "display_order": 2,
+            "authoring_origin": AuthoringOrigin.LOCAL_LLM_GENERATED.value,
+            "validation_status": "PASSED",
+            "model_identifier": "qwen/qwen3-4b-2507",
         },
         {
             "question_id": str(uuid.uuid4()),
@@ -228,6 +235,9 @@ def test_released_job(test_db: Session, test_recruiter: UserRecord, test_candida
             "competency": "Databases",
             "difficulty": QuestionDifficulty.INTERMEDIATE.value,
             "display_order": 3,
+            "authoring_origin": AuthoringOrigin.LOCAL_LLM_GENERATED.value,
+            "validation_status": "PASSED",
+            "model_identifier": "qwen/qwen3-4b-2507",
             "options": [
                 {"option_id": opt_a, "text": "B-Tree supports range queries, Hash does not", "display_order": 1},
                 {"option_id": opt_b, "text": "Hash supports range queries, B-Tree does not", "display_order": 2},
@@ -245,6 +255,12 @@ def test_released_job(test_db: Session, test_recruiter: UserRecord, test_candida
         template_id=template.template_id,
         job_id=job.job_id,
         job_version_id=ver.job_version_id,
+        job_revision=ver.version_number,
+        provider_class="LMStudioProvider",
+        model_identifier="qwen/qwen3-4b-2507",
+        prompt_template_version="practice-question.v1",
+        guardrail_policy_version="1.0.0",
+        schema_version="practice-question.v1",
         source_template_version=1,
         source_content_hash=template.content_hash,
         set_version=1,
@@ -517,18 +533,22 @@ async def test_conversational_flow_with_ai_follow_up(test_db: Session, test_cand
     req = PracticeSessionStartRequest(release_id=release.release_id)
     session = start_or_resume_practice_session(candidate_user=cand_user, release_id=release.release_id, db=test_db)
 
-    # Mock follow-up AI service to return a follow-up
-    mock_follow_up_resp = BoundedPracticeFollowUpResponse(
-        action="FOLLOW_UP",
-        source_question_id=test_released_job["q_items"][0]["question_id"],
+    # Mock review service to return a follow-up
+    from app.schemas.practice_review_contract import ConversationalReviewPayload, FollowUpItem, AnswerStrengthItem, ImprovementAreaItem, DimensionLevel
+    mock_review_payload = ConversationalReviewPayload(
+        source_question_id=str(q0_id),
         acknowledgement="Thank you for explaining that.",
-        follow_up_question="How would you use composite indexes to speed up multi-column filtering?",
-        validation_passed=True,
-        safe_fallback_used=False,
+        strengths=[AnswerStrengthItem(dimension="relevance", observation="Good explanation", answer_segment_ids=["segment-1"])],
+        improvement_areas=[ImprovementAreaItem(dimension="evidence_depth", observation="Add depth", answer_segment_ids=["segment-1"])],
+        next_steps=["Explain your exact action", "Add one measurable result"],
+        stronger_structure="State problem, action, and verified outcome.",
+        dimension_levels={"relevance": DimensionLevel.STRONG, "clarity": DimensionLevel.STRONG, "technical_depth": DimensionLevel.DEVELOPING, "evidence": DimensionLevel.NEEDS_DETAIL},
+        follow_up=FollowUpItem(needed=True, question="How would you use composite indexes to speed up multi-column filtering?"),
     )
 
-    with patch("app.services.practice_session_service.request_practice_conversation_follow_up", new_callable=AsyncMock) as mock_ai:
-        mock_ai.return_value = mock_follow_up_resp
+    from app.schemas.practice_review_contract import ReviewLifecycleStatus
+    with patch("app.services.practice_session_service.generate_conversational_review_with_repair", new_callable=AsyncMock) as mock_ai:
+        mock_ai.return_value = (ReviewLifecycleStatus.REVIEW_READY, mock_review_payload, None, "qwen3-4b-mlx")
 
         # Candidate submits answer 1 (turn 0 -> candidate answer + interviewer follow-up)
         ans_req1 = PracticeConversationAnswerRequest(
@@ -551,7 +571,7 @@ async def test_conversational_flow_with_ai_follow_up(test_db: Session, test_cand
         assert res1.messages[3].message_kind == PracticeMessageKind.FOLLOW_UP.value
         assert res1.messages[3].text == "How would you use composite indexes to speed up multi-column filtering?"
 
-        # Candidate submits follow-up answer (turn 1 -> candidate answer + interviewer acknowledgement + advance to Q1)
+        # Candidate submits follow-up answer (turn 1 -> candidate answer + advance to Q1 via advance_practice_question)
         ans_req2 = PracticeConversationAnswerRequest(
             question_id=q0_id,
             answer_text="I create composite indexes with the most selective columns first.",
@@ -564,13 +584,21 @@ async def test_conversational_flow_with_ai_follow_up(test_db: Session, test_cand
             db=test_db,
         )
 
-        assert res2.current_conv_index == 1
-        assert res2.active_question is not None
-        assert res2.active_question.wording == "Describe how you design distributed microservices."
-        # Messages should have: Greeting, Q0 primary, Q0 cand ans, Q0 follow-up, Q0 cand ans 2, Q0 ack, Q1 primary
-        assert len(res2.messages) == 7
-        assert res2.messages[5].message_kind == PracticeMessageKind.ACKNOWLEDGEMENT.value
-        assert res2.messages[6].message_kind == PracticeMessageKind.PRIMARY_QUESTION.value
+        assert len(res2.messages) == 5
+        assert res2.messages[4].role == PracticeMessageRole.CANDIDATE.value
+
+        # Now advance to next question
+        from app.services.practice_session_service import advance_practice_question
+        from app.schemas.practice_session_contract import PracticeAdvanceQuestionRequest
+        adv_res = advance_practice_question(
+            candidate_user=cand_user,
+            session_id=session.session_id,
+            payload=PracticeAdvanceQuestionRequest(question_id=q0_id),
+            db=test_db,
+        )
+        assert adv_res.current_conv_index == 1
+        assert adv_res.active_question is not None
+        assert adv_res.active_question.wording == "Describe how you design distributed microservices."
 
 
 @pytest.mark.anyio
@@ -583,17 +611,20 @@ async def test_conversational_flow_fallback_when_ai_disabled(test_db: Session, t
     session = start_or_resume_practice_session(candidate_user=cand_user, release_id=release.release_id, db=test_db)
 
     # When AI returns should_follow_up=False (e.g. disabled or offline)
-    mock_no_follow_up = BoundedPracticeFollowUpResponse(
-        action="ACKNOWLEDGE_AND_CONTINUE",
-        source_question_id=test_released_job["q_items"][0]["question_id"],
+    from app.schemas.practice_review_contract import ConversationalReviewPayload, FollowUpItem, DimensionLevel, ReviewLifecycleStatus
+    mock_no_follow_up = ConversationalReviewPayload(
+        source_question_id=str(q0_id),
         acknowledgement="Thank you for sharing your thoughts.",
-        follow_up_question=None,
-        validation_passed=True,
-        safe_fallback_used=True,
+        strengths=[],
+        improvement_areas=[],
+        next_steps=["Explain your exact action", "Add one measurable result"],
+        stronger_structure="State problem, action, and verified outcome.",
+        dimension_levels={"relevance": DimensionLevel.DEVELOPING, "clarity": DimensionLevel.DEVELOPING, "technical_depth": DimensionLevel.NEEDS_DETAIL, "evidence": DimensionLevel.NEEDS_DETAIL},
+        follow_up=FollowUpItem(needed=False, question=None),
     )
 
-    with patch("app.services.practice_session_service.request_practice_conversation_follow_up", new_callable=AsyncMock) as mock_ai:
-        mock_ai.return_value = mock_no_follow_up
+    with patch("app.services.practice_session_service.generate_conversational_review_with_repair", new_callable=AsyncMock) as mock_ai:
+        mock_ai.return_value = (ReviewLifecycleStatus.REVIEW_READY, mock_no_follow_up, None, "qwen3-4b-mlx")
 
         ans_req = PracticeConversationAnswerRequest(
             question_id=q0_id,
@@ -607,9 +638,9 @@ async def test_conversational_flow_fallback_when_ai_disabled(test_db: Session, t
             db=test_db,
         )
 
-        # Advanced immediately to Question 1
-        assert res.current_conv_index == 1
-        assert res.active_question.wording == "Describe how you design distributed microservices."
+        assert res.current_conv_index == 0
+        assert res.latest_review is not None
+        assert res.latest_review.acknowledgement == "Thank you for sharing your thoughts."
 
 
 @pytest.mark.anyio
@@ -622,18 +653,33 @@ async def test_full_practice_session_transition_to_mcq_and_completion(test_db: S
     req = PracticeSessionStartRequest(release_id=release.release_id)
     session = start_or_resume_practice_session(candidate_user=cand_user, release_id=release.release_id, db=test_db)
 
-    # Disable follow-up for faster progression
-    mock_no_follow_up = BoundedPracticeFollowUpResponse(
-        action="ACKNOWLEDGE_AND_CONTINUE",
-        source_question_id="any",
+    from app.schemas.practice_review_contract import ConversationalReviewPayload, FollowUpItem, DimensionLevel, ReviewLifecycleStatus
+    mock_no_follow_up_q0 = ConversationalReviewPayload(
+        source_question_id=str(q0_id),
         acknowledgement="Understood.",
-        follow_up_question=None,
-        validation_passed=True,
-        safe_fallback_used=True,
+        strengths=[],
+        improvement_areas=[],
+        next_steps=["Step 1 action", "Step 2 action"],
+        stronger_structure="Action and result.",
+        dimension_levels={"relevance": DimensionLevel.DEVELOPING, "clarity": DimensionLevel.DEVELOPING, "technical_depth": DimensionLevel.NEEDS_DETAIL, "evidence": DimensionLevel.NEEDS_DETAIL},
+        follow_up=FollowUpItem(needed=False, question=None),
+    )
+    mock_no_follow_up_q1 = ConversationalReviewPayload(
+        source_question_id=str(q1_id),
+        acknowledgement="Understood.",
+        strengths=[],
+        improvement_areas=[],
+        next_steps=["Step 1 action", "Step 2 action"],
+        stronger_structure="Action and result.",
+        dimension_levels={"relevance": DimensionLevel.DEVELOPING, "clarity": DimensionLevel.DEVELOPING, "technical_depth": DimensionLevel.NEEDS_DETAIL, "evidence": DimensionLevel.NEEDS_DETAIL},
+        follow_up=FollowUpItem(needed=False, question=None),
     )
 
-    with patch("app.services.practice_session_service.request_practice_conversation_follow_up", new_callable=AsyncMock) as mock_ai:
-        mock_ai.return_value = mock_no_follow_up
+    with patch("app.services.practice_session_service.generate_conversational_review_with_repair", new_callable=AsyncMock) as mock_ai:
+        mock_ai.side_effect = [
+            (ReviewLifecycleStatus.REVIEW_READY, mock_no_follow_up_q0, None, "qwen3-4b-mlx"),
+            (ReviewLifecycleStatus.REVIEW_READY, mock_no_follow_up_q1, None, "qwen3-4b-mlx"),
+        ]
 
         # Q0 Answer
         await submit_conversational_answer(
@@ -643,11 +689,27 @@ async def test_full_practice_session_transition_to_mcq_and_completion(test_db: S
             db=test_db,
         )
 
-        # Q1 Answer -> should transition section to MCQ
-        mcq_entry_res = await submit_conversational_answer(
+        from app.services.practice_session_service import advance_practice_question
+        from app.schemas.practice_session_contract import PracticeAdvanceQuestionRequest
+        advance_practice_question(
+            candidate_user=cand_user,
+            session_id=session.session_id,
+            payload=PracticeAdvanceQuestionRequest(question_id=q0_id),
+            db=test_db,
+        )
+
+        # Q1 Answer -> then advance should transition section to MCQ
+        await submit_conversational_answer(
             candidate_user=cand_user,
             session_id=session.session_id,
             payload=PracticeConversationAnswerRequest(question_id=q1_id, answer_text="Answer to Q1", idempotency_key=str(uuid.uuid4())),
+            db=test_db,
+        )
+
+        mcq_entry_res = advance_practice_question(
+            candidate_user=cand_user,
+            session_id=session.session_id,
+            payload=PracticeAdvanceQuestionRequest(question_id=q1_id),
             db=test_db,
         )
 

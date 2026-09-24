@@ -1808,6 +1808,12 @@ class AiInterviewQuestionSetRecord(Base):
         UUID(as_uuid=True),
         nullable=True,
     )
+    provider_class: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        default="LOCAL_OPENAI_COMPATIBLE",
+        server_default=text("'LOCAL_OPENAI_COMPATIBLE'"),
+    )
     model_identifier: Mapped[Optional[str]] = mapped_column(
         String(100),
         nullable=True,
@@ -1815,6 +1821,18 @@ class AiInterviewQuestionSetRecord(Base):
     prompt_template_version: Mapped[Optional[str]] = mapped_column(
         String(50),
         nullable=True,
+    )
+    guardrail_policy_version: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        default="1.0.0",
+        server_default=text("'1.0.0'"),
+    )
+    schema_version: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        default="practice-question.v1",
+        server_default=text("'practice-question.v1'"),
     )
     predecessor_set_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),

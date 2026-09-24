@@ -443,6 +443,8 @@ def test_step1_only_capability_specific_operations_exist():
         "STRUCTURE_PROVISIONAL_ASSESSMENT",
         "SUMMARIZE_SELECTED_EVIDENCE",
         "PRACTICE_CONVERSATION_FOLLOW_UP",
+        "GENERATE_LIVE_INTERVIEW_QUESTION",
+        "GENERATE_FINAL_INTERVIEW_REVIEW",
     }
     assert allowed_ops == expected_ops
 

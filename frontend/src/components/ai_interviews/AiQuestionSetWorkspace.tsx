@@ -53,8 +53,55 @@ export function AiQuestionSetWorkspace({
   const [showGenerateMcqDialog, setShowGenerateMcqDialog] = useState<boolean>(false);
   const [mcqGenerateCount, setMcqGenerateCount] = useState<number>(5);
 
+  const [showProvenanceDrawer, setShowProvenanceDrawer] = useState<boolean>(false);
+  const [isRegeneratingLegacy, setIsRegeneratingLegacy] = useState<boolean>(false);
+
   // Ref to return focus to rubric button after closing modal
   const viewRubricBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Provenance Label Helper
+  const getProvenanceBadge = (origin?: string, modelDisplayName?: string | null) => {
+    const norm = (origin || "").toUpperCase();
+    const modelTag = modelDisplayName ? (modelDisplayName.includes("Qwen3") ? "Qwen3" : modelDisplayName) : "Qwen3";
+    if (norm === "LOCAL_LLM_GENERATED" || norm === "AI_GENERATED") {
+      return {
+        label: `Generated locally with ${modelTag}`,
+        className: "prov-ai",
+        icon: "sparkles",
+        bg: "#eef1fc",
+        color: "#3730a3",
+        border: "#c7d2fe",
+      };
+    }
+    if (norm === "LOCAL_LLM_GENERATED_RECRUITER_EDITED" || norm === "RECRUITER_EDITED") {
+      return {
+        label: "Generated locally, recruiter edited",
+        className: "prov-edited",
+        icon: "edit",
+        bg: "#f1f5f9",
+        color: "#334155",
+        border: "#cbd5e1",
+      };
+    }
+    if (norm === "LEGACY_MANUAL" || norm === "RECRUITER_AUTHORED") {
+      return {
+        label: "Legacy manual",
+        className: "prov-manual",
+        icon: "user",
+        bg: "#fef3c7",
+        color: "#92400e",
+        border: "#fde68a",
+      };
+    }
+    return {
+      label: "Legacy deterministic",
+      className: "prov-legacy",
+      icon: "file-text",
+      bg: "#f3f4f6",
+      color: "#4b5563",
+      border: "#d1d5db",
+    };
+  };
 
   // Humanize helpers
   const humanizeCompetency = (raw: string) => {
@@ -187,6 +234,28 @@ export function AiQuestionSetWorkspace({
       setError(err?.message || "Slot regeneration failed. Ensure local AI provider is active.");
     } finally {
       setIsRegenerating(false);
+    }
+  };
+
+  const handleRegenerateLegacySet = async () => {
+    if (!detail) return;
+    try {
+      setIsRegeneratingLegacy(true);
+      setError(null);
+      setActionFeedback(null);
+      const res = await apiFetch<AiQuestionSetDetail>(
+        `/api/v1/ai-interviews/generate`,
+        {
+          method: "POST",
+          body: JSON.stringify({ job_id: detail.job_id, force_regenerate: true }),
+        }
+      );
+      setDetail(res);
+      setActionFeedback("Legacy set successfully regenerated as a fresh local-AI draft.");
+    } catch (err: any) {
+      setError(err?.message || "Failed to regenerate set with local model.");
+    } finally {
+      setIsRegeneratingLegacy(false);
     }
   };
 
@@ -395,11 +464,15 @@ export function AiQuestionSetWorkspace({
 
   const isApproved = detail.lifecycle_status === "APPROVED" || detail.is_immutable;
   const isStale = detail.is_source_stale || detail.lifecycle_status === "STALE";
+  const isLegacy = detail.is_legacy || false;
   const reviewedCount = detail.reviewed_slots_count || 0;
   const totalCount = detail.total_slots_count || detail.slots.length;
   const progressPercent = totalCount > 0 ? Math.round((reviewedCount / totalCount) * 100) : 0;
   const allReviewed = totalCount > 0 && reviewedCount === totalCount;
-  const canApprove = !isApproved && !isStale && (validationResult?.is_valid || allReviewed);
+  const hasIneligibleQuestions = detail.slots.some(
+    (s) => !["LOCAL_LLM_GENERATED", "LOCAL_LLM_GENERATED_RECRUITER_EDITED", "AI_GENERATED", "RECRUITER_EDITED"].includes(s.authoring_origin)
+  );
+  const canApprove = !isApproved && !isStale && !isLegacy && !hasIneligibleQuestions && (validationResult?.is_valid || allReviewed);
 
   return (
     <div className="aiq-workspace-page">
@@ -426,7 +499,9 @@ export function AiQuestionSetWorkspace({
             <h1 className="aiq-workspace-title">{detail.job_title}</h1>
             <span
               className={`aiq-status-badge ${
-                isApproved
+                isLegacy
+                  ? "legacy"
+                  : isApproved
                   ? "approved"
                   : isStale
                   ? "stale"
@@ -435,14 +510,34 @@ export function AiQuestionSetWorkspace({
                   : "draft"
               }`}
             >
-              {isApproved && <Icon name="lock" size={11} />}
-              {isApproved
+              {isApproved && !isLegacy && <Icon name="lock" size={11} />}
+              {isLegacy
+                ? "Legacy set (Ineligible)"
+                : isApproved
                 ? "Approved & Sealed"
                 : isStale
                 ? "Blueprint Stale"
                 : detail.lifecycle_status === "VALIDATED"
                 ? "Ready for Approval"
                 : "Draft"}
+            </span>
+
+            {/* Compact Provenance Indicator */}
+            <span
+              className="badge"
+              style={{
+                fontSize: "12px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                backgroundColor: "#eef1fc",
+                color: "#3730a3",
+                padding: "3px 8px",
+                borderRadius: "6px",
+              }}
+            >
+              <Icon name="sparkles" size={12} />
+              <span>{detail.model_display_name || "Qwen3-4B MLX"}</span>
             </span>
           </div>
 
@@ -464,6 +559,16 @@ export function AiQuestionSetWorkspace({
           <button
             type="button"
             className="btn btn-secondary btn-sm"
+            onClick={() => setShowProvenanceDrawer(!showProvenanceDrawer)}
+            title="View safe model provenance and revision details"
+          >
+            <Icon name="info" size={15} />
+            <span>Provenance Details</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
             onClick={() => setIsPreviewModalOpen(true)}
             title="Preview candidate-safe view of this interview set"
           >
@@ -471,7 +576,19 @@ export function AiQuestionSetWorkspace({
             <span>Candidate Preview</span>
           </button>
 
-          {!isApproved && (
+          {isLegacy && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleRegenerateLegacySet}
+              disabled={isRegeneratingLegacy}
+            >
+              <Icon name="sparkles" size={15} className={isRegeneratingLegacy ? "animate-spin" : ""} />
+              <span>{isRegeneratingLegacy ? "Regenerating..." : "Regenerate as AI set"}</span>
+            </button>
+          )}
+
+          {!isApproved && !isLegacy && (
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -497,8 +614,101 @@ export function AiQuestionSetWorkspace({
         </div>
       </header>
 
+      {/* Provenance & Details Panel Drawer */}
+      {showProvenanceDrawer && (
+        <div
+          className="aiq-panel"
+          style={{
+            backgroundColor: "#f8fafc",
+            borderColor: "#cbd5e1",
+            marginBottom: "20px",
+            padding: "16px 20px",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+            <strong style={{ fontSize: "14px", color: "var(--text-primary, #0f172a)" }}>
+              Question Set Provenance & Metadata
+            </strong>
+            <button
+              type="button"
+              className="btn-icon-subtle"
+              onClick={() => setShowProvenanceDrawer(false)}
+              aria-label="Close details"
+            >
+              <Icon name="x" size={14} />
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", fontSize: "13px" }}>
+            <div>
+              <span style={{ color: "var(--text-muted, #64748b)" }}>Local Model:</span>
+              <div style={{ fontWeight: 600, color: "var(--text-primary, #0f172a)" }}>
+                {detail.model_display_name || "Qwen3-4B MLX"}
+              </div>
+            </div>
+            <div>
+              <span style={{ color: "var(--text-muted, #64748b)" }}>Job Revision:</span>
+              <div style={{ fontWeight: 600, color: "var(--text-primary, #0f172a)" }}>
+                Rev #{detail.job_revision}
+              </div>
+            </div>
+            <div>
+              <span style={{ color: "var(--text-muted, #64748b)" }}>Set Version:</span>
+              <div style={{ fontWeight: 600, color: "var(--text-primary, #0f172a)" }}>
+                v{detail.set_version}
+              </div>
+            </div>
+            <div>
+              <span style={{ color: "var(--text-muted, #64748b)" }}>Release Eligibility:</span>
+              <div style={{ fontWeight: 600, color: detail.release_eligibility?.is_eligible ? "#065f46" : "#92400e" }}>
+                {detail.release_eligibility?.is_eligible ? "Eligible" : "Ineligible for release"}
+              </div>
+            </div>
+            <div>
+              <span style={{ color: "var(--text-muted, #64748b)" }}>Created:</span>
+              <div style={{ fontWeight: 500, color: "var(--text-secondary, #334155)" }}>
+                {new Date(detail.created_at).toLocaleDateString()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Legacy Warning Box */}
+      {isLegacy && (
+        <div
+          className="aiq-panel"
+          style={{
+            backgroundColor: "#fffbeb",
+            borderColor: "#fde68a",
+            marginBottom: "20px",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "12px",
+          }}
+        >
+          <Icon name="alert-triangle" size={18} style={{ color: "#d97706", flexShrink: 0, marginTop: "2px" }} />
+          <div>
+            <strong style={{ display: "block", color: "#92400e", marginBottom: "2px", fontSize: "15px" }}>
+              Legacy Question Set (Not eligible for AI practice release)
+            </strong>
+            <p style={{ color: "#78350f", fontSize: "14px", margin: "0 0 10px 0" }}>
+              This set contains legacy deterministic or manual content without verified local-AI provenance. To make it eligible for Phase 3G release, regenerate it as an AI set.
+            </p>
+            <button
+              type="button"
+              className="btn btn-secondary btn-xs"
+              onClick={handleRegenerateLegacySet}
+              disabled={isRegeneratingLegacy}
+            >
+              <Icon name="sparkles" size={13} />
+              <span>Regenerate as AI set</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Stale Blueprint Warning */}
-      {isStale && (
+      {isStale && !isLegacy && (
         <div
           className="aiq-panel"
           style={{
@@ -651,9 +861,33 @@ export function AiQuestionSetWorkspace({
                     <div className="aiq-editor-slot-meta">
                       Question {activeSlotIndex + 1} of {conversationalSlots.length} · {humanizeType(activeSlot.question_type)} · {activeSlot.estimated_time_minutes} minutes
                     </div>
-                    <h2 className="aiq-editor-competency">
-                      {humanizeCompetency(activeSlot.competency_name)}
-                    </h2>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
+                      <h2 className="aiq-editor-competency" style={{ margin: 0 }}>
+                        {humanizeCompetency(activeSlot.competency_name)}
+                      </h2>
+                      {(() => {
+                        const prov = getProvenanceBadge(activeSlot.authoring_origin, detail.model_display_name);
+                        return (
+                          <span
+                            className={`badge ${prov.className}`}
+                            style={{
+                              fontSize: "12px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              backgroundColor: prov.className === "prov-ai" ? "#eef1fc" : prov.className === "prov-edited" ? "#f1f5f9" : "#fef3c7",
+                              color: prov.className === "prov-ai" ? "#3730a3" : prov.className === "prov-edited" ? "#334155" : "#92400e",
+                              padding: "2px 8px",
+                              borderRadius: "6px",
+                              fontWeight: 500,
+                            }}
+                          >
+                            <Icon name={prov.icon as any} size={12} />
+                            <span>{prov.label}</span>
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {activeSlot.rubric && (
@@ -998,6 +1232,26 @@ export function AiQuestionSetWorkspace({
                               {slot.difficulty}
                             </span>
                           )}
+                          {(() => {
+                            const badge = getProvenanceBadge(slot.authoring_origin, detail.model_display_name);
+                            return (
+                              <span
+                                className="badge"
+                                style={{
+                                  fontSize: "11px",
+                                  backgroundColor: badge.bg,
+                                  color: badge.color,
+                                  border: `1px solid ${badge.border}`,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px"
+                                }}
+                              >
+                                <Icon name={badge.icon as any} size={10} />
+                                <span>{badge.label}</span>
+                              </span>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
