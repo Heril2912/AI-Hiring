@@ -23,6 +23,38 @@ export interface SafeRubricDto {
   permitted_probes: string[];
 }
 
+export interface QuestionProvenanceDto {
+  authoring_origin: string;
+  provider_class?: string | null;
+  model_identifier?: string | null;
+  invocation_id?: string | null;
+  prompt_template_version?: string | null;
+  guardrail_policy_version?: string | null;
+  schema_version?: string | null;
+  generated_at?: string | null;
+  validation_status?: string | null;
+  validation_result?: string | null;
+  job_version_id?: string | null;
+  job_revision?: number | null;
+  source_requirement_ids?: string[];
+  set_version?: number | null;
+  is_edited?: boolean;
+  reviewer_user_id?: string | null;
+  reviewed_at?: string | null;
+}
+
+export interface ReleaseEligibilitySummaryDto {
+  is_eligible: boolean;
+  reason_code?: string | null;
+  safe_message?: string | null;
+  blocking_items?: Array<{
+    slot_number?: number;
+    slot_id?: string;
+    reason_code?: string;
+    message?: string;
+  }>;
+}
+
 export interface AiQuestionSlotItem {
   slot_id: string;
   display_order: number;
@@ -32,11 +64,13 @@ export interface AiQuestionSlotItem {
   permitted_probes: string[];
   rubric?: SafeRubricDto | null;
   ai_wording?: string | null;
+  question_text?: string | null;
   review_state: SlotReviewState;
   authoring_origin: string;
-  validation_status: "PASSED" | "FAILED";
+  validation_status: "PASSED" | "FAILED" | "PENDING";
   safe_failure_code?: string | null;
   rationale_code?: string | null;
+  provenance?: QuestionProvenanceDto | null;
   updated_at?: string | null;
   question_format: QuestionFormat;
   options?: McqOptionDto[] | null;
@@ -60,6 +94,13 @@ export interface AiQuestionSetDetail {
   is_immutable: boolean;
   content_hash?: string | null;
   action?: string | null;
+  provider_class?: string | null;
+  model_identifier?: string | null;
+  model_display_name?: string | null;
+  prompt_template_version?: string | null;
+  guardrail_policy_version?: string | null;
+  schema_version?: string | null;
+  predecessor_set_id?: string | null;
   slots: AiQuestionSlotItem[];
   total_slots_count: number;
   generated_slots_count: number;
@@ -68,6 +109,8 @@ export interface AiQuestionSetDetail {
   mcq_count: number;
   is_source_stale: boolean;
   stale_reason?: string | null;
+  release_eligibility?: ReleaseEligibilitySummaryDto | null;
+  is_legacy?: boolean;
   created_at: string;
   updated_at: string;
   approved_at?: string | null;
@@ -83,6 +126,8 @@ export interface AiQuestionSetSummary {
   lifecycle_status: AiSetLifecycle;
   is_immutable: boolean;
   is_source_stale: boolean;
+  is_legacy?: boolean;
+  model_display_name?: string | null;
   generated_question_count: number;
   total_blueprint_slots: number;
   conversation_count: number;
@@ -104,6 +149,7 @@ export interface AiQuestionSetValidateResult {
   lifecycle_status: string;
   blocking_errors: string[];
   safe_message: string;
+  release_eligibility?: ReleaseEligibilitySummaryDto | null;
 }
 
 export interface AiQuestionSetApproveResult {

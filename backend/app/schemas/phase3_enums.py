@@ -36,11 +36,52 @@ class PracticeReleaseStatus(str, enum.Enum):
 
 class AuthoringOrigin(str, enum.Enum):
     """Provenance of the question text or rubric."""
+    # Canonical Phase 3G.1 Origins
+    LOCAL_LLM_GENERATED = "LOCAL_LLM_GENERATED"
+    LOCAL_LLM_GENERATED_RECRUITER_EDITED = "LOCAL_LLM_GENERATED_RECRUITER_EDITED"
+    LEGACY_DETERMINISTIC = "LEGACY_DETERMINISTIC"
+    LEGACY_MANUAL = "LEGACY_MANUAL"
+
+    # Historic / legacy compatibility aliases
     DETERMINISTIC = "DETERMINISTIC"
     AI_ASSISTED = "AI_ASSISTED"
     AI_GENERATED = "AI_GENERATED"
     RECRUITER_EDITED = "RECRUITER_EDITED"
     RECRUITER_AUTHORED = "RECRUITER_AUTHORED"
+
+    @classmethod
+    def is_eligible_for_release(cls, origin: Any) -> bool:
+        """Evaluates whether an authoring origin is eligible for Phase 3G practice release."""
+        val = origin.value if hasattr(origin, "value") else str(origin or "")
+        return val in (cls.LOCAL_LLM_GENERATED.value, cls.LOCAL_LLM_GENERATED_RECRUITER_EDITED.value)
+
+    @classmethod
+    def normalize_to_canonical(cls, origin: Any) -> "AuthoringOrigin":
+        """Maps historic/legacy origins to canonical equivalents."""
+        val = origin.value if hasattr(origin, "value") else str(origin or "")
+        if val in (cls.LOCAL_LLM_GENERATED.value, cls.AI_GENERATED.value):
+            return cls.LOCAL_LLM_GENERATED
+        if val in (cls.LOCAL_LLM_GENERATED_RECRUITER_EDITED.value, cls.RECRUITER_EDITED.value):
+            return cls.LOCAL_LLM_GENERATED_RECRUITER_EDITED
+        if val in (cls.LEGACY_MANUAL.value, cls.RECRUITER_AUTHORED.value):
+            return cls.LEGACY_MANUAL
+        return cls.LEGACY_DETERMINISTIC
+
+
+class ReleaseIneligibilityReasonCode(str, enum.Enum):
+    """Authoritative domain reason codes for practice release ineligibility."""
+    NOT_APPROVED = "NOT_APPROVED"
+    STALE_JOB_REVISION = "STALE_JOB_REVISION"
+    WRONG_SET_VERSION = "WRONG_SET_VERSION"
+    LEGACY_DETERMINISTIC_PRESENT = "LEGACY_DETERMINISTIC_PRESENT"
+    LEGACY_MANUAL_PRESENT = "LEGACY_MANUAL_PRESENT"
+    MISSING_PROVENANCE = "MISSING_PROVENANCE"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+    GENERATION_FAILED = "GENERATION_FAILED"
+    EMPTY_SET = "EMPTY_SET"
+    PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
+    PROVIDER_DISABLED = "PROVIDER_DISABLED"
+
 
 
 class ValidationState(str, enum.Enum):
@@ -121,6 +162,13 @@ class PrivacyReviewStatus(str, enum.Enum):
 class PracticeSessionLifecycle(str, enum.Enum):
     """Lifecycle states for candidate practice interview sessions."""
     IN_PROGRESS = "IN_PROGRESS"
+    QUESTION_GENERATING = "QUESTION_GENERATING"
+    AWAITING_ANSWER = "AWAITING_ANSWER"
+    ANSWER_SAVING = "ANSWER_SAVING"
+    QUESTION_GENERATION_FAILED_RETRYABLE = "QUESTION_GENERATION_FAILED_RETRYABLE"
+    FINAL_ANSWER_SAVING = "FINAL_ANSWER_SAVING"
+    FINAL_REVIEW_GENERATING = "FINAL_REVIEW_GENERATING"
+    FINAL_REVIEW_FAILED_RETRYABLE = "FINAL_REVIEW_FAILED_RETRYABLE"
     COMPLETED = "COMPLETED"
     ABANDONED = "ABANDONED"
     EXPIRED = "EXPIRED"
@@ -159,6 +207,8 @@ class ProviderOperation(str, enum.Enum):
     STRUCTURE_PROVISIONAL_ASSESSMENT = "STRUCTURE_PROVISIONAL_ASSESSMENT"
     SUMMARIZE_SELECTED_EVIDENCE = "SUMMARIZE_SELECTED_EVIDENCE"
     PRACTICE_CONVERSATION_FOLLOW_UP = "PRACTICE_CONVERSATION_FOLLOW_UP"
+    GENERATE_LIVE_INTERVIEW_QUESTION = "GENERATE_LIVE_INTERVIEW_QUESTION"
+    GENERATE_FINAL_INTERVIEW_REVIEW = "GENERATE_FINAL_INTERVIEW_REVIEW"
 
 
 class AuditRetentionClass(str, enum.Enum):

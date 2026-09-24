@@ -19,6 +19,45 @@ vi.mock("../api/candidatePracticeSession", () => ({
   submitConversationalAnswer: vi.fn(),
   submitMcqAnswer: vi.fn(),
   abandonPracticeSession: vi.fn(),
+  getPracticeReport: vi.fn().mockResolvedValue({
+    report_id: "rep-1",
+    session_id: "session-1",
+    candidate_id: "cand-1",
+    job_id: "job-1",
+    job_title: "Role Practice Interview",
+    job_revision: 1,
+    report_version: 1,
+    schema_version: "practice-coaching-summary.v1",
+    lifecycle_status: "COMPLETED",
+    aggregation_policy_version: "1.0.0",
+    source_review_hash: "hash-1",
+    summary_text: "Great job completing your practice session.",
+    strongest_areas: [],
+    priority_improvements: [],
+    competency_commentary: [],
+    response_patterns: [],
+    next_practice_plan: ["Action 1", "Action 2", "Action 3"],
+    competency_aggregates: [],
+    radar_eligible: false,
+    dimension_aggregates: [],
+    question_trend: [],
+    trend_classification: "NOT_ENOUGH_ASSESSABLE_DATA",
+    completion_counts: {
+      total_primary_questions: 1,
+      total_conversational_questions: 1,
+      total_mcq_questions: 0,
+      assessable_answers_count: 1,
+      insufficient_answers_count: 0,
+      skipped_count: 0,
+      unavailable_count: 0,
+    },
+    disclaimer: "This is practice coaching and not a hiring decision.",
+    validation_status: "VALIDATED",
+    retry_count: 0,
+    is_current: true,
+    created_at: new Date().toISOString(),
+  }),
+  retryPracticeReport: vi.fn(),
 }));
 
 const mockDiscoveryData = {
@@ -113,17 +152,21 @@ describe("Candidate Practice Engine & Room", () => {
     });
   });
 
-  it("submits conversational answer and displays follow-up question", async () => {
+  it("submits conversational answer and displays next AI question", async () => {
     const onExit = vi.fn();
     vi.mocked(practiceSessionApi.getPracticeSessionState).mockResolvedValue(mockInitialSessionState);
 
-    const mockFollowUpState: practiceSessionApi.PracticeSessionDetailResponse = {
+    const mockNextQuestionState: practiceSessionApi.PracticeSessionDetailResponse = {
       ...mockInitialSessionState,
-      turn_count_for_question: 1,
+      current_conv_index: 1,
       total_response_count: 1,
       active_question: {
-        ...mockInitialSessionState.active_question!,
-        turn_count_for_question: 1,
+        question_id: "q-conv-2",
+        question_format: "CONVERSATION",
+        wording: "How do you handle circuit breakers in microservices?",
+        competency_name: "System Design",
+        turn_count_for_question: 0,
+        follow_up_available: false,
       },
       messages: [
         ...mockInitialSessionState.messages,
@@ -139,15 +182,15 @@ describe("Candidate Practice Engine & Room", () => {
           message_id: "msg-4",
           sequence_number: 4,
           role: "INTERVIEWER",
-          message_kind: "FOLLOW_UP",
-          text: "Could you elaborate on how composite indexes affect that query?",
-          source_question_id: "q-conv-1",
+          message_kind: "PRIMARY_QUESTION",
+          text: "How do you handle circuit breakers in microservices?",
+          source_question_id: "q-conv-2",
           created_at: new Date().toISOString(),
         },
       ],
     };
 
-    vi.mocked(practiceSessionApi.submitConversationalAnswer).mockResolvedValue(mockFollowUpState);
+    vi.mocked(practiceSessionApi.submitConversationalAnswer).mockResolvedValue(mockNextQuestionState);
 
     render(<CandidatePracticeRoom sessionId="session-123" onExit={onExit} />);
 
@@ -174,8 +217,7 @@ describe("Candidate Practice Engine & Room", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Could you elaborate on how composite indexes affect that query?")).toBeInTheDocument();
-      expect(screen.getByText("Final Turn on this Question")).toBeInTheDocument();
+      expect(screen.getByText("How do you handle circuit breakers in microservices?")).toBeInTheDocument();
     });
   });
 
@@ -249,8 +291,9 @@ describe("Candidate Practice Engine & Room", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Practice Interview Completed!")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Return to Practice Directory/i })).toBeInTheDocument();
+      expect(screen.getByText(/Practice Coaching Report/i)).toBeInTheDocument();
+      expect(screen.getByText("Great job completing your practice session.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Return to Directory/i })).toBeInTheDocument();
     });
   });
 

@@ -164,3 +164,126 @@ def assemble_assessment_messages(request: Any) -> List[Dict[str, str]]:
         {"role": "user", "content": render_assessment_user_prompt(request)},
     ]
 
+
+CONVERSATIONAL_GENERATION_SYSTEM_INSTRUCTION = (
+    "You are an expert technical interviewer authoring structured candidate practice interview questions.\n"
+    "TASK:\n"
+    "- Author a clear, professional conversational interview question grounded in the specified competency and requirement.\n"
+    "- Exactly ONE primary ask per question (do not ask multi-part compound questions).\n"
+    "- Do NOT invent candidate facts, companies, or past experience.\n"
+    "- Do NOT introduce protected or prohibited topics (age, gender, race, religion, disability, marital status, politics, etc.).\n"
+    "- Do NOT output scoring, ranks, recommendations, HTML, markdown code blocks, or tool execution syntax.\n"
+    "- Output MUST be a single valid JSON object strictly matching schema 'practice-question.v1'.\n\n"
+    "SCHEMA:\n"
+    "{\n"
+    '  "schema_version": "practice-question.v1",\n'
+    '  "question": "Can you describe a situation where you had to optimize a slow database query in production?",\n'
+    '  "competency": "Database Performance Tuning",\n'
+    '  "question_type": "TECHNICAL",\n'
+    '  "intent_summary": "Assess practical knowledge of query analysis and indexing strategies.",\n'
+    '  "safe_follow_up_goal": "Probe candidate on trade-offs between write latency and read indexing.",\n'
+    '  "source_requirement_ids": ["req-id-1"],\n'
+    '  "estimated_answer_minutes": 3\n'
+    "}"
+)
+
+
+def assemble_conversational_generation_messages(
+    competency_name: str,
+    requirement_summary: str,
+    question_type: str,
+    requirement_ids: List[str],
+    difficulty: str = "INTERMEDIATE",
+) -> List[Dict[str, str]]:
+    """Assembles messages for local-AI conversational question authoring."""
+    user_context = {
+        "competency": competency_name,
+        "requirement_summary": requirement_summary,
+        "question_type": question_type,
+        "difficulty": difficulty,
+        "source_requirement_ids": requirement_ids,
+    }
+    user_prompt = (
+        "Author one conversational practice interview question grounded in the following context:\n"
+        f"```json\n{json.dumps(user_context, indent=2)}\n```\n"
+        "Return ONLY the valid JSON object conforming to schema 'practice-question.v1'."
+    )
+    return [
+        {"role": "system", "content": CONVERSATIONAL_GENERATION_SYSTEM_INSTRUCTION},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+MCQ_GENERATION_SYSTEM_INSTRUCTION = (
+    "You are an expert technical interviewer authoring structured multiple-choice questions (MCQs) for candidate practice.\n"
+    "TASK:\n"
+    "- Author structured MCQs grounded strictly in the provided job requirements.\n"
+    "- Each question must have 2 to 5 distinct options with unique IDs ('A', 'B', 'C', 'D').\n"
+    "- Exactly one option must be the correct_option_id.\n"
+    "- Provide a concise, clear explanation.\n"
+    "- Do NOT leak option answers in the question stem.\n"
+    "- Do NOT introduce protected or prohibited topics, HTML, markdown code fences outside JSON, or tool calls.\n"
+    "- Output MUST be a single valid JSON object strictly matching schema 'practice-mcq.v1'.\n\n"
+    "SCHEMA:\n"
+    "{\n"
+    '  "schema_version": "practice-mcq.v1",\n'
+    '  "stem": "Which HTTP status code is most appropriate when a requested resource is permanently moved?",\n'
+    '  "options": [\n'
+    '    {"id": "A", "text": "301 Moved Permanently"},\n'
+    '    {"id": "B", "text": "302 Found"},\n'
+    '    {"id": "C", "text": "404 Not Found"},\n'
+    '    {"id": "D", "text": "500 Internal Server Error"}\n'
+    '  ],\n'
+    '  "correct_option_id": "A",\n'
+    '  "explanation": "HTTP 301 is the standard status code for permanent URL redirection.",\n'
+    '  "competency": "HTTP & Web Protocols",\n'
+    '  "source_requirement_ids": ["req-id-1"]\n'
+    "}"
+)
+
+
+def assemble_mcq_generation_messages_v2(
+    competency_name: str,
+    requirement_summary: str,
+    requirement_ids: List[str],
+    difficulty: str = "FOUNDATIONAL",
+) -> List[Dict[str, str]]:
+    """Assembles messages for local-AI MCQ authoring."""
+    user_context = {
+        "competency": competency_name,
+        "requirement_summary": requirement_summary,
+        "difficulty": difficulty,
+        "source_requirement_ids": requirement_ids,
+    }
+    user_prompt = (
+        "Author one multiple-choice question (MCQ) grounded in the following context:\n"
+        f"```json\n{json.dumps(user_context, indent=2)}\n```\n"
+        "Return ONLY the valid JSON object conforming to schema 'practice-mcq.v1'."
+    )
+    return [
+        {"role": "system", "content": MCQ_GENERATION_SYSTEM_INSTRUCTION},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def assemble_schema_repair_messages(
+    invalid_raw_content: str,
+    validation_error_codes: List[str],
+    target_schema_name: str,
+) -> List[Dict[str, str]]:
+    """Assembles a bounded repair prompt disclosing only validation error codes and the invalid structure."""
+    system_instruction = (
+        f"You are a schema repair assistant. The previous output failed schema validation for '{target_schema_name}'.\n"
+        "Fix the formatting issues and return ONLY a valid JSON object matching the schema. Do not output preamble or reasoning."
+    )
+    user_prompt = (
+        f"The following output failed validation with error codes: {', '.join(validation_error_codes)}.\n"
+        f"Invalid output:\n{invalid_raw_content[:1000]}\n\n"
+        f"Repair and output ONLY the valid JSON object matching schema '{target_schema_name}'."
+    )
+    return [
+        {"role": "system", "content": system_instruction},
+        {"role": "user", "content": user_prompt},
+    ]
+
+

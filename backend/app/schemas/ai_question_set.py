@@ -53,6 +53,35 @@ class SafeRubricResponse(FrozenSchema):
     permitted_probes: List[str] = Field(default_factory=list)
 
 
+class QuestionProvenanceDto(FrozenSchema):
+    """Detailed provenance metadata for an AI practice question."""
+    authoring_origin: str
+    provider_class: Optional[str] = "LOCAL_OPENAI_COMPATIBLE"
+    model_identifier: Optional[str] = None
+    invocation_id: Optional[str] = None
+    prompt_template_version: Optional[str] = "practice-question.v1"
+    guardrail_policy_version: Optional[str] = "1.0.0"
+    schema_version: Optional[str] = "practice-question.v1"
+    generated_at: Optional[str] = None
+    validation_status: Optional[str] = "PASSED"
+    validation_result: Optional[str] = "PASSED"
+    job_version_id: Optional[UUID] = None
+    job_revision: Optional[int] = None
+    source_requirement_ids: List[UUID] = Field(default_factory=list)
+    set_version: Optional[int] = 1
+    is_edited: bool = False
+    reviewer_user_id: Optional[UUID] = None
+    reviewed_at: Optional[datetime] = None
+
+
+class ReleaseEligibilitySummaryDto(FrozenSchema):
+    """Release eligibility diagnosis and blocking items."""
+    is_eligible: bool
+    reason_code: Optional[str] = None
+    safe_message: Optional[str] = None
+    blocking_items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class AiQuestionSlotItemResponse(FrozenSchema):
     """Safe question slot inside an AI question set.
     
@@ -78,10 +107,11 @@ class AiQuestionSlotItemResponse(FrozenSchema):
     answer_explanation: Optional[str] = None
     difficulty: Optional[str] = None
     review_state: str = "UNREVIEWED"  # UNREVIEWED, KEPT, EDITED, REVISED, RECRUITER_AUTHORED
-    authoring_origin: str = "AI_GENERATED"  # AI_GENERATED, RECRUITER_EDITED, RECRUITER_AUTHORED
+    authoring_origin: str = "LOCAL_LLM_GENERATED"
     validation_status: str = "PASSED"  # PASSED, PENDING, FAILED
-    safe_failure_code: Optional[str] = None  # None if valid, else e.g. "SEMANTIC_VALIDATION_FAILED", "PROHIBITED_CONTENT"
+    safe_failure_code: Optional[str] = None
     rationale_code: Optional[str] = None
+    provenance: Optional[QuestionProvenanceDto] = None
     updated_at: Optional[datetime] = None
 
 
@@ -102,6 +132,15 @@ class AiQuestionSetDetailResponse(FrozenSchema):
     content_hash: Optional[str] = None
     action: Optional[str] = None  # GENERATED or OPENED_EXISTING
     
+    # Provenance metadata
+    provider_class: Optional[str] = "LOCAL_OPENAI_COMPATIBLE"
+    model_identifier: Optional[str] = None
+    model_display_name: Optional[str] = None
+    prompt_template_version: Optional[str] = "practice-question.v1"
+    guardrail_policy_version: Optional[str] = "1.0.0"
+    schema_version: Optional[str] = "practice-question.v1"
+    predecessor_set_id: Optional[UUID] = None
+
     # Slots
     slots: List[AiQuestionSlotItemResponse] = Field(default_factory=list)
     total_slots_count: int
@@ -110,9 +149,11 @@ class AiQuestionSetDetailResponse(FrozenSchema):
     conversation_count: int = 0
     mcq_count: int = 0
     
-    # Staleness check
+    # Staleness & Release Eligibility
     is_source_stale: bool = False
     stale_reason: Optional[str] = None
+    release_eligibility: Optional[ReleaseEligibilitySummaryDto] = None
+    is_legacy: bool = False
     
     created_at: datetime
     updated_at: datetime
@@ -130,6 +171,8 @@ class AiQuestionSetSummaryResponse(FrozenSchema):
     lifecycle_status: str
     is_immutable: bool
     is_source_stale: bool = False
+    is_legacy: bool = False
+    model_display_name: Optional[str] = None
     generated_question_count: int
     total_blueprint_slots: int
     conversation_count: int = 0
@@ -161,6 +204,7 @@ class AiQuestionSetValidateResponse(FrozenSchema):
     lifecycle_status: str
     blocking_errors: List[str] = Field(default_factory=list)
     safe_message: str
+    release_eligibility: Optional[ReleaseEligibilitySummaryDto] = None
 
 
 class AiQuestionSetApproveResponse(FrozenSchema):
@@ -172,3 +216,4 @@ class AiQuestionSetApproveResponse(FrozenSchema):
     content_hash: str
     approved_at: datetime
     safe_message: str
+

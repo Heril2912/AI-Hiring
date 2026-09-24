@@ -18,9 +18,12 @@ from app.models.candidate_access import (
     CandidateAccountBindingRecord,
     CandidateBindingStatus,
     CandidateInvitationRecord,
+    CandidatePracticeAnswerReviewRecord,
+    CandidatePracticeAnswerSegmentRecord,
     CandidatePracticeMcqAnswerRecord,
     CandidatePracticeMessageRecord,
     CandidatePracticeReleaseRecord,
+    CandidatePracticeReportRecord,
     CandidatePracticeSessionRecord,
 )
 from app.models.extraction import BlockType, ExtractionBlock, ExtractionMethod, ResumeExtraction
@@ -183,4 +186,7 @@ __all__ = [
     "CandidatePracticeSessionRecord",
     "CandidatePracticeMessageRecord",
     "CandidatePracticeMcqAnswerRecord",
+    "CandidatePracticeAnswerSegmentRecord",
+    "CandidatePracticeAnswerReviewRecord",
+    "CandidatePracticeReportRecord",
 ]

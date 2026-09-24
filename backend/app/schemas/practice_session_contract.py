@@ -15,6 +15,9 @@ from app.schemas.phase3_enums import (
 )
 
 
+from app.schemas.practice_review_contract import PracticeAnswerReviewDto, McqReviewPayload
+
+
 class PracticeSessionStartRequest(StrictSchema):
     release_id: UUID
 
@@ -28,6 +31,20 @@ class PracticeConversationAnswerRequest(StrictSchema):
 class PracticeMcqAnswerRequest(StrictSchema):
     question_id: UUID
     selected_option_id: str = Field(..., min_length=1, max_length=100)
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+
+
+class PracticeReviewRetryRequest(StrictSchema):
+    answer_id: UUID
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+
+
+class PracticeAdvanceQuestionRequest(StrictSchema):
+    question_id: UUID
+    skip_follow_up: bool = False
+
+
+class PracticeQuestionRetryRequest(StrictSchema):
     idempotency_key: str = Field(..., min_length=1, max_length=128)
 
 
@@ -68,6 +85,8 @@ class PracticeSessionDetailResponse(StrictSchema):
     total_response_count: int
     active_question: Optional[PracticeActiveQuestionDto] = None
     messages: List[PracticeMessageDto] = []
+    latest_review: Optional[PracticeAnswerReviewDto] = None
+    latest_mcq_review: Optional[McqReviewPayload] = None
     fallback_active: bool = False
     fallback_notice: Optional[str] = None
     started_at: datetime
@@ -79,3 +98,5 @@ class PracticeSessionAbandonResponse(StrictSchema):
     session_id: UUID
     lifecycle_status: str
     safe_message: str
+
+
