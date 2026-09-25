@@ -601,6 +601,35 @@ async def get_practice_report_endpoint(
     )
 
 
+@router.get(
+    "/recruiter/candidate-practice/sessions/{session_id}/report",
+    status_code=status.HTTP_200_OK,
+    summary="Get Recruiter Structured Practice Assessment Report",
+    description="Retrieves the recruiter-facing structured audit report with per-criterion citations, uncertainty codes, and human review status.",
+)
+async def get_recruiter_practice_report_endpoint(
+    session_id: UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+):
+    from app.services.answer_assessment_service import process_and_persist_structured_session_assessment
+    from app.models.candidate_access import CandidatePracticeSessionRecord
+    
+    stmt = select(CandidatePracticeSessionRecord).where(
+        CandidatePracticeSessionRecord.session_id == session_id,
+        CandidatePracticeSessionRecord.organization_id == auth_ctx.user.organization_id,
+    )
+    session = db.execute(stmt).scalar_one_or_none()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "SESSION_NOT_FOUND", "message": "Practice session not found."},
+        )
+    
+    _, recruiter_dto = await process_and_persist_structured_session_assessment(session=session, db=db)
+    return recruiter_dto
+
+
 @router.post(
     "/candidate/practice-sessions/{session_id}/retry-report",
     status_code=status.HTTP_200_OK,
@@ -618,5 +647,6 @@ async def retry_practice_report_endpoint(
         session_id=session_id,
         db=db,
     )
+
 
 

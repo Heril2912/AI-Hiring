@@ -128,7 +128,12 @@ function AuthenticatedApp() {
       ) {
         setActiveNavTab("ats_integrations");
       } else if (tabParam === "jobs") {
-        setActiveView("jobs");
+        if (jobIdParam) {
+          setSelectedJobId(jobIdParam);
+          setActiveView("edit_job");
+        } else {
+          setActiveView("jobs");
+        }
         setActiveNavTab("jobs");
       } else if (tabParam === "candidates") {
         setActiveView("candidates");
@@ -136,16 +141,25 @@ function AuthenticatedApp() {
       } else if (tabParam === "users" || tabParam === "events" || tabParam === "ai_providers") {
         setActiveNavTab(tabParam);
       } else if (
+        tabParam === "ai_questions" ||
+        tabParam === "ai-questions" ||
+        viewParam === "ai_questions" ||
+        viewParam === "ai-questions" ||
         viewParam === "interview_template" ||
         viewParam === "interview_workspace" ||
+        window.location.pathname.startsWith("/ai-questions") ||
         window.location.pathname.startsWith("/interview-templates") ||
         window.location.pathname.startsWith("/interviews")
       ) {
-        // Safe redirection from old deterministic routes to AI Questions
+        // Safe redirection from legacy routes to AI Interviews workspace / directory
         setActiveView("ai_interviews");
         setActiveNavTab("ai_interviews");
+        if (jobIdParam) {
+          setSelectedJobId(jobIdParam);
+        }
         if (typeof window !== "undefined" && window.history?.replaceState) {
-          window.history.replaceState(null, "", "/ai-interviews");
+          const targetUrl = jobIdParam ? `/ai-interviews?jobId=${encodeURIComponent(jobIdParam)}` : "/ai-interviews";
+          window.history.replaceState(null, "", targetUrl);
         }
       } else if (window.location.pathname.startsWith("/ai-interviews")) {
         const parts = window.location.pathname.split("/").filter(Boolean);
@@ -153,15 +167,21 @@ function AuthenticatedApp() {
           setSelectedAiTemplateId(parts[1]);
           setActiveView("ai_interview_workspace");
         } else {
+          if (jobIdParam) {
+            setSelectedJobId(jobIdParam);
+          }
           setActiveView("ai_interviews");
         }
         setActiveNavTab("ai_interviews");
-      } else if (viewParam === "ai_interviews") {
+      } else if (viewParam === "ai_interviews" || tabParam === "ai_interviews") {
         const tmplParam = searchParams.get("templateId");
         if (tmplParam) {
           setSelectedAiTemplateId(tmplParam);
           setActiveView("ai_interview_workspace");
         } else {
+          if (jobIdParam) {
+            setSelectedJobId(jobIdParam);
+          }
           setActiveView("ai_interviews");
         }
         setActiveNavTab("ai_interviews");
@@ -476,6 +496,14 @@ function AuthenticatedApp() {
                     setComparisonParams(params);
                     setActiveView("compare_candidates");
                   }}
+                  onOpenAiInterviews={(jId) => {
+                    setSelectedJobId(jId);
+                    setActiveView("ai_interviews");
+                    setActiveNavTab("ai_interviews");
+                    if (typeof window !== "undefined" && window.history?.pushState) {
+                      window.history.pushState(null, "", `/ai-interviews?jobId=${encodeURIComponent(jId)}`);
+                    }
+                  }}
                 />
               )}
 
@@ -611,6 +639,7 @@ function AuthenticatedApp() {
 
               {activeView === "ai_interviews" && (
                 <AiInterviewsDirectory
+                  initialSelectedJobId={selectedJobId}
                   onSelectTemplate={handleOpenAiQuestionSet}
                   onNavigateToJobs={() => {
                     setActiveNavTab("jobs");

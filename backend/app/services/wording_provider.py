@@ -114,6 +114,14 @@ class BaseWordingProvider(ABC):
         """Executes strict structured multiple-choice question generation for job requirements."""
         raise NotImplementedError("Provider does not support MCQ generation.")
 
+    async def request_job_grounded_generation(
+        self,
+        job_context: Dict[str, Any],
+        slots_context: List[Dict[str, Any]],
+    ) -> Any:
+        """Executes batch job-grounded question generation for planned slots."""
+        raise NotImplementedError("Provider does not support job-grounded question generation.")
+
 
 
 class DisabledWordingProvider(BaseWordingProvider):
@@ -124,6 +132,16 @@ class DisabledWordingProvider(BaseWordingProvider):
 
     def __init__(self, profile: Optional[ProviderProfile] = None):
         self.profile = profile
+
+    async def request_job_grounded_generation(
+        self,
+        job_context: Dict[str, Any],
+        slots_context: List[Dict[str, Any]],
+    ) -> Any:
+        raise ProviderTransportError(
+            error_code=ProviderErrorCode.PROVIDER_DISABLED,
+            safe_message="Model provider is disabled by system policy.",
+        )
 
     async def reword_question(
         self,
@@ -482,6 +500,72 @@ class FakeWordingProvider(BaseWordingProvider):
             raise ProviderTransportError(
                 error_code=ProviderErrorCode.PROVIDER_RESPONSE_TOO_LARGE,
                 safe_message="Simulated response exceeded maximum allowed bytes.",
+            )
+        elif self.simulated_mode == "INVALID_RESPONSE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="Simulated response was malformed or failed schema.",
+            )
+        else:
+            raise ProviderTransportError(
+                error_code=self.custom_error_code or ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                safe_message=self.custom_error_message or "Simulated provider error.",
+            )
+
+    async def request_job_grounded_generation(
+        self,
+        job_context: Dict[str, Any],
+        slots_context: List[Dict[str, Any]],
+    ) -> Any:
+        if self.simulated_mode == "SUCCESS":
+            if self.simulated_raw_json_override is not None:
+                from app.schemas.question_generation_contract import StrictJobGroundedGenerationBatchResponse
+                return StrictJobGroundedGenerationBatchResponse.model_validate(self.simulated_raw_json_override)
+            
+            from app.schemas.question_generation_contract import (
+                QUESTION_GENERATION_SCHEMA_VERSION,
+                StrictGeneratedQuestionItem,
+                StrictJobGroundedGenerationBatchResponse,
+            )
+            items = []
+            for slot in slots_context:
+                sid = slot.get("slot_id")
+                req_id = slot.get("primary_requirement_id") or (slot.get("allowed_requirement_ids", ["req-1"])[0])
+                comp = slot.get("competency_name", "Technical Competency")
+                obj = slot.get("question_objective", "Assess practical engineering problem-solving")
+                q_type = slot.get("question_type", "TECHNICAL")
+                diff = slot.get("difficulty", "INTERMEDIATE")
+                q_text = f"Can you describe how you architect and validate {comp} in high-scale production systems?"
+                items.append(
+                    StrictGeneratedQuestionItem(
+                        slot_id=str(sid),
+                        question_text=q_text,
+                        primary_requirement_id=str(req_id),
+                        supporting_requirement_ids=[],
+                        competency_name=str(comp),
+                        question_objective=str(obj),
+                        question_type=str(q_type),
+                        difficulty=str(diff),
+                        estimated_answer_minutes=5,
+                        permitted_probes=[
+                            f"How do you monitor and measure latency in {comp}?",
+                            "What failure modes or edge cases did you encounter?",
+                        ],
+                    )
+                )
+            return StrictJobGroundedGenerationBatchResponse(
+                schema_version=QUESTION_GENERATION_SCHEMA_VERSION,
+                questions=items,
+            )
+        elif self.simulated_mode == "TIMEOUT":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_TIMEOUT,
+                safe_message="Simulated request timeout.",
+            )
+        elif self.simulated_mode == "UNAVAILABLE":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                safe_message="Simulated provider endpoint unavailable.",
             )
         elif self.simulated_mode == "INVALID_RESPONSE":
             raise ProviderTransportError(
@@ -990,6 +1074,125 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
                 error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
                 safe_message=f"Provider MCQ response schema validation failed: {str(e)}",
             )
+
+    async def request_job_grounded_generation(
+        self,
+        job_context: Dict[str, Any],
+        slots_context: List[Dict[str, Any]],
+    ) -> Any:
+        """Executes structured batch job-grounded question generation for planned slots."""
+        if not self.profile.enabled:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_DISABLED,
+                safe_message="Target provider profile is currently disabled.",
+            )
+
+        normalized_base = self._validate_local_endpoint()
+        chat_url = f"{normalized_base}/chat/completions"
+
+        from app.services.wording_prompt_package import (
+            assemble_job_grounded_generation_messages,
+            assemble_job_grounded_repair_messages,
+        )
+        from app.schemas.question_generation_contract import StrictJobGroundedGenerationBatchResponse
+
+        messages = assemble_job_grounded_generation_messages(job_context, slots_context)
+
+        payload = {
+            "model": self.profile.model_identifier or "default",
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": min(self.profile.max_output_tokens, 2048),
+            "stream": False,
+        }
+
+        raw_response = await self._send_bounded_request(chat_url, payload)
+
+        choices = raw_response.get("choices")
+        if not choices or not isinstance(choices, list) or len(choices) == 0:
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.PROVIDER_INVALID_RESPONSE,
+                safe_message="OpenAI-compatible response missing 'choices' array.",
+            )
+
+        choice = choices[0]
+        finish_reason = choice.get("finish_reason")
+        message = choice.get("message", {})
+        raw_content = message.get("content")
+        raw_reasoning = message.get("reasoning_content")
+
+        content_str = (raw_content or "").strip()
+
+        if not content_str:
+            if raw_reasoning or finish_reason == "length":
+                raise ProviderTransportError(
+                    error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                    safe_message="The selected model used its response budget for reasoning and returned no final questions.",
+                )
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_CONTENT_EMPTY,
+                safe_message="OpenAI-compatible response contained null or whitespace message content.",
+            )
+
+        if finish_reason == "length":
+            raise ProviderTransportError(
+                error_code=ProviderErrorCode.RESPONSE_TRUNCATED,
+                safe_message="Model generation response was truncated before completing structured output.",
+            )
+
+        clean_json_str = content_str
+        if clean_json_str.startswith("```json"):
+            clean_json_str = clean_json_str[7:]
+        elif clean_json_str.startswith("```"):
+            clean_json_str = clean_json_str[3:]
+        if clean_json_str.endswith("```"):
+            clean_json_str = clean_json_str[:-3]
+        clean_json_str = clean_json_str.strip()
+
+        try:
+            parsed_data = json.loads(clean_json_str)
+            return StrictJobGroundedGenerationBatchResponse.model_validate(parsed_data)
+        except Exception as first_err:
+            logger.warning("First generation output failed validation (%s). Attempting 1 controlled repair...", first_err)
+            
+            # Attempt 1 controlled repair
+            repair_msgs = assemble_job_grounded_repair_messages(
+                invalid_raw_content=clean_json_str,
+                validation_error_codes=[str(first_err)],
+                slots_context=slots_context,
+            )
+            repair_payload = {
+                "model": self.profile.model_identifier or "default",
+                "messages": repair_msgs,
+                "temperature": 0.1,
+                "max_tokens": min(self.profile.max_output_tokens, 2048),
+                "stream": False,
+            }
+            repair_resp = await self._send_bounded_request(chat_url, repair_payload)
+            r_choices = repair_resp.get("choices", [])
+            if not r_choices:
+                raise ProviderTransportError(
+                    error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                    safe_message="Controlled repair failed: empty choices array.",
+                )
+            r_content = (r_choices[0].get("message", {}).get("content") or "").strip()
+            if r_content.startswith("```json"):
+                r_content = r_content[7:]
+            elif r_content.startswith("```"):
+                r_content = r_content[3:]
+            if r_content.endswith("```"):
+                r_content = r_content[:-3]
+            r_content = r_content.strip()
+
+            try:
+                r_parsed = json.loads(r_content)
+                return StrictJobGroundedGenerationBatchResponse.model_validate(r_parsed)
+            except Exception as repair_err:
+                logger.warning("Controlled repair failed schema validation: %s", repair_err)
+                raise ProviderTransportError(
+                    error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                    safe_message=f"Job-grounded generation output failed schema validation after controlled repair: {str(repair_err)}",
+                )
 
 
     async def reword_question(

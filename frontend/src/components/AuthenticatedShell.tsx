@@ -173,11 +173,11 @@ export function AuthenticatedShell({
                     ? "page"
                     : undefined
                 }
-                aria-label="AI-generated interview questions"
+                aria-label="AI-generated interviews and question sets"
                 onClick={() => onNavigateTab?.("ai_interviews")}
               >
                 <Icon name="sparkles" size={15} />
-                <span>AI Questions</span>
+                <span>AI Interviews</span>
                 {aiQuestionsCount !== undefined && aiQuestionsCount > 0 && (
                   <span className="nav-count-pill">{aiQuestionsCount}</span>
                 )}

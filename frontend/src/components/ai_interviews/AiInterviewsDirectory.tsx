@@ -12,15 +12,17 @@ import "./ai-interviews.css";
 interface AiInterviewsDirectoryProps {
   onSelectTemplate: (templateId: string) => void;
   onNavigateToJobs?: () => void;
+  initialSelectedJobId?: string | null;
 }
 
 export function AiInterviewsDirectory({
   onSelectTemplate,
   onNavigateToJobs,
+  initialSelectedJobId = null,
 }: AiInterviewsDirectoryProps) {
   const [eligibleJobs, setEligibleJobs] = useState<EligibleJobItem[]>([]);
   const [recentDirectory, setRecentDirectory] = useState<AiQuestionSetDirectory | null>(null);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(initialSelectedJobId);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isLoadingJobs, setIsLoadingJobs] = useState<boolean>(true);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -169,9 +171,9 @@ export function AiInterviewsDirectory({
     <div className="aiq-page">
       {/* Page Header */}
       <header className="aiq-header">
-        <h1 className="aiq-title">AI interview questions</h1>
+        <h1 className="aiq-title">AI Interviews</h1>
         <p className="aiq-subtitle">
-          Choose a job, generate questions, and review them before approval.
+          Choose a job, generate interview question sets, and manage candidate interview practice.
         </p>
       </header>
 
