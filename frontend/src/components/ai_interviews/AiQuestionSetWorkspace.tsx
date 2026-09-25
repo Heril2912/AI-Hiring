@@ -486,10 +486,10 @@ export function AiQuestionSetWorkspace({
         type="button"
         className="aiq-back-btn"
         onClick={onNavigateBack}
-        aria-label="Back to AI Questions"
+        aria-label="Back to AI Interviews"
       >
         <Icon name="arrow-left" size={16} />
-        <span>Back to AI Questions</span>
+        <span>Back to AI Interviews</span>
       </button>
 
       {/* Workspace Header */}

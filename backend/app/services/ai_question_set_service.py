@@ -67,6 +67,19 @@ from app.schemas.wording_contract import (
     StructuredWordingVariant,
     WordingRationaleCode,
 )
+from app.schemas.question_generation_contract import (
+    GENERATION_POLICY_VERSION,
+    GUARDRAIL_VERSION,
+    PROMPT_CONTRACT_VERSION,
+    QUESTION_GENERATION_SCHEMA_VERSION,
+    BoundedJobGroundedSlotRequest,
+    CanonicalGenerationSourcePacket,
+    CanonicalRequirementItem,
+    GenerationDeliveryMode,
+    PlannedQuestionSlot,
+    StrictGeneratedQuestionItem,
+    StrictJobGroundedGenerationBatchResponse,
+)
 from app.services.mcq_validation_service import validate_mcq_item
 from app.services.provider_registry import ProviderRegistry, get_provider_registry
 from app.services.wording_assistance_service import (
@@ -129,6 +142,18 @@ def _compute_requirement_fingerprint(job_id: UUID, version_id: UUID, revision: i
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _compute_canonical_source_fingerprint(packet: CanonicalGenerationSourcePacket) -> str:
+    """Computes a SHA-256 fingerprint over the authoritative generation source packet."""
+    sorted_req_ids = sorted(str(r.requirement_id) for r in packet.canonical_requirements)
+    raw_fingerprint = (
+        f"GEN_FINGERPRINT:{packet.organization_id}:{packet.job_id}:{packet.job_version_id}:"
+        f"{packet.job_revision}:{packet.delivery_mode.value}:{packet.requested_question_count}:"
+        f"{','.join(sorted_req_ids)}:{packet.generation_policy_version}:{packet.prompt_contract_version}:"
+        f"{packet.guardrail_version}"
+    )
+    return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
+
+
 def _is_requirement_eligible(req: JobRequirement) -> bool:
     """Filters out administrative, personal, unapproved, or prompt-injected requirements."""
     label_text = getattr(req, "label", getattr(req, "name", "")) or ""
@@ -158,22 +183,18 @@ def _is_requirement_eligible(req: JobRequirement) -> bool:
     return True
 
 
-def _build_requirement_grounded_plan(
+def _build_canonical_generation_packet(
     job: JobRequisition,
     job_version: JobVersion,
-) -> Dict[str, Any]:
-    """Constructs a bounded RequirementGroundedGenerationPlan from approved requirements.
-    
-    Bounded: 4-6 questions, high priority first, distinct competencies.
-    """
+    delivery_mode: GenerationDeliveryMode = GenerationDeliveryMode.CHAT,
+    actor: Optional[UserRecord] = None,
+) -> Tuple[CanonicalGenerationSourcePacket, Dict[str, Any]]:
+    """Builds a CanonicalGenerationSourcePacket and internal plan from approved job revision requirements."""
     raw_requirements = list(job_version.requirements or [])
     eligible = [r for r in raw_requirements if _is_requirement_eligible(r)]
-    
     if not eligible and raw_requirements:
-        # If all were strictly filtered by safety heuristic, fallback safely to the first non-injected
         eligible = raw_requirements
-        
-    # Sort: MUST_HAVE / CRITICAL first
+
     def sort_key(r: JobRequirement) -> int:
         nec = getattr(r, "necessity", getattr(r, "importance", None))
         nec_str = nec.value if hasattr(nec, "value") else str(nec or "")
@@ -184,30 +205,60 @@ def _build_requirement_grounded_plan(
         return 1
 
     eligible.sort(key=sort_key)
-    
-    # Cap between 4 and 6 questions (or fewer if fewer eligible requirements)
+
     target_count = min(6, max(len(eligible), 1))
-    if target_count > len(eligible):
-        target_count = len(eligible)
-        
     selected_reqs = eligible[:target_count]
-    
-    slots: List[Dict[str, Any]] = []
-    for idx, req in enumerate(selected_reqs):
-        cat_val = req.category.value if hasattr(req.category, "value") else str(req.category)
-        q_type = "TECHNICAL" if cat_val in ("SKILL", "EXPERIENCE", "HARD_SKILL", "DOMAIN_KNOWLEDGE") else "BEHAVIORAL"
-        req_name = getattr(req, "label", getattr(req, "name", "Requirement")).strip()
-        req_desc = getattr(req, "rationale", getattr(req, "description", req_name)) or req_name
-        
-        slot_id = str(uuid.uuid4())
-        slots.append({
-            "slot_id": slot_id,
+
+    canonical_reqs: List[CanonicalRequirementItem] = []
+    for r in selected_reqs:
+        cat_str = r.category.value if hasattr(r.category, "value") else str(r.category)
+        nec_str = r.necessity.value if hasattr(r.necessity, "value") else str(r.necessity)
+        prio_str = r.priority.value if hasattr(r.priority, "value") else str(r.priority)
+        canonical_reqs.append(
+            CanonicalRequirementItem(
+                requirement_id=r.requirement_id,
+                label=r.label.strip(),
+                category=cat_str,
+                necessity=nec_str,
+                priority=prio_str,
+                rationale=r.rationale.strip() if r.rationale else None,
+                is_interview_eligible=True,
+            )
+        )
+
+    planned_slots: List[PlannedQuestionSlot] = []
+    plan_slots_internal: List[Dict[str, Any]] = []
+
+    for idx, r in enumerate(selected_reqs):
+        cat_str = r.category.value if hasattr(r.category, "value") else str(r.category)
+        q_type_enum = QuestionType.TECHNICAL if cat_str in ("SKILL", "EXPERIENCE", "HARD_SKILL", "DOMAIN_KNOWLEDGE") else QuestionType.BEHAVIORAL
+        req_name = getattr(r, "label", getattr(r, "name", "Requirement")).strip()
+        req_desc = getattr(r, "rationale", getattr(r, "description", req_name)) or req_name
+        slot_uuid = uuid.uuid4()
+
+        planned_slot = PlannedQuestionSlot(
+            slot_id=slot_uuid,
+            display_order=idx,
+            primary_requirement_id=r.requirement_id,
+            supporting_requirement_ids=[],
+            competency_name=req_name,
+            question_type=q_type_enum,
+            question_objective=f"Assess practical experience, decision-making, and technical execution in {req_name}.",
+            expected_evidence_type="PRACTICAL_EXPERIENCE",
+            difficulty="INTERMEDIATE",
+            delivery_mode=delivery_mode,
+            estimated_time_minutes=5,
+        )
+        planned_slots.append(planned_slot)
+
+        plan_slots_internal.append({
+            "slot_id": str(slot_uuid),
             "display_order": idx,
-            "source_requirement_ids": [str(req.requirement_id)],
+            "source_requirement_ids": [str(r.requirement_id)],
             "competency_name": req_name,
             "requirement_summary": req_desc.strip()[:250],
-            "question_type": q_type,
-            "estimated_time_minutes": 6,
+            "question_type": q_type_enum.value,
+            "estimated_time_minutes": 5,
             "permitted_probes": [
                 f"Can you provide a concrete example from your past work demonstrating {req_name}?",
                 "What challenges or trade-offs did you encounter and how did you resolve them?",
@@ -235,24 +286,49 @@ def _build_requirement_grounded_plan(
                 ],
             },
         })
-        
-    req_ids = [str(r.requirement_id) for r in selected_reqs]
-    fingerprint = _compute_requirement_fingerprint(
-        job.job_id,
-        job_version.job_version_id,
-        job_version.version_number,
-        req_ids,
-    )
+
+    raw_org = getattr(job, "organization_id", None) or getattr(job, "org_id", None)
+    if raw_org is None and actor is not None:
+        raw_org = getattr(actor, "organization_id", None) or getattr(actor, "org_id", None)
     
-    return {
+    if raw_org is None or str(raw_org) == "00000000-0000-0000-0000-000000000000":
+        # Generate a stable deterministic UUID from job_id if no org_id is present
+        org_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"org.job.{job.job_id}")
+    elif isinstance(raw_org, uuid.UUID):
+        org_id = raw_org
+    else:
+        org_id = uuid.UUID(str(raw_org))
+
+    packet = CanonicalGenerationSourcePacket(
+        organization_id=org_id,
+        job_id=job.job_id,
+        job_version_id=job_version.job_version_id,
+        job_revision=job_version.version_number,
+        job_title=job_version.title or f"Job #{str(job.job_id)[:8]}",
+        seniority_level=None,
+        role_summary=job_version.summary,
+        key_responsibilities=job_version.responsibilities,
+        planned_slots=planned_slots,
+        canonical_requirements=canonical_reqs,
+        requested_question_count=len(planned_slots),
+        delivery_mode=delivery_mode,
+        generation_policy_version=GENERATION_POLICY_VERSION,
+        prompt_contract_version=PROMPT_CONTRACT_VERSION,
+        guardrail_version=GUARDRAIL_VERSION,
+    )
+
+    fingerprint = _compute_canonical_source_fingerprint(packet)
+    internal_plan = {
         "job_id": str(job.job_id),
         "job_version_id": str(job_version.job_version_id),
         "job_revision": job_version.version_number,
-        "job_title": job_version.title or f"Job #{str(job.job_id)[:8]}",
+        "job_title": packet.job_title,
         "fingerprint": fingerprint,
-        "source_requirement_ids": req_ids,
-        "slots": slots,
+        "source_requirement_ids": [str(r.requirement_id) for r in selected_reqs],
+        "slots": plan_slots_internal,
     }
+
+    return packet, internal_plan
 
 
 def _validate_ai_wording_safety(text: str) -> Tuple[bool, Optional[str]]:
@@ -282,13 +358,14 @@ def _validate_ai_wording_safety(text: str) -> Tuple[bool, Optional[str]]:
 
 
 async def _generate_requirement_grounded_slots(
-    plan: Dict[str, Any],
+    packet: CanonicalGenerationSourcePacket,
+    internal_plan: Dict[str, Any],
     actor: UserRecord,
     db: Session,
     provider_registry: Optional[ProviderRegistry] = None,
     custom_provider: Optional[BaseWordingProvider] = None,
 ) -> List[Dict[str, Any]]:
-    """Generates AI wording for each slot in a RequirementGroundedGenerationPlan using the local model."""
+    """Generates AI wording for all planned slots using the job-grounded batch generation provider."""
     reg = provider_registry or get_provider_registry()
     items: List[Dict[str, Any]] = []
     
@@ -301,9 +378,58 @@ async def _generate_requirement_grounded_slots(
     model_id = active_profile.model_identifier if active_profile else "qwen/qwen3-4b-2507"
     prov_class = active_profile.provider_type.value if (active_profile and hasattr(active_profile.provider_type, "value")) else "LOCAL_OPENAI_COMPATIBLE"
 
-    for slot in plan["slots"]:
+    provider = custom_provider or (reg.get_provider_instance(active_profile) if active_profile else None)
+    if not provider:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PROVIDER_UNAVAILABLE", "message": "Failed to generate AI questions. Local AI is unavailable. Please check that LM Studio is running."},
+        )
+
+    job_context = {
+        "job_title": packet.job_title,
+        "seniority_level": packet.seniority_level or "Intermediate",
+        "role_summary": packet.role_summary or "",
+        "key_responsibilities": packet.key_responsibilities or "",
+    }
+
+    slots_context = []
+    for s in packet.planned_slots:
+        # Find matching internal slot to get requirement rationale / summary
+        internal_match = next((x for x in internal_plan["slots"] if str(x["slot_id"]) == str(s.slot_id)), None)
+        req_desc = internal_match.get("requirement_summary") if internal_match else s.competency_name
+        slots_context.append({
+            "slot_id": str(s.slot_id),
+            "primary_requirement_id": str(s.primary_requirement_id),
+            "allowed_requirement_ids": [str(s.primary_requirement_id)] + [str(rid) for rid in s.supporting_requirement_ids],
+            "primary_requirement_label": s.competency_name,
+            "primary_requirement_rationale": req_desc,
+            "competency_name": s.competency_name,
+            "question_objective": s.question_objective,
+            "question_type": s.question_type.value,
+            "difficulty": s.difficulty,
+            "delivery_mode": s.delivery_mode.value,
+        })
+
+    try:
+        batch_resp: StrictJobGroundedGenerationBatchResponse = await provider.request_job_grounded_generation(
+            job_context=job_context,
+            slots_context=slots_context,
+        )
+    except Exception as e:
+        logger.warning("Batch job-grounded generation provider error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PROVIDER_UNAVAILABLE", "message": f"Failed to generate AI questions. Local AI is unavailable or returned an error: {str(e)}"},
+        )
+
+    # Validate output questions against planned slots
+    questions_by_slot = {q.slot_id: q for q in batch_resp.questions}
+    allowed_req_ids = {str(r.requirement_id) for r in packet.canonical_requirements}
+
+    for slot in internal_plan["slots"]:
+        slot_id_str = str(slot["slot_id"])
         item: Dict[str, Any] = {
-            "slot_id": slot["slot_id"],
+            "slot_id": slot_id_str,
             "display_order": slot["display_order"],
             "source_requirement_ids": slot["source_requirement_ids"],
             "competency_name": slot["competency_name"],
@@ -322,72 +448,31 @@ async def _generate_requirement_grounded_slots(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Build bounded request for local provider
-        q_type_enum = QuestionType.TECHNICAL if slot["question_type"] == "TECHNICAL" else QuestionType.BEHAVIORAL
-        seed_text = slot.get("requirement_summary") or f"Assess hands-on proficiency in {slot['competency_name']}."
-        if len(seed_text) < 5:
-            seed_text = f"Assess practical proficiency in {slot['competency_name']}."
-            
-        bounded_req = BoundedWordingRequest(
-            source_question_id=uuid.UUID(slot["slot_id"]),
-            source_question_version=1,
-            deterministic_question_text=seed_text,
-            question_intent=f"Assess depth of experience and practical execution in {slot['competency_name']}.",
-            competency_label=slot["competency_name"][:200],
-            question_type=q_type_enum,
-            layer=InterviewLayer.COMMON_CORE,
-            allowed_reference_ids=slot["source_requirement_ids"],
-            max_variants=1,
-        )
-
-        try:
-            provider = custom_provider or (reg.get_provider_instance(active_profile) if active_profile else None)
-            if not provider:
+        generated_q = questions_by_slot.get(slot_id_str)
+        if not generated_q:
+            item["validation_status"] = "FAILED"
+            item["safe_failure_code"] = "MISSING_SLOT_OUTPUT"
+        else:
+            # Check requirement ownership
+            if generated_q.primary_requirement_id not in allowed_req_ids:
                 item["validation_status"] = "FAILED"
-                item["safe_failure_code"] = "PROVIDER_UNAVAILABLE"
+                item["safe_failure_code"] = "FORGED_REQUIREMENT_ID"
+            elif generated_q.primary_requirement_id != slot["source_requirement_ids"][0]:
+                item["validation_status"] = "FAILED"
+                item["safe_failure_code"] = "MISMATCHED_REQUIREMENT_ID"
             else:
-                resp: BoundedWordingResponse = await provider.request_wording_assistance(bounded_req)
-                if resp.variants:
-                    wording = resp.variants[0].variant_text.strip()
-                    is_valid, fail_code = _validate_ai_wording_safety(wording)
-                    if is_valid:
-                        item["ai_wording"] = wording
-                        item["validation_status"] = "PASSED"
-                        item["safe_failure_code"] = None
-                    else:
-                        # Attempt 1 controlled repair
-                        repair_req = BoundedWordingRequest(
-                            source_question_id=uuid.UUID(slot["slot_id"]),
-                            source_question_version=1,
-                            deterministic_question_text=seed_text,
-                            question_intent=f"Assess practical experience with {slot['competency_name']} safely and concisely.",
-                            competency_label=slot["competency_name"][:200],
-                            question_type=q_type_enum,
-                            layer=InterviewLayer.COMMON_CORE,
-                            allowed_reference_ids=slot["source_requirement_ids"],
-                            max_variants=1,
-                        )
-                        repair_resp = await provider.request_wording_assistance(repair_req)
-                        if repair_resp.variants:
-                            repaired = repair_resp.variants[0].variant_text.strip()
-                            r_valid, r_code = _validate_ai_wording_safety(repaired)
-                            if r_valid:
-                                item["ai_wording"] = repaired
-                                item["validation_status"] = "PASSED"
-                                item["safe_failure_code"] = None
-                            else:
-                                item["validation_status"] = "FAILED"
-                                item["safe_failure_code"] = r_code or "SEMANTIC_VALIDATION_FAILED"
-                        else:
-                            item["validation_status"] = "FAILED"
-                            item["safe_failure_code"] = "SEMANTIC_VALIDATION_FAILED"
+                wording = generated_q.question_text.strip()
+                is_valid, fail_code = _validate_ai_wording_safety(wording)
+                if is_valid:
+                    item["ai_wording"] = wording
+                    item["question_text"] = wording
+                    item["validation_status"] = "PASSED"
+                    item["safe_failure_code"] = None
+                    if generated_q.permitted_probes:
+                        item["permitted_probes"] = generated_q.permitted_probes
                 else:
                     item["validation_status"] = "FAILED"
-                    item["safe_failure_code"] = "PROVIDER_UNAVAILABLE"
-        except Exception as e:
-            logger.warning(f"Requirement-grounded wording generation failed for slot {slot['slot_id']}: {e}")
-            item["validation_status"] = "FAILED"
-            item["safe_failure_code"] = "PROVIDER_UNAVAILABLE"
+                    item["safe_failure_code"] = fail_code or "SAFETY_CHECK_FAILED"
 
         items.append(item)
 
@@ -415,18 +500,25 @@ def _map_record_to_detail_dto(
             is_stale = True
             stale_reason = "Deterministic blueprint was modified since AI question set generation."
     elif ai_set.source_mode == "REQUIREMENT_GROUNDED":
-        # Check current requirements fingerprint
+        # Check current requirements fingerprint against current revision
         job_stmt = select(JobRequisition).options(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
         ).where(JobRequisition.job_id == ai_set.job_id)
         job = db.execute(job_stmt).scalar_one_or_none()
         if job and job.versions:
             latest_v = job.versions[-1]
-            req_ids = [str(r.requirement_id) for r in (latest_v.requirements or [])]
-            curr_fp = _compute_requirement_fingerprint(job.job_id, latest_v.job_version_id, latest_v.version_number, req_ids)
-            if curr_fp != ai_set.source_content_hash:
+            # If revision number changed, it is definitely stale
+            if ai_set.job_revision and ai_set.job_revision != latest_v.version_number:
                 is_stale = True
-                stale_reason = "Job requirements were updated since AI question set generation."
+                stale_reason = f"Job revision was updated from #{ai_set.job_revision} to #{latest_v.version_number}."
+            else:
+                p, i_plan = _build_canonical_generation_packet(job, latest_v)
+                canon_fp = i_plan["fingerprint"]
+                req_ids = [str(r.requirement_id) for r in (latest_v.requirements or [])]
+                legacy_fp = _compute_requirement_fingerprint(job.job_id, latest_v.job_version_id, latest_v.version_number, req_ids)
+                if ai_set.source_content_hash not in (canon_fp, legacy_fp):
+                    is_stale = True
+                    stale_reason = "Job requirements were updated since AI question set generation."
 
     if is_stale and ai_set.lifecycle_status not in ("APPROVED", "STALE"):
         ai_set.lifecycle_status = "STALE"
@@ -903,53 +995,33 @@ async def generate_ai_questions_by_job_id(
     )
     existing_set = db.execute(stmt_existing).scalars().first()
 
-    # Step 3: Check if fresh active AI set exists
+    # Step 3: Check if fresh active AI set exists for this exact job revision and canonical source fingerprint
+    packet, internal_plan = _build_canonical_generation_packet(job, latest_version, actor=actor)
+    canonical_fp = internal_plan["fingerprint"]
+
     if existing_set and not force_regenerate:
-        # Check freshness
-        is_fresh = True
-        if existing_set.source_mode == "BLUEPRINT_GROUNDED" and existing_set.template:
-            if existing_set.template.content_hash and existing_set.source_content_hash != existing_set.template.content_hash:
-                is_fresh = False
+        # Check freshness against authoritative canonical source fingerprint
+        is_fresh = False
+        if existing_set.source_content_hash == canonical_fp:
+            is_fresh = True
         elif existing_set.source_mode == "REQUIREMENT_GROUNDED":
+            # Check legacy requirement fingerprint compatibility
             req_ids = [str(r.requirement_id) for r in latest_version.requirements]
-            curr_fp = _compute_requirement_fingerprint(job.job_id, latest_version.job_version_id, latest_version.version_number, req_ids)
-            if curr_fp != existing_set.source_content_hash:
-                is_fresh = False
+            legacy_fp = _compute_requirement_fingerprint(job.job_id, latest_version.job_version_id, latest_version.version_number, req_ids)
+            if existing_set.source_content_hash == legacy_fp:
+                is_fresh = True
+        elif existing_set.source_mode == "BLUEPRINT_GROUNDED" and existing_set.template_id:
+            # Check legacy template content hash compatibility
+            if existing_set.template and existing_set.source_content_hash == existing_set.template.content_hash:
+                is_fresh = True
 
         if is_fresh:
             return _map_record_to_detail_dto(existing_set, db, action="OPENED_EXISTING")
 
-    # Step 5 & 6: Check for usable internal deterministic blueprint with usable slots
-    stmt_tmpl = (
-        select(JobInterviewTemplateRecord)
-        .options(
-            selectinload(JobInterviewTemplateRecord.requisition),
-            selectinload(JobInterviewTemplateRecord.questions).selectinload(InterviewQuestionRecord.rubric),
-        )
-        .where(
-            JobInterviewTemplateRecord.job_id == job_id,
-            JobInterviewTemplateRecord.revision == latest_version.version_number,
-        )
-        .order_by(desc(JobInterviewTemplateRecord.template_version))
-    )
-    template_rec = db.execute(stmt_tmpl).scalars().first()
-
-    if template_rec and template_rec.questions and len(template_rec.questions) > 0:
-        # BLUEPRINT_GROUNDED mode
-        return await generate_or_open_ai_question_set(
-            actor=actor,
-            job_id=job.job_id,
-            template_id=template_rec.template_id,
-            force_regenerate=force_regenerate,
-            db=db,
-            provider_registry=provider_registry,
-            custom_provider=custom_provider,
-        )
-
-    # Step 7: REQUIREMENT_GROUNDED mode (Fallback when deterministic questions do not exist)
-    plan = _build_requirement_grounded_plan(job, latest_version)
+    # Step 4: Requirement-grounded batch generation (Job-Grounded Generation Pipeline)
     items = await _generate_requirement_grounded_slots(
-        plan=plan,
+        packet=packet,
+        internal_plan=internal_plan,
         actor=actor,
         db=db,
         provider_registry=provider_registry,
@@ -971,7 +1043,7 @@ async def generate_ai_questions_by_job_id(
     except Exception:
         pass
 
-    org_id = getattr(actor, "organization_id", getattr(job, "organization_id", None)) or uuid.uuid4()
+    org_id = packet.organization_id
     new_set = AiInterviewQuestionSetRecord(
         ai_set_id=uuid.uuid4(),
         organization_id=org_id,
@@ -981,17 +1053,17 @@ async def generate_ai_questions_by_job_id(
         job_revision=latest_version.version_number,
         source_mode="REQUIREMENT_GROUNDED",
         source_template_version=None,
-        source_content_hash=plan["fingerprint"],
-        source_requirement_ids=plan["source_requirement_ids"],
+        source_content_hash=canonical_fp,
+        source_requirement_ids=internal_plan["source_requirement_ids"],
         set_version=next_version,
         lifecycle_status="DRAFT",
         is_immutable=False,
         provider_profile_id=active_prof.profile_id if active_prof else None,
         provider_class=active_prof.provider_type.value if (active_prof and hasattr(active_prof.provider_type, "value")) else "LOCAL_OPENAI_COMPATIBLE",
         model_identifier=active_prof.model_identifier if active_prof else "qwen/qwen3-4b-2507",
-        prompt_template_version="practice-question.v1",
-        guardrail_policy_version="1.0.0",
-        schema_version="practice-question.v1",
+        prompt_template_version=PROMPT_CONTRACT_VERSION,
+        guardrail_policy_version=GUARDRAIL_VERSION,
+        schema_version=QUESTION_GENERATION_SCHEMA_VERSION,
         items=items,
         created_by_user_id=actor.user_id,
     )
@@ -1933,10 +2005,15 @@ def validate_ai_question_set(
         job_rec = db.execute(job_stmt).scalar_one_or_none()
         if job_rec and job_rec.versions:
             latest_v = job_rec.versions[-1]
-            req_ids = [str(r.requirement_id) for r in (latest_v.requirements or [])]
-            curr_fp = _compute_requirement_fingerprint(job_rec.job_id, latest_v.job_version_id, latest_v.version_number, req_ids)
-            if curr_fp != ai_set.source_content_hash:
-                errors.append("AI question set is stale: job requirements have changed since generation. Please regenerate.")
+            if ai_set.job_revision and ai_set.job_revision != latest_v.version_number:
+                errors.append(f"AI question set is stale: job revision changed from #{ai_set.job_revision} to #{latest_v.version_number}. Please regenerate.")
+            else:
+                p, i_plan = _build_canonical_generation_packet(job_rec, latest_v)
+                canon_fp = i_plan["fingerprint"]
+                req_ids = [str(r.requirement_id) for r in (latest_v.requirements or [])]
+                legacy_fp = _compute_requirement_fingerprint(job_rec.job_id, latest_v.job_version_id, latest_v.version_number, req_ids)
+                if ai_set.source_content_hash not in (canon_fp, legacy_fp):
+                    errors.append("AI question set is stale: job requirements have changed since generation. Please regenerate.")
 
     items = ai_set.items or []
     conv_items = [it for it in items if it.get("question_format") != "MCQ_SINGLE_ANSWER"]

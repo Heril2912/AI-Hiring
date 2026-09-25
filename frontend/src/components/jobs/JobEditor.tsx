@@ -31,9 +31,10 @@ interface JobEditorProps {
     revision: number;
     requirementsCount: number;
   }) => void;
+  onOpenAiInterviews?: (jobId: string) => void;
 }
 
-export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandidates }: JobEditorProps) {
+export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandidates, onOpenAiInterviews }: JobEditorProps) {
   // Main Draft Data
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(jobId));
@@ -653,6 +654,17 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
                 <Icon name="plus" size={14} />
                 <span>{isCreatingSuccessor ? "Creating..." : "Create new revision"}</span>
               </button>
+              {jobId && onOpenAiInterviews && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-md"
+                  onClick={() => onOpenAiInterviews(jobId)}
+                  title="Open AI Interviews workspace for this requisition"
+                >
+                  <Icon name="sparkles" size={14} />
+                  <span>AI Interviews</span>
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-primary btn-md"
