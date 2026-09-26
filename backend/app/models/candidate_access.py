@@ -1441,12 +1441,22 @@ class CandidateApplicationStatus(str, enum.Enum):
     WITHDRAWN = "WITHDRAWN"
 
 
+class RecruiterReviewState(str, enum.Enum):
+    RECEIVED = "RECEIVED"
+    IN_REVIEW = "IN_REVIEW"
+    INTERVIEW_READY = "INTERVIEW_READY"
+
+
 class CandidateApplicationRecord(Base):
     __tablename__ = "candidate_applications"
     __table_args__ = (
         CheckConstraint(
             "status IN ('SUBMITTED', 'WITHDRAWN')",
             name="ck_candidate_applications_status",
+        ),
+        CheckConstraint(
+            "recruiter_review_state IN ('RECEIVED', 'IN_REVIEW', 'INTERVIEW_READY')",
+            name="ck_candidate_applications_recruiter_review_state",
         ),
         CheckConstraint(
             "job_revision >= 1",
@@ -1465,6 +1475,7 @@ class CandidateApplicationRecord(Base):
         Index("ix_candidate_applications_org_id", "organization_id"),
         Index("ix_candidate_applications_job_id", "job_id"),
         Index("ix_candidate_applications_status", "status"),
+        Index("ix_candidate_applications_recruiter_review_state", "recruiter_review_state"),
         Index("ix_candidate_applications_idempotency_key", "binding_id", "idempotency_key", unique=True),
     )
 
@@ -1535,6 +1546,12 @@ class CandidateApplicationRecord(Base):
         nullable=False,
         default=CandidateApplicationStatus.SUBMITTED.value,
         server_default=text("'SUBMITTED'"),
+    )
+    recruiter_review_state: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default=RecruiterReviewState.RECEIVED.value,
+        server_default=text("'RECEIVED'"),
     )
     submission_source: Mapped[str] = mapped_column(
         String(50),

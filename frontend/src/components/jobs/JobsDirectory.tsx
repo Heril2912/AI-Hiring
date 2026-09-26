@@ -31,11 +31,11 @@ export function JobsDirectory({
   const safeJobs = Array.isArray(jobs) ? jobs : [];
 
   const getDerivedState = (versionStatus: string, reqCount: number): "NEEDS_REQUIREMENTS" | "DRAFT" | "APPROVED" => {
-    if (versionStatus === "APPROVED") {
-      return "APPROVED";
-    }
     if (reqCount === 0) {
       return "NEEDS_REQUIREMENTS";
+    }
+    if (versionStatus === "READY_FOR_MATCHING" || versionStatus === "APPROVED") {
+      return "APPROVED";
     }
     return "DRAFT";
   };

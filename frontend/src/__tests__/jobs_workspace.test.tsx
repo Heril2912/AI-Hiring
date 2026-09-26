@@ -760,5 +760,261 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
       expect(screen.getByText(/This requisition was updated or changed status in another session/)).toBeInTheDocument();
     });
   });
+
+  // =========================================================================
+  // 6. Jobs Directory Status Mapping & Lifecycle Tab Filtering
+  // =========================================================================
+  describe("Jobs Directory Status Calculation and Tab Filtering", () => {
+    const mockJobsList: jobsApi.JobSummary[] = [
+      {
+        jobId: "job-approved-1",
+        createdByUserId: "user-1",
+        status: "ACTIVE",
+        createdAt: "2026-09-01T10:00:00Z",
+        updatedAt: "2026-09-01T12:00:00Z",
+        currentVersion: {
+          jobVersionId: "ver-app-1",
+          versionNumber: 1,
+          versionStatus: "READY_FOR_MATCHING",
+          revision: 2,
+          title: "Principal Architect",
+          department: "Engineering",
+          location: "Remote",
+          requirementsCount: 5,
+          createdAt: "2026-09-01T10:00:00Z",
+          updatedAt: "2026-09-01T12:00:00Z",
+        },
+      },
+      {
+        jobId: "job-draft-1",
+        createdByUserId: "user-1",
+        status: "ACTIVE",
+        createdAt: "2026-09-02T10:00:00Z",
+        updatedAt: "2026-09-02T12:00:00Z",
+        currentVersion: {
+          jobVersionId: "ver-draft-1",
+          versionNumber: 1,
+          versionStatus: "DRAFT",
+          revision: 1,
+          title: "Senior Backend Developer",
+          department: "Platform",
+          location: "San Francisco",
+          requirementsCount: 3,
+          createdAt: "2026-09-02T10:00:00Z",
+          updatedAt: "2026-09-02T12:00:00Z",
+        },
+      },
+      {
+        jobId: "job-empty-1",
+        createdByUserId: "user-1",
+        status: "ACTIVE",
+        createdAt: "2026-09-03T10:00:00Z",
+        updatedAt: "2026-09-03T12:00:00Z",
+        currentVersion: {
+          jobVersionId: "ver-empty-1",
+          versionNumber: 1,
+          versionStatus: "DRAFT",
+          revision: 1,
+          title: "Junior QA Engineer",
+          department: "Quality",
+          location: "New York",
+          requirementsCount: 0,
+          createdAt: "2026-09-03T10:00:00Z",
+          updatedAt: "2026-09-03T12:00:00Z",
+        },
+      },
+    ];
+
+    it("displays READY_FOR_MATCHING as Approved, unready revision with requirements as Draft, and 0 requirements as Needs requirements", () => {
+      render(
+        <JobsDirectory
+          jobs={mockJobsList}
+          isLoading={false}
+          onSelectJob={vi.fn()}
+          onCreateJob={vi.fn()}
+          onRefresh={vi.fn()}
+        />
+      );
+
+      // Verify status text
+      expect(screen.getByText(/Approved · 5 requirements/)).toBeInTheDocument();
+      expect(screen.getByText(/Draft · 3 requirements/)).toBeInTheDocument();
+      expect(screen.getAllByText("Needs requirements").length).toBeGreaterThanOrEqual(1);
+
+      // Verify contextual action buttons
+      expect(screen.getByRole("button", { name: "View job Principal Architect" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Continue editing Senior Backend Developer" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Add requirements Junior QA Engineer" })).toBeInTheDocument();
+    });
+
+    it("filters correctly by Approved tab and excludes Draft jobs", () => {
+      render(
+        <JobsDirectory
+          jobs={mockJobsList}
+          isLoading={false}
+          onSelectJob={vi.fn()}
+          onCreateJob={vi.fn()}
+          onRefresh={vi.fn()}
+        />
+      );
+
+      const approvedTab = screen.getByRole("tab", { name: "Approved" });
+      fireEvent.click(approvedTab);
+
+      // Approved job is present
+      expect(screen.getByText("Principal Architect")).toBeInTheDocument();
+      // Draft and Needs requirements jobs are excluded
+      expect(screen.queryByText("Senior Backend Developer")).not.toBeInTheDocument();
+      expect(screen.queryByText("Junior QA Engineer")).not.toBeInTheDocument();
+      expect(screen.getByText("1 job")).toBeInTheDocument();
+    });
+
+    it("filters correctly by Draft tab and excludes Approved jobs", () => {
+      render(
+        <JobsDirectory
+          jobs={mockJobsList}
+          isLoading={false}
+          onSelectJob={vi.fn()}
+          onCreateJob={vi.fn()}
+          onRefresh={vi.fn()}
+        />
+      );
+
+      const draftTab = screen.getByRole("tab", { name: "Draft" });
+      fireEvent.click(draftTab);
+
+      // Draft job with requirements is present
+      expect(screen.getByText("Senior Backend Developer")).toBeInTheDocument();
+      // Approved and 0-requirement jobs are excluded
+      expect(screen.queryByText("Principal Architect")).not.toBeInTheDocument();
+      expect(screen.queryByText("Junior QA Engineer")).not.toBeInTheDocument();
+      expect(screen.getByText("1 job")).toBeInTheDocument();
+    });
+
+    it("filters correctly by Needs requirements tab", () => {
+      render(
+        <JobsDirectory
+          jobs={mockJobsList}
+          isLoading={false}
+          onSelectJob={vi.fn()}
+          onCreateJob={vi.fn()}
+          onRefresh={vi.fn()}
+        />
+      );
+
+      const needsReqsTab = screen.getByRole("tab", { name: "Needs requirements" });
+      fireEvent.click(needsReqsTab);
+
+      // 0-requirement job is present
+      expect(screen.getByText("Junior QA Engineer")).toBeInTheDocument();
+      // Others excluded
+      expect(screen.queryByText("Principal Architect")).not.toBeInTheDocument();
+      expect(screen.queryByText("Senior Backend Developer")).not.toBeInTheDocument();
+      expect(screen.getByText("1 job")).toBeInTheDocument();
+    });
+
+    it("notifies parent and triggers live update after job is approved and when creating successor", async () => {
+      const mockDraftDetail: jobsApi.JobDetail = {
+        jobId: "job-sync-1",
+        createdByUserId: "user-1",
+        status: "ACTIVE",
+        createdAt: "2026-09-04T10:00:00Z",
+        updatedAt: "2026-09-04T10:00:00Z",
+        currentVersion: {
+          jobVersionId: "ver-1",
+          jobId: "job-sync-1",
+          versionNumber: 1,
+          versionStatus: "DRAFT",
+          revision: 1,
+          title: "Staff Engineer",
+          department: "Core",
+          location: "Remote",
+          employmentType: "FULL_TIME",
+          workplaceType: "REMOTE",
+          openingsCount: 1,
+          internalReference: null,
+          summary: "Core team",
+          responsibilities: "Build systems",
+          jobDescriptionText: null,
+          occupationConceptId: null,
+          occupationTitle: null,
+          createdByUser: "user-1",
+          approvedByUser: null,
+          approvedAt: null,
+          readyByUserId: null,
+          readyAt: null,
+          requirements: [
+            {
+              requirementId: "req-1",
+              displayOrder: 0,
+              category: "SKILL",
+              label: "Python",
+              necessity: "MUST_HAVE",
+              priority: "CRITICAL",
+              rationale: "Core requirement",
+              acceptedEvidenceTypes: ["EMPLOYMENT"],
+              acceptedEquivalents: [],
+            },
+          ],
+          reviewWarnings: [],
+          createdAt: "2026-09-04T10:00:00Z",
+          updatedAt: "2026-09-04T10:00:00Z",
+        },
+      };
+
+      const mockReadyDetail: jobsApi.JobDetail = {
+        ...mockDraftDetail,
+        currentVersion: {
+          ...mockDraftDetail.currentVersion,
+          versionStatus: "READY_FOR_MATCHING",
+          revision: 2,
+        },
+      };
+
+      vi.mocked(jobsApi.fetchJobDetail).mockResolvedValue(mockDraftDetail);
+      vi.mocked(jobsApi.markJobReady).mockResolvedValue(mockReadyDetail);
+
+      const onJobUpdated = vi.fn();
+
+      render(
+        <JobEditor
+          jobId="job-sync-1"
+          onNavigateBack={vi.fn()}
+          onJobCreated={vi.fn()}
+          onJobUpdated={onJobUpdated}
+        />
+      );
+
+      await screen.findByDisplayValue("Staff Engineer");
+
+      const approveBtn = screen.getByRole("button", { name: /Approve job/i });
+      fireEvent.click(approveBtn);
+
+      await waitFor(() => {
+        expect(jobsApi.markJobReady).toHaveBeenCalledWith("job-sync-1", 1);
+        expect(onJobUpdated).toHaveBeenCalledWith("job-sync-1");
+      });
+
+      // Now create successor
+      const mockSuccessorDetail: jobsApi.JobDetail = {
+        ...mockDraftDetail,
+        currentVersion: {
+          ...mockDraftDetail.currentVersion,
+          versionNumber: 2,
+          versionStatus: "DRAFT",
+          revision: 1,
+        },
+      };
+      vi.mocked(jobsApi.createSuccessorVersion).mockResolvedValue(mockSuccessorDetail);
+
+      const createSuccessorBtn = screen.getByRole("button", { name: "Create new revision" });
+      fireEvent.click(createSuccessorBtn);
+
+      await waitFor(() => {
+        expect(jobsApi.createSuccessorVersion).toHaveBeenCalledWith("job-sync-1");
+        expect(onJobUpdated).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
 });
 

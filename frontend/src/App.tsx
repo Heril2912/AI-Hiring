@@ -11,6 +11,8 @@ import { CandidateProfileReview, CandidateProfileData } from "./components/Candi
 import { ExtractionReview, ExtractionResultData } from "./components/ExtractionReview";
 import { JobsDirectory } from "./components/jobs/JobsDirectory";
 import { JobEditor } from "./components/jobs/JobEditor";
+import { JobApplicantsView } from "./components/jobs/JobApplicantsView";
+import { JobApplicationDetailView } from "./components/jobs/JobApplicationDetailView";
 import { CandidateComparisonView } from "./components/jobs/CandidateComparisonView";
 import { RequirementGapReportView } from "./components/jobs/RequirementGapReportView";
 import { InterviewWorkspace } from "./components/interviews/InterviewWorkspace";
@@ -62,9 +64,11 @@ function AuthenticatedApp() {
     role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews"
   );
   const [activeView, setActiveView] = useState<
-    "jobs" | "new_job" | "edit_job" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace" | "interview_simulation" | "ai_interviews" | "ai_interview_workspace"
+    "jobs" | "new_job" | "edit_job" | "job_applicants" | "job_application_detail" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace" | "interview_simulation" | "ai_interviews" | "ai_interview_workspace"
   >("candidates");
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
+  const [selectedJobTitle, setSelectedJobTitle] = useState<string>("");
   const [interviewRoute, setInterviewRoute] = useState<InterviewRouteState | null>(null);
   const [simulationRoute, setSimulationRoute] = useState<{ planId: string; jobId: string } | null>(null);
   const [selectedAiTemplateId, setSelectedAiTemplateId] = useState<string | null>(null);
@@ -422,6 +426,7 @@ function AuthenticatedApp() {
                   loadJobsList();
                 }}
                 onJobCreated={handleJobCreated}
+                onJobUpdated={loadJobsList}
               />
             )
           ) : (
@@ -482,6 +487,7 @@ function AuthenticatedApp() {
                     loadJobsList();
                   }}
                   onJobCreated={handleJobCreated}
+                  onJobUpdated={loadJobsList}
                 />
               )}
 
@@ -492,9 +498,16 @@ function AuthenticatedApp() {
                     setActiveView("jobs");
                     loadJobsList();
                   }}
+                  onJobCreated={handleJobCreated}
+                  onJobUpdated={loadJobsList}
                   onCompareCandidates={(params) => {
                     setComparisonParams(params);
                     setActiveView("compare_candidates");
+                  }}
+                  onOpenApplicants={(jId, jTitle) => {
+                    setSelectedJobId(jId);
+                    setSelectedJobTitle(jTitle);
+                    setActiveView("job_applicants");
                   }}
                   onOpenAiInterviews={(jId) => {
                     setSelectedJobId(jId);
@@ -503,6 +516,34 @@ function AuthenticatedApp() {
                     if (typeof window !== "undefined" && window.history?.pushState) {
                       window.history.pushState(null, "", `/ai-interviews?jobId=${encodeURIComponent(jId)}`);
                     }
+                  }}
+                />
+              )}
+
+              {activeView === "job_applicants" && selectedJobId && (
+                <JobApplicantsView
+                  jobId={selectedJobId}
+                  jobTitle={selectedJobTitle}
+                  onNavigateBack={() => setActiveView("edit_job")}
+                  onSelectApplication={(appId) => {
+                    setSelectedApplicationId(appId);
+                    setActiveView("job_application_detail");
+                  }}
+                />
+              )}
+
+              {activeView === "job_application_detail" && selectedJobId && selectedApplicationId && (
+                <JobApplicationDetailView
+                  jobId={selectedJobId}
+                  applicationId={selectedApplicationId}
+                  onNavigateBack={() => setActiveView("job_applicants")}
+                  onOpenAiInterviews={(jId) => {
+                    setSelectedJobId(jId);
+                    setActiveView("ai_interviews");
+                    setActiveNavTab("ai_interviews");
+                  }}
+                  onOpenMatchingComparison={() => {
+                    setActiveView("edit_job");
                   }}
                 />
               )}
