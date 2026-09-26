@@ -36,6 +36,12 @@ class JobLifecycleStatus(str, enum.Enum):
     ARCHIVED = "ARCHIVED"
 
 
+class JobPublicationStatus(str, enum.Enum):
+    NOT_RELEASED = "NOT_RELEASED"
+    RELEASED = "RELEASED"
+    CLOSED = "CLOSED"
+
+
 class JobVersionStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     READY_FOR_MATCHING = "READY_FOR_MATCHING"
@@ -113,8 +119,14 @@ class JobRequisition(Base):
             "status IN ('ACTIVE', 'ARCHIVED')",
             name="ck_job_requisitions_status",
         ),
+        CheckConstraint(
+            "publication_status IN ('NOT_RELEASED', 'RELEASED', 'CLOSED')",
+            name="ck_job_requisitions_publication_status",
+        ),
         Index("ix_job_requisitions_created_by_user_id", "created_by_user_id"),
         Index("ix_job_requisitions_status", "status"),
+        Index("ix_job_requisitions_publication_status", "publication_status"),
+        Index("ix_job_requisitions_released_job_version_id", "released_job_version_id"),
         Index("ix_job_requisitions_created_by_updated_at", "created_by_user_id", "updated_at"),
         Index("ix_job_requisitions_idempotency_key", "idempotency_key"),
         Index("ix_job_requisitions_deleted_at", "deleted_at"),
@@ -144,6 +156,40 @@ class JobRequisition(Base):
         nullable=False,
         default=JobLifecycleStatus.ACTIVE,
         server_default=text("'ACTIVE'"),
+    )
+    publication_status: Mapped[JobPublicationStatus] = mapped_column(
+        Enum(
+            JobPublicationStatus,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_job_requisitions_publication_status_enum",
+        ),
+        nullable=False,
+        default=JobPublicationStatus.NOT_RELEASED,
+        server_default=text("'NOT_RELEASED'"),
+    )
+    released_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    released_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.user_id",
+            ondelete="SET NULL",
+            name="fk_job_requisitions_released_by_user_id_users",
+        ),
+        nullable=True,
+    )
+    released_job_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "job_versions.job_version_id",
+            ondelete="SET NULL",
+            name="fk_job_requisitions_released_job_version_id_versions",
+            use_alter=True,
+        ),
+        nullable=True,
     )
     idempotency_key: Mapped[Optional[str]] = mapped_column(
         String(255),
@@ -183,11 +229,21 @@ class JobRequisition(Base):
         "UserRecord",
         foreign_keys=[created_by_user_id],
     )
+    released_by: Mapped[Optional["UserRecord"]] = relationship(
+        "UserRecord",
+        foreign_keys=[released_by_user_id],
+    )
+    released_version: Mapped[Optional["JobVersion"]] = relationship(
+        "JobVersion",
+        foreign_keys=[released_job_version_id],
+        post_update=True,
+    )
     versions: Mapped[List["JobVersion"]] = relationship(
         "JobVersion",
         back_populates="requisition",
         cascade="all, delete-orphan",
         passive_deletes=True,
+        foreign_keys="JobVersion.job_id",
         order_by="JobVersion.version_number.asc()",
     )
 
@@ -401,6 +457,7 @@ class JobVersion(Base):
     requisition: Mapped["JobRequisition"] = relationship(
         "JobRequisition",
         back_populates="versions",
+        foreign_keys=[job_id],
     )
     creator: Mapped["UserRecord"] = relationship(
         "UserRecord",

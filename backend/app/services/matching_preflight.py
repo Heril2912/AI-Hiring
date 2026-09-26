@@ -538,7 +538,7 @@ def build_frozen_requisition_matching_view(
 
 
 def prepare_match_input_snapshot(
-    actor: UserRecord,
+    actor: Optional[UserRecord],
     job_id: UUID,
     expected_revision: Optional[int],
     profile_version: Optional[int],
@@ -551,8 +551,8 @@ def prepare_match_input_snapshot(
     ready requisition requirements and an exact candidate profile version into
     an immutable, pseudonymous MatchInputSnapshot.
     """
-    # 1. Enforce Recruiter or Admin role
-    if actor.role not in {UserRole.RECRUITER, UserRole.ADMIN}:
+    # 1. Enforce Recruiter or Admin role if actor is present
+    if actor is not None and actor.role not in {UserRole.RECRUITER, UserRole.ADMIN}:
         raise UnauthorizedPreflightError("Actor must possess RECRUITER or ADMIN role.")
 
     # 2. Enforce explicit requisition revision
@@ -575,7 +575,7 @@ def prepare_match_input_snapshot(
     req = db.execute(stmt_req).scalar_one_or_none()
 
     # Recruiter ownership enforcement (conceal existence on failure)
-    if req is None or (actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
+    if req is None or (actor is not None and actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
         raise RequisitionNotFoundError("Requisition not found.")
 
     if req.status != JobLifecycleStatus.ACTIVE:

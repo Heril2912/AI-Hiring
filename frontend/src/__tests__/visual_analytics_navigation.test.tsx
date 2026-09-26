@@ -360,7 +360,7 @@ describe("Phase 2E.1: Visual Analytics, Navigation, and Canonical Integrity", ()
         />
       );
 
-      expect(screen.getByText("Candidate Resume-Match Ranking")).toBeInTheDocument();
+      expect(screen.getByText("Overall Compatibility Ranking")).toBeInTheDocument();
       expect(screen.getByText("Alice Engineer")).toBeInTheDocument();
       expect(screen.getByText("Bob Developer")).toBeInTheDocument();
       expect(screen.getByText("Charlie Architect")).toBeInTheDocument();
@@ -565,7 +565,7 @@ describe("Phase 2E.1: Visual Analytics, Navigation, and Canonical Integrity", ()
 
       // Verification: rendered without infinite re-render loops or excessive delay
       expect(screen.getByText("Candidate Comparison")).toBeInTheDocument();
-      expect(screen.getAllByText("Candidate Resume-Match Ranking").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Overall Compatibility Ranking").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Requirement Evidence Distribution").length).toBeGreaterThan(0);
 
       // Verify no extraneous match run API calls were triggered because initialResults was provided

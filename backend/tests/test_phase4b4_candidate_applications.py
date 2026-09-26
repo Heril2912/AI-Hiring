@@ -58,6 +58,7 @@ from app.models.extraction import ResumeExtraction
 from app.models.job import (
     EmploymentType,
     JobLifecycleStatus,
+    JobPublicationStatus,
     JobRequirement,
     JobRequisition,
     JobVersion,
@@ -221,6 +222,7 @@ def _create_approved_job(db, rec_user_id: uuid.UUID, title: str = "Senior Backen
         job_id=uuid.uuid4(),
         created_by_user_id=rec_user_id,
         status=JobLifecycleStatus.ACTIVE,
+        publication_status=JobPublicationStatus.RELEASED,
     )
     db.add(job)
 
@@ -242,6 +244,11 @@ def _create_approved_job(db, rec_user_id: uuid.UUID, title: str = "Senior Backen
         approved_at=datetime.now(timezone.utc),
     )
     db.add(v1)
+    db.flush()
+
+    job.released_job_version_id = v1.job_version_id
+    job.released_at = datetime.now(timezone.utc)
+    job.released_by_user_id = rec_user_id
 
     req1 = JobRequirement(
         requirement_id=uuid.uuid4(),

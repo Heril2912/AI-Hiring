@@ -40,6 +40,7 @@ from app.models.candidate_access import (
 from app.models.job import (
     EmploymentType,
     JobLifecycleStatus,
+    JobPublicationStatus,
     JobRequirement,
     JobRequisition,
     JobVersion,
@@ -183,11 +184,12 @@ def test_candidate_list_open_jobs_success(client, test_db):
     cand_user, cand_tok, _, _ = _seed_candidate_with_session(test_db)
     rec_user, _, _ = _seed_staff_with_session(test_db)
 
-    # 1. Create an APPROVED active job
+    # 1. Create an APPROVED active job that is RELEASED
     job = JobRequisition(
         job_id=uuid.uuid4(),
         created_by_user_id=rec_user.user_id,
         status=JobLifecycleStatus.ACTIVE,
+        publication_status=JobPublicationStatus.RELEASED,
     )
     test_db.add(job)
 
@@ -210,6 +212,11 @@ def test_candidate_list_open_jobs_success(client, test_db):
         approved_at=datetime.now(timezone.utc),
     )
     test_db.add(v1)
+    test_db.flush()
+
+    job.released_job_version_id = v1.job_version_id
+    job.released_at = datetime.now(timezone.utc)
+    job.released_by_user_id = rec_user.user_id
 
     req1 = JobRequirement(
         requirement_id=uuid.uuid4(),
@@ -323,6 +330,7 @@ def test_superseded_version_not_exposed_on_detail(client, test_db):
         job_id=uuid.uuid4(),
         created_by_user_id=rec_user.user_id,
         status=JobLifecycleStatus.ACTIVE,
+        publication_status=JobPublicationStatus.RELEASED,
     )
     test_db.add(job)
 
@@ -350,6 +358,11 @@ def test_superseded_version_not_exposed_on_detail(client, test_db):
         created_by_user_id=rec_user.user_id,
     )
     test_db.add(v2)
+    test_db.flush()
+
+    job.released_job_version_id = v2.job_version_id
+    job.released_at = datetime.now(timezone.utc)
+    job.released_by_user_id = rec_user.user_id
 
     req = JobRequirement(
         requirement_id=uuid.uuid4(),
@@ -365,7 +378,7 @@ def test_superseded_version_not_exposed_on_detail(client, test_db):
     test_db.commit()
 
     client.cookies.set("ai_hiring_candidate_session", cand_tok)
-    # Detail request without version returns latest approved (v2)
+    # Detail request without version returns latest released (v2)
     res = client.get(f"/api/v1/candidate/jobs/{job.job_id}")
     assert res.status_code == status.HTTP_200_OK
     data = res.json()
@@ -389,6 +402,7 @@ def test_candidate_job_search_and_pagination(client, test_db):
             job_id=uuid.uuid4(),
             created_by_user_id=rec_user.user_id,
             status=JobLifecycleStatus.ACTIVE,
+            publication_status=JobPublicationStatus.RELEASED,
         )
         test_db.add(job)
         v = JobVersion(
@@ -402,6 +416,10 @@ def test_candidate_job_search_and_pagination(client, test_db):
             created_by_user_id=rec_user.user_id,
         )
         test_db.add(v)
+        test_db.flush()
+        job.released_job_version_id = v.job_version_id
+        job.released_at = datetime.now(timezone.utc)
+        job.released_by_user_id = rec_user.user_id
     test_db.commit()
 
     client.cookies.set("ai_hiring_candidate_session", cand_tok)

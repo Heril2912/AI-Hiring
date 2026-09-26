@@ -66,11 +66,11 @@ export function CandidateRankingChart({
     <div
       className="visual-analytics-card ranking-chart-card"
       role="region"
-      aria-label="Candidate Resume-Match Ranking Chart"
+      aria-label="Overall Compatibility Ranking Chart"
     >
       <div className="chart-header">
         <div>
-          <h4 className="chart-title">Candidate Resume-Match Ranking</h4>
+          <h4 className="chart-title">Overall Compatibility Ranking</h4>
           <p className="chart-subtitle">
             Ranked deterministically by stored backend compatibility scores ({results.length} candidate{results.length === 1 ? "" : "s"})
           </p>

@@ -68,7 +68,7 @@ describe("Candidate Applications Lifecycle (Phase 4B.4)", () => {
     } as any);
   });
 
-  it("renders Apply button on Job Detail for unapplied job and handles successful submission", async () => {
+  it("renders Apply button on Job Detail for unapplied job and navigates into application form", async () => {
     vi.mocked(candidateJobsApi.fetchCandidateJobDetail).mockResolvedValue({
       ...sampleJobSummary1,
       responsibilities: ["Build backend APIs"],
@@ -77,17 +77,20 @@ describe("Candidate Applications Lifecycle (Phase 4B.4)", () => {
       activeApplicationId: null,
     } as any);
 
-    vi.mocked(candidateAppsApi.submitApplication).mockResolvedValue({
+    vi.mocked(candidateAppsApi.createOrGetApplicationDraft).mockResolvedValue({
       applicationId: "app-201",
       jobId: "job-1",
       jobVersionId: "ver-1",
       jobRevision: 1,
-      profileVersion: 1,
-      status: "SUBMITTED",
-      submittedAt: "2026-09-26T12:00:00Z",
+      profileVersion: null,
+      status: "DRAFT",
+      submittedAt: null,
       withdrawnAt: null,
-      canWithdraw: true,
+      canWithdraw: false,
+      canSubmit: false,
       job: sampleJobSummary1,
+      createdAt: "2026-09-26T12:00:00Z",
+      updatedAt: "2026-09-26T12:00:00Z",
     });
 
     const onBack = vi.fn();
@@ -111,13 +114,13 @@ describe("Candidate Applications Lifecycle (Phase 4B.4)", () => {
     fireEvent.click(applyButton);
 
     await waitFor(() => {
-      expect(candidateAppsApi.submitApplication).toHaveBeenCalledWith(
-        "job-1",
+      expect(candidateAppsApi.createOrGetApplicationDraft).toHaveBeenCalledWith(
         expect.objectContaining({
+          jobId: "job-1",
           expectedRevision: 1,
         })
       );
-      expect(screen.getByRole("button", { name: /View Application/i })).toBeInTheDocument();
+      expect(screen.getByText("1. Upload Resume")).toBeInTheDocument();
     });
   });
 

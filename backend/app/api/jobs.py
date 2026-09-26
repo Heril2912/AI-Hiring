@@ -22,6 +22,7 @@ from app.models.auth import AuditEventType, AuditReasonCode, AuditResult, UserRo
 from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
 from app.models.job import (
     JobLifecycleStatus,
+    JobPublicationStatus,
     JobRequirement,
     JobRequisition,
     JobVersion,
@@ -182,6 +183,10 @@ def _build_job_detail_response(req: JobRequisition, version: JobVersion) -> JobD
         job_id=req.job_id,
         created_by_user_id=req.created_by_user_id,
         status=req.status,
+        publication_status=req.publication_status,
+        released_at=req.released_at,
+        released_by_user_id=req.released_by_user_id,
+        released_job_version_id=req.released_job_version_id,
         created_at=req.created_at,
         updated_at=req.updated_at,
         current_version=_build_job_version_detail_response(version),
@@ -387,6 +392,10 @@ async def list_jobs(
                 job_id=req.job_id,
                 created_by_user_id=req.created_by_user_id,
                 status=req.status,
+                publication_status=req.publication_status,
+                released_at=req.released_at,
+                released_by_user_id=req.released_by_user_id,
+                released_job_version_id=req.released_job_version_id,
                 created_at=req.created_at,
                 updated_at=req.updated_at,
                 current_version=_build_job_version_summary_response(latest_version),
@@ -870,6 +879,116 @@ async def mark_job_ready(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": "JOB_READY_FAILED", "message": "Failed to mark job ready for matching."},
+        )
+
+    return _build_job_detail_response(req, latest_version)
+
+
+@router.post(
+    "/{job_id}/release",
+    response_model=JobDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Release Job Revision to Candidates",
+    description="Releases an approved, locked job revision so candidates can discover and apply to the job.",
+)
+async def release_job(
+    job_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+) -> JobDetailResponse:
+    actor = auth_ctx.user
+    now = datetime.now(timezone.utc)
+
+    stmt = (
+        select(JobRequisition)
+        .options(
+            selectinload(JobRequisition.versions).selectinload(JobVersion.requirements),
+            selectinload(JobRequisition.versions).selectinload(JobVersion.occupation),
+        )
+        .where(
+            JobRequisition.job_id == job_id,
+            JobRequisition.deleted_at.is_(None),
+        )
+        .with_for_update(of=JobRequisition)
+    )
+    req = db.execute(stmt).scalar_one_or_none()
+
+    if req is None or (actor.role == UserRole.RECRUITER and req.created_by_user_id != actor.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job not found."},
+        )
+
+    if req.status != JobLifecycleStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "JOB_NOT_ACTIVE", "message": "Archived or inactive jobs cannot be released."},
+        )
+
+    if not req.versions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job version not found."},
+        )
+
+    # Find the latest version to release
+    latest_version = max(req.versions, key=lambda v: v.version_number)
+
+    # Idempotent check: if already released pointing to this exact version
+    if (
+        req.publication_status == JobPublicationStatus.RELEASED
+        and req.released_job_version_id == latest_version.job_version_id
+    ):
+        return _build_job_detail_response(req, latest_version)
+
+    # Current revision must be READY_FOR_MATCHING or APPROVED
+    if latest_version.version_status not in (JobVersionStatus.READY_FOR_MATCHING, JobVersionStatus.APPROVED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "JOB_NOT_READY_FOR_MATCHING",
+                "message": f"Job revision must be approved and locked before releasing. Current version status: {latest_version.version_status}.",
+            },
+        )
+
+    # Job must contain at least one active opening
+    if latest_version.openings_count is None or latest_version.openings_count < 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "NO_ACTIVE_OPENINGS",
+                "message": "Job must contain at least one active opening to be released.",
+            },
+        )
+
+    # Update publication status on job requisition
+    req.publication_status = JobPublicationStatus.RELEASED
+    req.released_at = now
+    req.released_by_user_id = actor.user_id
+    req.released_job_version_id = latest_version.job_version_id
+    req.updated_at = now
+
+    logger.info(
+        "Job revision released to candidates",
+        extra={
+            "job_id": str(job_id),
+            "released_by": str(actor.user_id),
+            "released_job_version_id": str(latest_version.job_version_id),
+            "version_number": latest_version.version_number,
+            "revision": latest_version.revision,
+        },
+    )
+
+    try:
+        db.commit()
+        db.refresh(req)
+        db.refresh(latest_version)
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("Failed to release job", extra={"job_id": str(job_id), "error_type": type(e).__name__})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "JOB_RELEASE_FAILED", "message": "Failed to release job to candidates."},
         )
 
     return _build_job_detail_response(req, latest_version)

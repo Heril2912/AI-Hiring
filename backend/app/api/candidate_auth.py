@@ -38,9 +38,10 @@ from app.schemas.candidate_access import (
     CandidateLoginRequest,
     CandidateLoginResponse,
     CandidateMeResponse,
+    CandidateRegisterRequest,
 )
 from app.schemas.profile_assembly import CandidateProfileResponse
-from app.services.candidate_access_service import activate_candidate_account
+from app.services.candidate_access_service import activate_candidate_account, register_candidate_account
 from app.services.security import (
     dummy_verify_password,
     generate_secure_token,
@@ -59,33 +60,48 @@ router = APIRouter(
 
 
 @router.post(
-    "/activate",
-    response_model=CandidateActivationResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Activate Candidate Account with Single-Use Token",
+    "/register",
+    response_model=CandidateLoginResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Candidate Self-Registration",
 )
-async def activate_account(
-    req: CandidateActivationRequest,
+async def candidate_register(
+    req: CandidateRegisterRequest,
     response: Response,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> CandidateActivationResponse:
-    user, binding, user_session, raw_session_token, raw_csrf_token = activate_candidate_account(
+) -> CandidateLoginResponse:
+    user, user_session, raw_session_token, raw_csrf_token = register_candidate_account(
         db=db,
         req=req,
         settings=settings,
     )
     _set_candidate_session_cookie(response, raw_session_token, settings)
 
-    return CandidateActivationResponse(
+    return CandidateLoginResponse(
         user_id=user.user_id,
         email=user.email,
         display_name=user.display_name,
         role=user.role.value,
-        candidate_id=binding.candidate_id,
-        organization_id=binding.organization_id,
-        binding_status=binding.status,
+        candidate_id=None,
+        organization_id=None,
+        binding_status=None,
         csrf_token=raw_csrf_token,
+    )
+
+
+@router.post(
+    "/activate",
+    status_code=status.HTTP_410_GONE,
+    summary="Activate Candidate Account (Obsolete)",
+)
+async def activate_account() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "INVITATIONS_DEPRECATED",
+            "message": "Recruiter invitation activation has been deprecated. Please use candidate self-registration.",
+        },
     )
 
 
@@ -175,19 +191,19 @@ async def candidate_login(
         db.commit()
         raise GENERIC_AUTH_ERROR
 
-    # Verify active CandidateAccountBindingRecord
+    # Check CandidateAccountBindingRecord if it exists
     binding_stmt = select(CandidateAccountBindingRecord).where(
         CandidateAccountBindingRecord.user_id == user.user_id
     )
     binding = db.execute(binding_stmt).scalar_one_or_none()
-    if binding is None or binding.status != CandidateBindingStatus.ACTIVE.value:
+    if binding is not None and binding.status != CandidateBindingStatus.ACTIVE.value:
         _record_audit_event(
             db=db,
             event_type=AuditEventType.LOGIN_ATTEMPT,
             result=AuditResult.DENIED,
-            reason_code=AuditReasonCode.BINDING_SUSPENDED if (binding and binding.status == "SUSPENDED") else AuditReasonCode.UNAUTHORIZED,
+            reason_code=AuditReasonCode.BINDING_SUSPENDED,
             actor_user_id=user.user_id,
-            safe_metadata={"status": binding.status if binding else "MISSING", "portal": "CANDIDATE"},
+            safe_metadata={"status": binding.status, "portal": "CANDIDATE"},
         )
         db.commit()
         raise HTTPException(
@@ -245,9 +261,9 @@ async def candidate_login(
         email=user.email,
         display_name=user.display_name,
         role=user.role.value,
-        candidate_id=binding.candidate_id,
-        organization_id=binding.organization_id,
-        binding_status=binding.status,
+        candidate_id=binding.candidate_id if binding else None,
+        organization_id=binding.organization_id if binding else None,
+        binding_status=binding.status if binding else None,
         csrf_token=raw_csrf_token,
     )
 
@@ -276,9 +292,9 @@ async def get_candidate_me(
         email=user.email,
         display_name=user.display_name,
         role=user.role.value,
-        candidate_id=binding.candidate_id,
-        organization_id=binding.organization_id,
-        binding_status=binding.status,
+        candidate_id=binding.candidate_id if binding else None,
+        organization_id=binding.organization_id if binding else None,
+        binding_status=binding.status if binding else None,
         idle_expires_at=session.idle_expires_at,
         absolute_expires_at=session.absolute_expires_at,
         csrf_token=raw_csrf_token,

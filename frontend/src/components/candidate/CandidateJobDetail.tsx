@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { fetchCandidateJobDetail, CandidateJobDetail } from "../../api/candidateJobs";
-import { submitApplication } from "../../api/candidateApplications";
+import { CandidateApplicationForm } from "./CandidateApplicationForm";
 import { Icon } from "../Icon";
 
 interface CandidateJobDetailViewProps {
@@ -20,7 +20,6 @@ export function CandidateJobDetailView({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isApplying, setIsApplying] = useState<boolean>(false);
-  const [applyError, setApplyError] = useState<string | null>(null);
   const [appliedSuccessAppId, setAppliedSuccessAppId] = useState<string | null>(null);
 
   const loadJob = async () => {
@@ -45,23 +44,24 @@ export function CandidateJobDetailView({
     loadJob();
   }, [jobId, versionId]);
 
-  const handleApply = async () => {
-    if (!job || isApplying || appliedSuccessAppId) return;
+  const handleApplyClick = () => {
+    setIsApplying(true);
+  };
 
-    try {
-      setIsApplying(true);
-      setApplyError(null);
-      const idempotencyKey = `apply-${job.jobId}-${job.revision}-${Date.now()}`;
-      const app = await submitApplication(job.jobId, {
-        idempotencyKey,
-        expectedRevision: job.revision,
-      });
-      setAppliedSuccessAppId(app.applicationId);
-      setJob((prev) => (prev ? { ...prev, hasActiveApplication: true, activeApplicationId: app.applicationId } : null));
-    } catch (err: any) {
-      setApplyError(err?.message || "Failed to submit application. Please try again.");
-    } finally {
-      setIsApplying(false);
+  const handleApplicationSuccess = (appId: string) => {
+    setIsApplying(false);
+    setAppliedSuccessAppId(appId);
+    setJob((prev) =>
+      prev
+        ? {
+            ...prev,
+            hasActiveApplication: true,
+            activeApplicationId: appId,
+          }
+        : null
+    );
+    if (onNavigateApplication) {
+      onNavigateApplication(appId);
     }
   };
 
@@ -127,8 +127,17 @@ export function CandidateJobDetailView({
         </div>
       )}
 
+      {/* Application Form View */}
+      {isApplying && job && (
+        <CandidateApplicationForm
+          job={job}
+          onBack={() => setIsApplying(false)}
+          onSuccess={handleApplicationSuccess}
+        />
+      )}
+
       {/* Job Details Content */}
-      {!isLoading && !error && job && (
+      {!isLoading && !error && job && !isApplying && (
         <div
           style={{
             backgroundColor: "var(--bg-surface, #ffffff)",
@@ -190,23 +199,15 @@ export function CandidateJobDetailView({
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={isApplying}
-                    onClick={handleApply}
+                    onClick={handleApplyClick}
                     style={{ minWidth: "120px" }}
                     aria-label="Apply to Position"
                   >
-                    {isApplying ? "Submitting..." : "Apply Now"}
+                    Apply Now
                   </button>
                 )}
               </div>
             </div>
-
-            {applyError && (
-              <div className="feedback-box error" role="alert" style={{ marginTop: "12px", marginBottom: "12px" }}>
-                <Icon name="alert-circle" size={16} />
-                <span>{applyError}</span>
-              </div>
-            )}
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: "center" }}>
               {job.department && (

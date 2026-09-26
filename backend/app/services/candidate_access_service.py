@@ -30,6 +30,7 @@ from app.schemas.candidate_access import (
     CandidateAccessStatusResponse,
     CandidateActivationRequest,
     CandidateInvitationSummary,
+    CandidateRegisterRequest,
     CreateCandidateInvitationRequest,
 )
 from app.services.security import (
@@ -679,3 +680,101 @@ def activate_candidate_account(
     db.refresh(user_session)
 
     return user, binding, user_session, raw_session_token, raw_csrf_token
+
+
+def register_candidate_account(
+    db: Session,
+    req: CandidateRegisterRequest,
+    settings: Settings,
+) -> Tuple[UserRecord, UserSessionRecord, str, str]:
+    """
+    Public Candidate Self-Registration.
+    - Strictly assigns Candidate role server-side.
+    - Normalizes and checks for email collisions.
+    - Hashes password using existing scrypt implementation.
+    - Creates UserRecord without requiring candidate identity/profile/binding.
+    - Establishes fresh candidate session and returns (user, session, raw_session_token, raw_csrf_token).
+    """
+    now = datetime.now(timezone.utc)
+    canonical_email = canonicalize_email(req.email)
+
+    # Check if user already exists with this email
+    stmt = select(UserRecord).where(UserRecord.email == canonical_email)
+    existing_user = db.execute(stmt).scalar_one_or_none()
+
+    if existing_user is not None:
+        _record_audit_event(
+            db=db,
+            event_type=AuditEventType.CANDIDATE_REGISTERED,
+            result=AuditResult.FAILURE,
+            reason_code=AuditReasonCode.DUPLICATE_APPLICATION,
+            actor_user_id=None,
+            resource_type="user",
+            safe_metadata={"attempted_email": canonical_email, "conflict": "EMAIL_EXISTS"},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "EMAIL_ALREADY_REGISTERED",
+                "message": "An account with this email address already exists. Please sign in instead.",
+            },
+        )
+
+    # Hash password using scrypt
+    pw_hash = hash_password(
+        plaintext_password=req.password,
+        n=settings.scrypt_n,
+        r=settings.scrypt_r,
+        p=settings.scrypt_p,
+        dklen=settings.scrypt_dklen,
+    )
+
+    # Create candidate user record
+    new_user = UserRecord(
+        user_id=uuid.uuid4(),
+        email=canonical_email,
+        display_name=req.full_name.strip(),
+        password_hash=pw_hash,
+        role=UserRole.CANDIDATE,
+        is_active=True,
+        must_change_password=False,
+        failed_login_count=0,
+        locked_until=None,
+        last_login_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(new_user)
+    db.flush()
+
+    # Create fresh server session
+    from app.api.auth import _create_db_session_with_collision_handling
+    user_session, raw_session_token, raw_csrf_token = _create_db_session_with_collision_handling(
+        db=db,
+        user_id=new_user.user_id,
+        settings=settings,
+        now=now,
+    )
+
+    _record_audit_event(
+        db=db,
+        event_type=AuditEventType.CANDIDATE_REGISTERED,
+        result=AuditResult.SUCCESS,
+        reason_code=AuditReasonCode.CANDIDATE_ACCOUNT_REGISTERED,
+        actor_user_id=new_user.user_id,
+        resource_type="user",
+        resource_id=str(new_user.user_id),
+        safe_metadata={
+            "email": canonical_email,
+            "role": UserRole.CANDIDATE.value,
+            "portal": "CANDIDATE",
+        },
+    )
+
+    db.commit()
+    db.refresh(new_user)
+    db.refresh(user_session)
+
+    return new_user, user_session, raw_session_token, raw_csrf_token
+

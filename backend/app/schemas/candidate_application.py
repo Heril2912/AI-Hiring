@@ -14,6 +14,16 @@ from app.schemas.candidate import StrictSchema
 from app.schemas.candidate_job import CandidateJobSummaryResponse
 
 
+class CandidateApplicationDraftRequest(StrictSchema):
+    """Input payload for creating or reopening an application draft."""
+    job_id: uuid.UUID
+    expected_revision: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional expected revision number for optimistic stale view detection.",
+    )
+
+
 class CandidateApplicationSubmitRequest(StrictSchema):
     """Input payload for applying to an open job."""
     idempotency_key: Optional[str] = Field(
@@ -28,15 +38,27 @@ class CandidateApplicationSubmitRequest(StrictSchema):
     )
 
 
+class CandidateResumeStatusResponse(StrictSchema):
+    """Safe, allowlisted processing status of an application's resume."""
+    application_id: uuid.UUID
+    artifact_id: Optional[uuid.UUID] = None
+    status: CandidateApplicationStatus
+    processing_status: Optional[str] = None
+    safe_error_code: Optional[str] = None
+    safe_message: Optional[str] = None
+    is_ready_to_submit: bool
+
+
 class CandidateApplicationResponse(StrictSchema):
-    """Safe, allowlisted details of a submitted or withdrawn candidate application."""
+    """Safe, allowlisted details of a candidate application in any lifecycle state."""
     application_id: uuid.UUID
     job_id: uuid.UUID
     job_version_id: uuid.UUID
     job_revision: int
-    profile_version: int
+    artifact_id: Optional[uuid.UUID] = None
+    profile_version: Optional[int] = None
     status: CandidateApplicationStatus
-    submitted_at: datetime
+    submitted_at: Optional[datetime] = None
     withdrawn_at: Optional[datetime] = None
     can_withdraw: bool = Field(
         description="True if application is in SUBMITTED status and permitted for candidate withdrawal."
@@ -45,7 +67,7 @@ class CandidateApplicationResponse(StrictSchema):
 
 
 class CandidateApplicationListResponse(StrictSchema):
-    """Paginated list of candidate's own submitted and withdrawn applications."""
+    """Paginated list of candidate's own applications."""
     items: List[CandidateApplicationResponse] = Field(default_factory=list)
     total: int
     page: int

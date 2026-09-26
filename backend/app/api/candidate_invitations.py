@@ -70,35 +70,18 @@ async def revoke_candidate_access_endpoint(
 
 @router.post(
     "/candidate-access/candidates/{candidate_id}/invitations",
-    response_model=CreateCandidateInvitationResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create Single-Use Candidate Access Invitation",
+    status_code=status.HTTP_410_GONE,
+    summary="Create Single-Use Candidate Access Invitation (Obsolete)",
 )
 async def create_candidate_access_invitation_endpoint(
     candidate_id: uuid.UUID,
-    req: CreateCandidateInvitationRequest = None,
-    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> CreateCandidateInvitationResponse:
-    payload = req or CreateCandidateInvitationRequest(candidate_id=candidate_id)
-    if payload.candidate_id is None:
-        payload.candidate_id = candidate_id
-
-    invitation, raw_token, activation_url = create_candidate_invitation(
-        db=db,
-        recruiter_user=auth_ctx.user,
-        req=payload,
-        settings=settings,
-    )
-    return CreateCandidateInvitationResponse(
-        invitation_id=invitation.invitation_id,
-        candidate_id=invitation.candidate_id,
-        organization_id=invitation.organization_id,
-        raw_token=raw_token,
-        activation_url=activation_url,
-        expires_at=invitation.expires_at,
-        created_at=invitation.created_at,
+) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "INVITATIONS_DEPRECATED",
+            "message": "Recruiter-provisioned candidate invitations have been deprecated. Candidates can register directly via the portal.",
+        },
     )
 
 
@@ -135,30 +118,16 @@ async def revoke_candidate_access_invitation_endpoint(
 # --- Legacy / Aliased Candidate Invitations Endpoints ---
 @router.post(
     "/candidate-invitations",
-    response_model=CreateCandidateInvitationResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create Single-Use Candidate Invitation (Legacy)",
+    status_code=status.HTTP_410_GONE,
+    summary="Create Single-Use Candidate Invitation (Obsolete)",
 )
-async def create_invitation(
-    req: CreateCandidateInvitationRequest,
-    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> CreateCandidateInvitationResponse:
-    invitation, raw_token, activation_url = create_candidate_invitation(
-        db=db,
-        recruiter_user=auth_ctx.user,
-        req=req,
-        settings=settings,
-    )
-    return CreateCandidateInvitationResponse(
-        invitation_id=invitation.invitation_id,
-        candidate_id=invitation.candidate_id,
-        organization_id=invitation.organization_id,
-        raw_token=raw_token,
-        activation_url=activation_url,
-        expires_at=invitation.expires_at,
-        created_at=invitation.created_at,
+async def create_invitation() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "INVITATIONS_DEPRECATED",
+            "message": "Recruiter-provisioned candidate invitations have been deprecated. Candidates can register directly via the portal.",
+        },
     )
 
 

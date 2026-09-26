@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
     from app.models.interview import AiInterviewQuestionSetRecord, JobInterviewTemplateRecord
     from app.models.job import JobRequisition, JobVersion
+    from app.models.resume import ResumeArtifact
 
 
 class CandidateBindingStatus(str, enum.Enum):
@@ -182,14 +183,14 @@ class CandidateAccountBindingRecord(Base):
         Uuid,
         nullable=False,
     )
-    invitation_id: Mapped[uuid.UUID] = mapped_column(
+    invitation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid,
         ForeignKey(
             "candidate_invitations.invitation_id",
             ondelete="RESTRICT",
             name="fk_candidate_account_bindings_invitation_id",
         ),
-        nullable=False,
+        nullable=True,
     )
     status: Mapped[str] = mapped_column(
         String(20),
@@ -1437,7 +1438,11 @@ class CandidatePracticeReportRecord(Base):
 
 
 class CandidateApplicationStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    RESUME_PROCESSING = "RESUME_PROCESSING"
+    READY_TO_SUBMIT = "READY_TO_SUBMIT"
     SUBMITTED = "SUBMITTED"
+    PROCESSING_FAILED = "PROCESSING_FAILED"
     WITHDRAWN = "WITHDRAWN"
 
 
@@ -1451,7 +1456,7 @@ class CandidateApplicationRecord(Base):
     __tablename__ = "candidate_applications"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('SUBMITTED', 'WITHDRAWN')",
+            "status IN ('DRAFT', 'RESUME_PROCESSING', 'READY_TO_SUBMIT', 'SUBMITTED', 'PROCESSING_FAILED', 'WITHDRAWN')",
             name="ck_candidate_applications_status",
         ),
         CheckConstraint(
@@ -1463,17 +1468,18 @@ class CandidateApplicationRecord(Base):
             name="ck_candidate_applications_job_revision_positive",
         ),
         CheckConstraint(
-            "profile_version >= 1",
+            "profile_version IS NULL OR profile_version >= 1",
             name="ck_candidate_applications_profile_version_positive",
         ),
         CheckConstraint(
-            "(status = 'WITHDRAWN' AND withdrawn_at IS NOT NULL) OR (status = 'SUBMITTED' AND withdrawn_at IS NULL)",
+            "(status = 'WITHDRAWN' AND withdrawn_at IS NOT NULL) OR (status != 'WITHDRAWN' AND withdrawn_at IS NULL)",
             name="ck_candidate_applications_withdrawn_timestamp_consistency",
         ),
         Index("ix_candidate_applications_binding_id", "binding_id"),
         Index("ix_candidate_applications_candidate_id", "candidate_id"),
         Index("ix_candidate_applications_org_id", "organization_id"),
         Index("ix_candidate_applications_job_id", "job_id"),
+        Index("ix_candidate_applications_artifact_id", "artifact_id"),
         Index("ix_candidate_applications_status", "status"),
         Index("ix_candidate_applications_recruiter_review_state", "recruiter_review_state"),
         Index("ix_candidate_applications_idempotency_key", "binding_id", "idempotency_key", unique=True),
@@ -1488,23 +1494,32 @@ class CandidateApplicationRecord(Base):
         Uuid,
         nullable=False,
     )
-    binding_id: Mapped[uuid.UUID] = mapped_column(
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "users.user_id",
+            ondelete="CASCADE",
+            name="fk_candidate_applications_user_id_users",
+        ),
+        nullable=True,
+    )
+    binding_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid,
         ForeignKey(
             "candidate_account_bindings.binding_id",
             ondelete="CASCADE",
             name="fk_candidate_applications_binding_id_bindings",
         ),
-        nullable=False,
+        nullable=True,
     )
-    candidate_id: Mapped[uuid.UUID] = mapped_column(
+    candidate_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid,
         ForeignKey(
             "candidate_identities.identity_id",
             ondelete="CASCADE",
             name="fk_candidate_applications_candidate_id_identities",
         ),
-        nullable=False,
+        nullable=True,
     )
     job_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
@@ -1528,24 +1543,33 @@ class CandidateApplicationRecord(Base):
         Integer,
         nullable=False,
     )
-    profile_id: Mapped[uuid.UUID] = mapped_column(
+    artifact_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "resume_artifacts.artifact_id",
+            ondelete="SET NULL",
+            name="fk_candidate_applications_artifact_id_artifacts",
+        ),
+        nullable=True,
+    )
+    profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         Uuid,
         ForeignKey(
             "candidate_profiles.profile_id",
             ondelete="RESTRICT",
             name="fk_candidate_applications_profile_id_profiles",
         ),
-        nullable=False,
+        nullable=True,
     )
-    profile_version: Mapped[int] = mapped_column(
+    profile_version: Mapped[Optional[int]] = mapped_column(
         Integer,
-        nullable=False,
+        nullable=True,
     )
     status: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
-        default=CandidateApplicationStatus.SUBMITTED.value,
-        server_default=text("'SUBMITTED'"),
+        default=CandidateApplicationStatus.DRAFT.value,
+        server_default=text("'DRAFT'"),
     )
     recruiter_review_state: Mapped[str] = mapped_column(
         String(30),
@@ -1563,10 +1587,9 @@ class CandidateApplicationRecord(Base):
         String(255),
         nullable=True,
     )
-    submitted_at: Mapped[datetime] = mapped_column(
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
+        nullable=True,
     )
     withdrawn_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
@@ -1597,7 +1620,10 @@ class CandidateApplicationRecord(Base):
     job_version: Mapped["JobVersion"] = relationship(
         "JobVersion",
     )
-    profile: Mapped["CandidateProfileRecord"] = relationship(
+    artifact: Mapped[Optional["ResumeArtifact"]] = relationship(
+        "ResumeArtifact",
+    )
+    profile: Mapped[Optional["CandidateProfileRecord"]] = relationship(
         "CandidateProfileRecord",
     )
 

@@ -8,6 +8,7 @@ from app.models.job import (
     JobImportSourceType,
     JobImportStatus,
     JobLifecycleStatus,
+    JobPublicationStatus,
     JobVersionStatus,
     RequirementCategory,
     RequirementEvidenceType,
@@ -219,6 +220,10 @@ class JobSummaryResponse(StrictSchema):
     job_id: uuid.UUID
     created_by_user_id: uuid.UUID
     status: JobLifecycleStatus
+    publication_status: JobPublicationStatus = JobPublicationStatus.NOT_RELEASED
+    released_at: Optional[datetime] = None
+    released_by_user_id: Optional[uuid.UUID] = None
+    released_job_version_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
     current_version: JobVersionSummaryResponse
@@ -228,6 +233,10 @@ class JobDetailResponse(StrictSchema):
     job_id: uuid.UUID
     created_by_user_id: uuid.UUID
     status: JobLifecycleStatus
+    publication_status: JobPublicationStatus = JobPublicationStatus.NOT_RELEASED
+    released_at: Optional[datetime] = None
+    released_by_user_id: Optional[uuid.UUID] = None
+    released_job_version_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
     current_version: JobVersionDetailResponse

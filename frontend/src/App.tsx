@@ -25,7 +25,7 @@ import { Icon } from "./components/Icon";
 import { validateInternalReturnUrl, ComparisonNavigationState } from "./utils/navigation";
 import { getPortalContext, getCrossPortalUrl } from "./utils/portal";
 import { CandidateAuthProvider, useCandidateAuth } from "./context/CandidateAuthContext";
-import { CandidateActivationPage } from "./components/candidate/CandidateActivationPage";
+import { CandidateRegisterPage } from "./components/candidate/CandidateRegisterPage";
 import { CandidateLoginPage } from "./components/candidate/CandidateLoginPage";
 import { CandidateShell } from "./components/candidate/CandidateShell";
 
@@ -710,15 +710,15 @@ function AuthenticatedApp() {
   );
 }
 
-function CandidateMainContent({ initialView }: { initialView?: "activate" | "login" | "shell" }) {
+function CandidateMainContent({ initialView }: { initialView?: "register" | "login" | "shell" }) {
   const { status } = useCandidateAuth();
-  const [activeView, setActiveView] = useState<"activate" | "login" | "shell">(
-    initialView || (typeof window !== "undefined" && window.location.pathname.startsWith("/candidate/activate") ? "activate" : "shell")
+  const [activeView, setActiveView] = useState<"register" | "login" | "shell">(
+    initialView || (typeof window !== "undefined" && window.location.pathname.startsWith("/candidate/register") ? "register" : "shell")
   );
 
-  if (activeView === "activate") {
+  if (activeView === "register") {
     return (
-      <CandidateActivationPage
+      <CandidateRegisterPage
         onSuccess={() => {
           setActiveView("shell");
           if (typeof window !== "undefined" && window.history?.pushState) {
@@ -739,7 +739,7 @@ function CandidateMainContent({ initialView }: { initialView?: "activate" | "log
     return (
       <div className="auth-loading-splash" role="status" aria-live="polite">
         <div className="loading-spinner" />
-        <p className="loading-text">Authenticating candidate practice session...</p>
+        <p className="loading-text">Authenticating candidate session...</p>
       </div>
     );
   }
@@ -753,10 +753,10 @@ function CandidateMainContent({ initialView }: { initialView?: "activate" | "log
             window.history.pushState(null, "", "/candidate");
           }
         }}
-        onNavigateActivate={() => {
-          setActiveView("activate");
+        onNavigateRegister={() => {
+          setActiveView("register");
           if (typeof window !== "undefined" && window.history?.pushState) {
-            window.history.pushState(null, "", "/candidate/activate");
+            window.history.pushState(null, "", "/candidate/register");
           }
         }}
       />
@@ -809,10 +809,10 @@ export function App() {
     pathname.startsWith("/candidate");
 
   if (isCandidateRoute) {
-    const isActivate = pathname.startsWith("/candidate/activate");
+    const isRegister = pathname.startsWith("/candidate/register");
     return (
       <CandidateAuthProvider>
-        <CandidateMainContent initialView={isActivate ? "activate" : undefined} />
+        <CandidateMainContent initialView={isRegister ? "register" : undefined} />
       </CandidateAuthProvider>
     );
   }

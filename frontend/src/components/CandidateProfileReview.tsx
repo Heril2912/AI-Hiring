@@ -6,7 +6,6 @@ import { VersionHistoryDrawer, ProfileSummary } from "./VersionHistoryDrawer";
 import { ReviewDrawer } from "./ReviewDrawer";
 import { ExtractionResultData } from "./ExtractionReview";
 import { AtsExportModal } from "./ats/AtsExportModal";
-import { CandidateInvitationModal } from "./candidate/CandidateInvitationModal";
 
 export type ExtractedField = {
   fieldName: string;
@@ -177,7 +176,6 @@ export function CandidateProfileReview({
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [showDiffPreview, setShowDiffPreview] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
-  const [isInvitationModalOpen, setIsInvitationModalOpen] = useState<boolean>(false);
 
   // Draft scalar inputs for correction
   const [draftFullName, setDraftFullName] = useState("");
@@ -774,15 +772,6 @@ export function CandidateProfileReview({
             title="Export candidate review note to ATS"
           >
             <Icon name="external-link" size={14} /> Export to ATS
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsInvitationModalOpen(true)}
-            className="btn btn-secondary btn-sm"
-            title="Generate candidate portal invitation link"
-          >
-            <Icon name="key" size={14} /> Candidate Access
           </button>
         </div>
       </div>
@@ -2009,15 +1998,6 @@ export function CandidateProfileReview({
           candidateId={currentProfile.profileId}
           candidateName={currentProfile.identity?.fullName?.value || "Candidate"}
           onClose={() => setIsExportModalOpen(false)}
-        />
-      )}
-
-      {isInvitationModalOpen && (
-        <CandidateInvitationModal
-          isOpen={isInvitationModalOpen}
-          candidateId={currentProfile.candidateId || currentProfile.profileId}
-          candidateName={currentProfile.identity?.fullName?.value || "Candidate"}
-          onClose={() => setIsInvitationModalOpen(false)}
         />
       )}
     </div>

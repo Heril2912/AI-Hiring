@@ -73,14 +73,34 @@ class CandidateActivationRequest(StrictSchema):
         return self
 
 
+class CandidateRegisterRequest(StrictSchema):
+    full_name: str = Field(min_length=1, max_length=255)
+    email: str = Field(max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Full name cannot be empty.")
+        return cleaned
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_format(cls, v: str) -> str:
+        from app.services.security import canonicalize_email
+        return canonicalize_email(v)
+
+
 class CandidateActivationResponse(StrictSchema):
     user_id: uuid.UUID
     email: str
     display_name: str
     role: str
-    candidate_id: uuid.UUID
-    organization_id: uuid.UUID
-    binding_status: str
+    candidate_id: Optional[uuid.UUID] = None
+    organization_id: Optional[uuid.UUID] = None
+    binding_status: Optional[str] = None
     csrf_token: str
 
 
@@ -100,9 +120,9 @@ class CandidateLoginResponse(StrictSchema):
     email: str
     display_name: str
     role: str
-    candidate_id: uuid.UUID
-    organization_id: uuid.UUID
-    binding_status: str
+    candidate_id: Optional[uuid.UUID] = None
+    organization_id: Optional[uuid.UUID] = None
+    binding_status: Optional[str] = None
     csrf_token: str
 
 
@@ -111,9 +131,10 @@ class CandidateMeResponse(StrictSchema):
     email: str
     display_name: str
     role: str
-    candidate_id: uuid.UUID
-    organization_id: uuid.UUID
-    binding_status: str
+    candidate_id: Optional[uuid.UUID] = None
+    organization_id: Optional[uuid.UUID] = None
+    binding_status: Optional[str] = None
     idle_expires_at: datetime
     absolute_expires_at: datetime
     csrf_token: str
+

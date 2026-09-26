@@ -28,9 +28,9 @@ export interface CandidateAuthResponse {
   email: string;
   displayName: string;
   role: string;
-  candidateId: string;
-  organizationId: string;
-  bindingStatus: string;
+  candidateId?: string | null;
+  organizationId?: string | null;
+  bindingStatus?: string | null;
   csrfToken: string;
   idleExpiresAt?: string;
   absoluteExpiresAt?: string;
@@ -121,6 +121,21 @@ export async function activateCandidateAccount(
   });
 }
 
+export async function registerCandidate(
+  fullName: string,
+  email: string,
+  password: string
+): Promise<CandidateAuthResponse> {
+  return apiFetch<CandidateAuthResponse>("/api/v1/candidate/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      full_name: fullName,
+      email,
+      password,
+    }),
+  });
+}
+
 export async function candidateLogin(
   email: string,
   password: string
@@ -143,3 +158,4 @@ export async function candidateLogout(): Promise<void> {
     method: "POST",
   });
 }
+

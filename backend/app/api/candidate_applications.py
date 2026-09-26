@@ -9,23 +9,30 @@ import uuid
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.auth import (
     CandidateAuthenticatedContext,
     require_candidate,
 )
+from app.config import Settings, get_settings
 from app.database import get_db
 from app.schemas.candidate_application import (
+    CandidateApplicationDraftRequest,
     CandidateApplicationListResponse,
     CandidateApplicationResponse,
     CandidateApplicationSubmitRequest,
+    CandidateResumeStatusResponse,
 )
 from app.services.candidate_application_service import (
+    create_or_get_candidate_application_draft,
     get_candidate_application_detail,
+    get_candidate_application_resume_status,
     list_candidate_applications,
     submit_candidate_application,
+    submit_candidate_application_draft,
+    upload_candidate_application_resume,
     withdraw_candidate_application,
 )
 from app.services.candidate_authorization_kernel import CandidatePrincipal
@@ -36,6 +43,108 @@ router = APIRouter(
     prefix="/api/v1/candidate/applications",
     tags=["candidate_applications"],
 )
+
+
+@router.post(
+    "/drafts",
+    response_model=CandidateApplicationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Create or Get Application Draft",
+    description="Initializes or retrieves an existing draft application for a candidate-visible released job.",
+)
+async def create_or_get_draft(
+    payload: CandidateApplicationDraftRequest,
+    auth_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+    db: Session = Depends(get_db),
+) -> CandidateApplicationResponse:
+    principal = CandidatePrincipal.from_context(
+        user=auth_ctx.user,
+        session=auth_ctx.session,
+        binding=auth_ctx.binding,
+    )
+    return create_or_get_candidate_application_draft(
+        principal=principal,
+        payload=payload,
+        db=db,
+    )
+
+
+@router.post(
+    "/{application_id}/resume",
+    response_model=CandidateResumeStatusResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload Resume for Application",
+    description="Uploads and processes a candidate's resume (PDF/DOCX, max 10MB) for their draft application.",
+)
+async def upload_application_resume(
+    application_id: UUID,
+    file: UploadFile = File(...),
+    auth_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> CandidateResumeStatusResponse:
+    principal = CandidatePrincipal.from_context(
+        user=auth_ctx.user,
+        session=auth_ctx.session,
+        binding=auth_ctx.binding,
+    )
+    return await upload_candidate_application_resume(
+        principal=principal,
+        application_id=application_id,
+        file=file,
+        settings=settings,
+        db=db,
+    )
+
+
+@router.get(
+    "/{application_id}/resume/status",
+    response_model=CandidateResumeStatusResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Resume Processing Status",
+    description="Retrieves the current extraction and profile status of the uploaded resume for an application draft.",
+)
+async def get_application_resume_status(
+    application_id: UUID,
+    auth_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+    db: Session = Depends(get_db),
+) -> CandidateResumeStatusResponse:
+    principal = CandidatePrincipal.from_context(
+        user=auth_ctx.user,
+        session=auth_ctx.session,
+        binding=auth_ctx.binding,
+    )
+    return get_candidate_application_resume_status(
+        principal=principal,
+        application_id=application_id,
+        db=db,
+    )
+
+
+@router.post(
+    "/{application_id}/submit",
+    response_model=CandidateApplicationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Submit Application Draft",
+    description="Submits a prepared candidate application draft after resume processing completes successfully.",
+)
+async def submit_draft(
+    application_id: UUID,
+    payload: Optional[CandidateApplicationSubmitRequest] = None,
+    auth_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+    db: Session = Depends(get_db),
+) -> CandidateApplicationResponse:
+    principal = CandidatePrincipal.from_context(
+        user=auth_ctx.user,
+        session=auth_ctx.session,
+        binding=auth_ctx.binding,
+    )
+    return submit_candidate_application_draft(
+        principal=principal,
+        application_id=application_id,
+        db=db,
+        payload=payload,
+    )
 
 
 @router.post(
