@@ -16,6 +16,7 @@ from app.api.ai_interviews import router as ai_interviews_router
 from app.api.job_imports import router as job_imports_router
 from app.api.jobs import router as jobs_router
 from app.api.matches import router as matches_router
+from app.api.recruiter_applications import router as recruiter_applications_router
 from app.api.resumes import router as resumes_router
 from app.api.taxonomy import router as taxonomy_router
 from app.config import get_settings
@@ -67,6 +68,7 @@ app.include_router(candidate_practice_router)
 app.include_router(admin_router)
 app.include_router(ats_router)
 app.include_router(jobs_router)
+app.include_router(recruiter_applications_router)
 app.include_router(interviews_router)
 app.include_router(simulations_router)
 app.include_router(ai_interviews_router)

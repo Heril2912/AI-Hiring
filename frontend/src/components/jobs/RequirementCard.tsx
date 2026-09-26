@@ -54,8 +54,15 @@ export function RequirementCard({
   const isSkillCategory = requirement.category === "SKILL";
   const isMustHave = requirement.necessity === "MUST_HAVE";
   const isCritical = requirement.priority === "CRITICAL";
-  const needsRationale = (isMustHave || isCritical) && !requirement.rationale?.trim();
-  const hasWarnings = requirement.warningMetadata && requirement.warningMetadata.length > 0;
+  const hasRationale = Boolean(requirement.rationale && requirement.rationale.trim());
+  const needsRationale = (isMustHave || isCritical) && !hasRationale;
+  const activeWarnings = (requirement.warningMetadata || []).filter((w) => {
+    if (hasRationale && (w.code === "MISSING_MUST_HAVE_RATIONALE" || w.code === "MISSING_CRITICAL_RATIONALE")) {
+      return false;
+    }
+    return true;
+  });
+  const hasWarnings = activeWarnings.length > 0;
 
   const handleSelectTaxonomySkill = (skill: SkillSearchItem) => {
     onChange({
@@ -415,12 +422,13 @@ export function RequirementCard({
       </div>
 
       {/* Immediate Mandatory Rationale when Must-Have or Critical */}
-      {isMustHave && (
+      {(isMustHave || isCritical) && (
         <div className="rationale-mandatory-box">
           <label htmlFor={`rat-${index}`} className="rationale-label-required">
             <Icon name="alert-circle" size={14} />
             <span>
-              Must-Have Rationale <span className="required-star">*</span>
+              {isMustHave ? "Must-Have Rationale" : "Critical Priority Rationale"}{" "}
+              <span className="required-star">*</span>
             </span>
           </label>
           <p style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "6px" }}>
@@ -445,7 +453,7 @@ export function RequirementCard({
         <div className="requirement-warning-banner" role="alert">
           <Icon name="alert-triangle" size={15} className="warning-icon" />
           <div className="warning-content">
-            {requirement.warningMetadata?.map((w, wIdx) => (
+            {activeWarnings.map((w, wIdx) => (
               <p key={wIdx} className="warning-msg-text">
                 {w.message}
               </p>
@@ -470,7 +478,7 @@ export function RequirementCard({
       {showAdvancedOptions && (
         <div className="requirement-advanced-panel">
           {/* Optional Rationale for Preferred criteria if not already shown */}
-          {!isMustHave && (
+          {!(isMustHave || isCritical) && (
             <div className="form-group">
               <label htmlFor={`rat-opt-${index}`} className="form-label-xs">
                 Job-related reason <span className="text-muted">(optional)</span>

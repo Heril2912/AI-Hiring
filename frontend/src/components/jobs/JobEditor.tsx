@@ -24,6 +24,7 @@ interface JobEditorProps {
   jobId?: string | null; // null if creating a new job
   onNavigateBack: () => void;
   onJobCreated?: (newJobId: string) => void;
+  onJobUpdated?: (jobId: string) => void;
   onCompareCandidates?: (params: {
     jobId: string;
     jobTitle: string;
@@ -32,9 +33,10 @@ interface JobEditorProps {
     requirementsCount: number;
   }) => void;
   onOpenAiInterviews?: (jobId: string) => void;
+  onOpenApplicants?: (jobId: string, jobTitle: string) => void;
 }
 
-export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandidates, onOpenAiInterviews }: JobEditorProps) {
+export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, onCompareCandidates, onOpenAiInterviews, onOpenApplicants }: JobEditorProps) {
   // Main Draft Data
   const [jobDetail, setJobDetail] = useState<JobDetail | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(jobId));
@@ -181,7 +183,20 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
 
   const handleUpdateRequirement = (idx: number, updated: RequirementItem) => {
     const copy = [...requirements];
-    copy[idx] = updated;
+    // Re-evaluate client-side rationale warning metadata on edit so stale warnings from previous draft saves don't persist
+    let warningMetadata = updated.warningMetadata ? [...updated.warningMetadata] : [];
+    const hasRationale = Boolean(updated.rationale && updated.rationale.trim());
+    if (hasRationale) {
+      warningMetadata = warningMetadata.filter(
+        (w) => w.code !== "MISSING_MUST_HAVE_RATIONALE" && w.code !== "MISSING_CRITICAL_RATIONALE"
+      );
+    }
+    const reviewRequired = warningMetadata.length > 0;
+    copy[idx] = {
+      ...updated,
+      warningMetadata,
+      reviewRequired,
+    };
     setRequirements(copy);
     setIsDirty(true);
   };
@@ -464,6 +479,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
         setIsDirty(false);
         setSaveSuccessMsg(`Job approved successfully (Revision #${updated.currentVersion.revision}).`);
         setReadinessResult(null);
+        if (onJobUpdated) onJobUpdated(targetJobId);
       }
     } catch (err: any) {
       if (err?.code === "REVISION_CONFLICT") {
@@ -559,6 +575,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
       setIsDirty(false);
       setReadinessResult(null);
       setSaveSuccessMsg(`Created new editable draft successor Version ${v.versionNumber}.`);
+      if (onJobUpdated) onJobUpdated(jobId);
     } catch (err: any) {
       setSaveError(err?.message || "Failed to create editable successor version.");
     } finally {
@@ -654,6 +671,17 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onCompareCandid
                 <Icon name="plus" size={14} />
                 <span>{isCreatingSuccessor ? "Creating..." : "Create new revision"}</span>
               </button>
+              {jobId && onOpenApplicants && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-md"
+                  onClick={() => onOpenApplicants(jobId, title || "Job Requisition")}
+                  title="View applicants for this job"
+                >
+                  <Icon name="users" size={14} />
+                  <span>Applicants</span>
+                </button>
+              )}
               {jobId && onOpenAiInterviews && (
                 <button
                   type="button"
