@@ -7,7 +7,6 @@ import { ReviewDrawer } from "./ReviewDrawer";
 import { ExtractionResultData } from "./ExtractionReview";
 import { AtsExportModal } from "./ats/AtsExportModal";
 import { CandidateInvitationModal } from "./candidate/CandidateInvitationModal";
-import { CandidatePracticeReleaseModal } from "./candidate/CandidatePracticeReleaseModal";
 
 export type ExtractedField = {
   fieldName: string;
@@ -179,7 +178,6 @@ export function CandidateProfileReview({
   const [showDiffPreview, setShowDiffPreview] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isInvitationModalOpen, setIsInvitationModalOpen] = useState<boolean>(false);
-  const [isPracticeReleaseModalOpen, setIsPracticeReleaseModalOpen] = useState<boolean>(false);
 
   // Draft scalar inputs for correction
   const [draftFullName, setDraftFullName] = useState("");
@@ -785,15 +783,6 @@ export function CandidateProfileReview({
             title="Generate candidate portal invitation link"
           >
             <Icon name="key" size={14} /> Candidate Access
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsPracticeReleaseModalOpen(true)}
-            className="btn btn-secondary btn-sm"
-            title="Release approved practice interview to candidate"
-          >
-            <Icon name="briefcase" size={14} /> Release Practice
           </button>
         </div>
       </div>
@@ -2029,15 +2018,6 @@ export function CandidateProfileReview({
           candidateId={currentProfile.candidateId || currentProfile.profileId}
           candidateName={currentProfile.identity?.fullName?.value || "Candidate"}
           onClose={() => setIsInvitationModalOpen(false)}
-        />
-      )}
-
-      {isPracticeReleaseModalOpen && (
-        <CandidatePracticeReleaseModal
-          isOpen={isPracticeReleaseModalOpen}
-          candidateId={currentProfile.candidateId || currentProfile.profileId}
-          candidateName={currentProfile.identity?.fullName?.value || "Candidate"}
-          onClose={() => setIsPracticeReleaseModalOpen(false)}
         />
       )}
     </div>
