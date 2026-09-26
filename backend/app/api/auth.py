@@ -289,9 +289,11 @@ class CandidateAuthenticatedContext:
         session: UserSessionRecord,
         binding: CandidateAccountBindingRecord,
     ):
+        from app.services.candidate_authorization_kernel import CandidatePrincipal
         self.user = user
         self.session = session
         self.binding = binding
+        self.principal = CandidatePrincipal.from_context(user, session, binding)
 
 
 async def get_candidate_authenticated_context(
@@ -299,12 +301,8 @@ async def get_candidate_authenticated_context(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> CandidateAuthenticatedContext:
-    # 1. Prefer candidate-specific session cookie
+    # 1. Strictly inspect Candidate session namespace cookie only (no fallback to staff cookie)
     raw_token = request.cookies.get(settings.candidate_session_cookie_name)
-    if not raw_token:
-        # Fallback to general session cookie only if candidate cookie absent
-        raw_token = request.cookies.get(settings.session_cookie_name)
-
     if not raw_token:
         raise UNAUTHENTICATED_ERROR
 
@@ -341,7 +339,7 @@ async def get_candidate_authenticated_context(
             actor_user_id=user_session.user_id,
             resource_type="user_session",
             resource_id=str(user_session.session_id),
-            safe_metadata={"revoke_reason": reason.value},
+            safe_metadata={"revoke_reason": reason.value, "portal": "CANDIDATE"},
         )
         db.commit()
         raise UNAUTHENTICATED_ERROR
@@ -364,7 +362,7 @@ async def get_candidate_authenticated_context(
             actor_user_id=user.user_id,
             resource_type="candidate_account_binding",
             resource_id=str(binding.binding_id) if binding else None,
-            safe_metadata={"status": binding.status if binding else "MISSING"},
+            safe_metadata={"status": binding.status if binding else "MISSING", "portal": "CANDIDATE"},
         )
         db.commit()
         raise HTTPException(
