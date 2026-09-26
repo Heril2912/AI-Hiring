@@ -39,8 +39,8 @@ describe("Candidate Job Discovery (Phase 4B.3)", () => {
     render(<CandidateShell />);
 
     expect(screen.getByRole("button", { name: /Open Jobs/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /My Applications/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Practice Interviews/i })).toBeInTheDocument();
-    expect(screen.queryByText(/My Applications/i)).not.toBeInTheDocument();
   });
 
   it("lists eligible open jobs in CandidateOpenJobs view", async () => {
@@ -139,8 +139,8 @@ describe("Candidate Job Discovery (Phase 4B.3)", () => {
       expect(screen.getByText("Back to Open Jobs")).toBeInTheDocument();
     });
 
-    // Ensure no apply button exists
-    expect(screen.queryByRole("button", { name: /Apply/i })).not.toBeInTheDocument();
+    // Phase 4B.4 added Apply button; ensure Withdraw button does not exist on Job Detail
+    expect(screen.getByRole("button", { name: /Apply to Position/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Withdraw/i })).not.toBeInTheDocument();
   });
 });

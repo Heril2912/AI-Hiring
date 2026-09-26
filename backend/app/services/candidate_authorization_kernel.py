@@ -27,6 +27,8 @@ from app.models.candidate import (
 )
 from app.models.candidate_access import (
     CandidateAccountBindingRecord,
+    CandidateApplicationRecord,
+    CandidateApplicationStatus,
     CandidateBindingStatus,
     CandidatePracticeReleaseRecord,
     CandidatePracticeRequestRecord,
@@ -325,3 +327,69 @@ def load_scoped_candidate_profile(
             detail={"code": "PROFILE_NOT_FOUND", "message": "Candidate profile not found."},
         )
     return profile
+
+
+def authorize_access_application(
+    principal: CandidatePrincipal,
+    application: CandidateApplicationRecord,
+    db: Session,
+    action: str = "ACCESS_APPLICATION",
+) -> None:
+    """Enforces ownership and binding status checks for candidate applications."""
+    if principal.role != UserRole.CANDIDATE.value or principal.binding_status != CandidateBindingStatus.ACTIVE.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "CANDIDATE_ACCESS_DENIED", "message": "Candidate account or binding is not active."},
+        )
+
+    if application.binding_id != principal.binding_id or application.candidate_id != principal.candidate_id:
+        _record_authz_audit(
+            db=db,
+            principal=principal,
+            event_type=AuditEventType.ACCESS_DENIED,
+            result=AuditResult.DENIED,
+            reason_code=AuditReasonCode.UNAUTHORIZED,
+            resource_type="candidate_application",
+            resource_id=str(application.application_id),
+            safe_metadata={"action": action, "denial": "OWNERSHIP_OR_BINDING_MISMATCH"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "APPLICATION_NOT_FOUND", "message": "Application not found."},
+        )
+
+
+def load_scoped_candidate_application(
+    principal: CandidatePrincipal,
+    application_id: UUID,
+    db: Session,
+    for_update: bool = False,
+    action: str = "LOAD_APPLICATION",
+) -> CandidateApplicationRecord:
+    """Loads a CandidateApplicationRecord strictly scoped to the authenticated candidate principal."""
+    stmt = (
+        select(CandidateApplicationRecord)
+        .options(
+            selectinload(CandidateApplicationRecord.job),
+            selectinload(CandidateApplicationRecord.job_version),
+            selectinload(CandidateApplicationRecord.profile),
+        )
+        .where(
+            CandidateApplicationRecord.application_id == application_id,
+            CandidateApplicationRecord.binding_id == principal.binding_id,
+            CandidateApplicationRecord.candidate_id == principal.candidate_id,
+        )
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+
+    app_rec = db.execute(stmt).scalar_one_or_none()
+    if not app_rec:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "APPLICATION_NOT_FOUND", "message": "Application not found."},
+        )
+
+    authorize_access_application(principal=principal, application=app_rec, db=db, action=action)
+    return app_rec
+

@@ -37,6 +37,8 @@ export interface CandidateJobDetail {
   qualifications: string[];
   publishedAt: string;
   updatedAt: string;
+  hasActiveApplication?: boolean;
+  activeApplicationId?: string | null;
 }
 
 export interface CandidateJobListResponse {

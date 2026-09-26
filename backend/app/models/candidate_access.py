@@ -27,7 +27,7 @@ json_type = JSON().with_variant(postgresql.JSONB(astext_type=Text()), "postgresq
 
 if TYPE_CHECKING:
     from app.models.auth import UserRecord
-    from app.models.candidate import CandidateIdentityRecord
+    from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
     from app.models.interview import AiInterviewQuestionSetRecord, JobInterviewTemplateRecord
     from app.models.job import JobRequisition, JobVersion
 
@@ -1434,5 +1434,155 @@ class CandidatePracticeReportRecord(Base):
     candidate: Mapped["CandidateIdentityRecord"] = relationship(
         "CandidateIdentityRecord",
     )
+
+
+class CandidateApplicationStatus(str, enum.Enum):
+    SUBMITTED = "SUBMITTED"
+    WITHDRAWN = "WITHDRAWN"
+
+
+class CandidateApplicationRecord(Base):
+    __tablename__ = "candidate_applications"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('SUBMITTED', 'WITHDRAWN')",
+            name="ck_candidate_applications_status",
+        ),
+        CheckConstraint(
+            "job_revision >= 1",
+            name="ck_candidate_applications_job_revision_positive",
+        ),
+        CheckConstraint(
+            "profile_version >= 1",
+            name="ck_candidate_applications_profile_version_positive",
+        ),
+        CheckConstraint(
+            "(status = 'WITHDRAWN' AND withdrawn_at IS NOT NULL) OR (status = 'SUBMITTED' AND withdrawn_at IS NULL)",
+            name="ck_candidate_applications_withdrawn_timestamp_consistency",
+        ),
+        Index("ix_candidate_applications_binding_id", "binding_id"),
+        Index("ix_candidate_applications_candidate_id", "candidate_id"),
+        Index("ix_candidate_applications_org_id", "organization_id"),
+        Index("ix_candidate_applications_job_id", "job_id"),
+        Index("ix_candidate_applications_status", "status"),
+        Index("ix_candidate_applications_idempotency_key", "binding_id", "idempotency_key", unique=True),
+    )
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    binding_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_account_bindings.binding_id",
+            ondelete="CASCADE",
+            name="fk_candidate_applications_binding_id_bindings",
+        ),
+        nullable=False,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_identities.identity_id",
+            ondelete="CASCADE",
+            name="fk_candidate_applications_candidate_id_identities",
+        ),
+        nullable=False,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_requisitions.job_id",
+            ondelete="CASCADE",
+            name="fk_candidate_applications_job_id_requisitions",
+        ),
+        nullable=False,
+    )
+    job_version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_versions.job_version_id",
+            ondelete="CASCADE",
+            name="fk_candidate_applications_job_version_id_versions",
+        ),
+        nullable=False,
+    )
+    job_revision: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_profiles.profile_id",
+            ondelete="RESTRICT",
+            name="fk_candidate_applications_profile_id_profiles",
+        ),
+        nullable=False,
+    )
+    profile_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default=CandidateApplicationStatus.SUBMITTED.value,
+        server_default=text("'SUBMITTED'"),
+    )
+    submission_source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="CANDIDATE_PORTAL",
+        server_default=text("'CANDIDATE_PORTAL'"),
+    )
+    idempotency_key: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    withdrawn_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    binding: Mapped["CandidateAccountBindingRecord"] = relationship(
+        "CandidateAccountBindingRecord",
+    )
+    candidate: Mapped["CandidateIdentityRecord"] = relationship(
+        "CandidateIdentityRecord",
+    )
+    job: Mapped["JobRequisition"] = relationship(
+        "JobRequisition",
+    )
+    job_version: Mapped["JobVersion"] = relationship(
+        "JobVersion",
+    )
+    profile: Mapped["CandidateProfileRecord"] = relationship(
+        "CandidateProfileRecord",
+    )
+
 
 
