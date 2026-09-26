@@ -53,6 +53,14 @@ class CandidateJobDetailResponse(StrictSchema):
     )
     published_at: datetime
     updated_at: datetime
+    has_active_application: bool = Field(
+        default=False,
+        description="Whether the authenticated candidate currently has an active SUBMITTED application for this job.",
+    )
+    active_application_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="Application ID of active application if one exists for the candidate.",
+    )
 
 
 class CandidateJobListResponse(StrictSchema):

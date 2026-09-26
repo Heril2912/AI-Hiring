@@ -12,6 +12,7 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.auth import AuditEventType, AuditReasonCode, AuditResult
+from app.models.candidate_access import CandidateApplicationRecord, CandidateApplicationStatus
 from app.models.job import (
     JobLifecycleStatus,
     JobRequirement,
@@ -210,6 +211,14 @@ def get_candidate_open_job_detail(
 
     published_time = latest_approved.approved_at or latest_approved.updated_at or latest_approved.created_at
 
+    # Check if candidate has active SUBMITTED application for this job
+    stmt_app = select(CandidateApplicationRecord).where(
+        CandidateApplicationRecord.binding_id == principal.binding_id,
+        CandidateApplicationRecord.job_id == job.job_id,
+        CandidateApplicationRecord.status == CandidateApplicationStatus.SUBMITTED.value,
+    )
+    active_app = db.execute(stmt_app).scalar_one_or_none()
+
     return CandidateJobDetailResponse(
         job_id=job.job_id,
         job_version_id=latest_approved.job_version_id,
@@ -226,4 +235,6 @@ def get_candidate_open_job_detail(
         qualifications=public_qualifications,
         published_at=published_time,
         updated_at=latest_approved.updated_at or latest_approved.created_at,
+        has_active_application=active_app is not None,
+        active_application_id=active_app.application_id if active_app else None,
     )

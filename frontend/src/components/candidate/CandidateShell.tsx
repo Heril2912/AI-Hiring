@@ -4,17 +4,20 @@ import { Icon } from "../Icon";
 import { CandidatePracticeDirectory } from "./CandidatePracticeDirectory";
 import { CandidateOpenJobs } from "./CandidateOpenJobs";
 import { CandidateJobDetailView } from "./CandidateJobDetail";
+import { CandidateMyApplications } from "./CandidateMyApplications";
+import { CandidateApplicationDetailView } from "./CandidateApplicationDetail";
 
 interface CandidateShellProps {
   onLogout?: () => void;
-  initialTab?: "jobs" | "practice";
+  initialTab?: "jobs" | "applications" | "practice";
 }
 
 export function CandidateShell({ onLogout, initialTab = "jobs" }: CandidateShellProps) {
   const { candidateUser, logout } = useCandidateAuth();
-  const [activeTab, setActiveTab] = useState<"jobs" | "practice">(initialTab);
+  const [activeTab, setActiveTab] = useState<"jobs" | "applications" | "practice">(initialTab);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | undefined>(undefined);
+  const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
 
   const handleLogout = async () => {
     await logout();
@@ -31,6 +34,15 @@ export function CandidateShell({ onLogout, initialTab = "jobs" }: CandidateShell
   const handleBackToJobs = () => {
     setSelectedJobId(null);
     setSelectedVersionId(undefined);
+  };
+
+  const handleSelectApplication = (applicationId: string) => {
+    setSelectedApplicationId(applicationId);
+    setActiveTab("applications");
+  };
+
+  const handleBackToApplications = () => {
+    setSelectedApplicationId(null);
   };
 
   return (
@@ -64,10 +76,25 @@ export function CandidateShell({ onLogout, initialTab = "jobs" }: CandidateShell
 
           <button
             type="button"
+            className={`btn btn-sm ${activeTab === "applications" ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => {
+              setActiveTab("applications");
+              handleBackToApplications();
+            }}
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+            aria-current={activeTab === "applications" ? "page" : undefined}
+          >
+            <Icon name="file-text" size={14} aria-hidden="true" />
+            <span>My Applications</span>
+          </button>
+
+          <button
+            type="button"
             className={`btn btn-sm ${activeTab === "practice" ? "btn-primary" : "btn-secondary"}`}
             onClick={() => {
               setActiveTab("practice");
               handleBackToJobs();
+              handleBackToApplications();
             }}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             aria-current={activeTab === "practice" ? "page" : undefined}
@@ -100,9 +127,31 @@ export function CandidateShell({ onLogout, initialTab = "jobs" }: CandidateShell
               jobId={selectedJobId}
               versionId={selectedVersionId}
               onBack={handleBackToJobs}
+              onNavigateApplication={handleSelectApplication}
             />
           ) : (
             <CandidateOpenJobs onSelectJob={handleSelectJob} />
+          )
+        )}
+
+        {activeTab === "applications" && (
+          selectedApplicationId ? (
+            <CandidateApplicationDetailView
+              applicationId={selectedApplicationId}
+              onBack={handleBackToApplications}
+              onNavigateJobs={() => {
+                setActiveTab("jobs");
+                handleBackToJobs();
+              }}
+            />
+          ) : (
+            <CandidateMyApplications
+              onSelectApplication={handleSelectApplication}
+              onNavigateJobs={() => {
+                setActiveTab("jobs");
+                handleBackToJobs();
+              }}
+            />
           )
         )}
 

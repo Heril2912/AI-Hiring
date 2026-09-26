@@ -16,6 +16,8 @@ from app.models.candidate import (
 )
 from app.models.candidate_access import (
     CandidateAccountBindingRecord,
+    CandidateApplicationRecord,
+    CandidateApplicationStatus,
     CandidateBindingStatus,
     CandidateInvitationRecord,
     CandidatePracticeAnswerReviewRecord,

@@ -1,21 +1,27 @@
 import React, { useEffect, useState } from "react";
 import { fetchCandidateJobDetail, CandidateJobDetail } from "../../api/candidateJobs";
+import { submitApplication } from "../../api/candidateApplications";
 import { Icon } from "../Icon";
 
 interface CandidateJobDetailViewProps {
   jobId: string;
   versionId?: string;
   onBack: () => void;
+  onNavigateApplication?: (applicationId: string) => void;
 }
 
 export function CandidateJobDetailView({
   jobId,
   versionId,
   onBack,
+  onNavigateApplication,
 }: CandidateJobDetailViewProps) {
   const [job, setJob] = useState<CandidateJobDetail | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [isApplying, setIsApplying] = useState<boolean>(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [appliedSuccessAppId, setAppliedSuccessAppId] = useState<string | null>(null);
 
   const loadJob = async () => {
     try {
@@ -23,6 +29,11 @@ export function CandidateJobDetailView({
       setError(null);
       const res = await fetchCandidateJobDetail(jobId, versionId);
       setJob(res);
+      const activeAppId = res.activeApplicationId || (res as any).active_application_id;
+      const hasActive = res.hasActiveApplication || (res as any).has_active_application;
+      if (hasActive && activeAppId) {
+        setAppliedSuccessAppId(activeAppId);
+      }
     } catch (err: any) {
       setError(err?.message || "Job posting not found or no longer available.");
     } finally {
@@ -33,6 +44,26 @@ export function CandidateJobDetailView({
   useEffect(() => {
     loadJob();
   }, [jobId, versionId]);
+
+  const handleApply = async () => {
+    if (!job || isApplying || appliedSuccessAppId) return;
+
+    try {
+      setIsApplying(true);
+      setApplyError(null);
+      const idempotencyKey = `apply-${job.jobId}-${job.revision}-${Date.now()}`;
+      const app = await submitApplication(job.jobId, {
+        idempotencyKey,
+        expectedRevision: job.revision,
+      });
+      setAppliedSuccessAppId(app.applicationId);
+      setJob((prev) => (prev ? { ...prev, hasActiveApplication: true, activeApplicationId: app.applicationId } : null));
+    } catch (err: any) {
+      setApplyError(err?.message || "Failed to submit application. Please try again.");
+    } finally {
+      setIsApplying(false);
+    }
+  };
 
   const formatEmploymentType = (type?: string | null) => {
     if (!type) return null;
@@ -110,18 +141,72 @@ export function CandidateJobDetailView({
             gap: "28px",
           }}
         >
-          {/* Header Block */}
+          {/* Header Block with Apply Button */}
           <div style={{ borderBottom: "1px solid var(--border-subtle, #e2e8f0)", paddingBottom: "24px" }}>
-            <h1
-              style={{
-                fontSize: "24px",
-                fontWeight: 700,
-                color: "var(--text-primary, #0f172a)",
-                margin: "0 0 12px 0",
-              }}
-            >
-              {job.title}
-            </h1>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", marginBottom: "12px" }}>
+              <h1
+                style={{
+                  fontSize: "24px",
+                  fontWeight: 700,
+                  color: "var(--text-primary, #0f172a)",
+                  margin: 0,
+                }}
+              >
+                {job.title}
+              </h1>
+
+              {/* Application Action Area */}
+              <div>
+                {(appliedSuccessAppId || job.hasActiveApplication || (job as any).has_active_application) ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span
+                      style={{
+                        fontSize: "13px",
+                        padding: "4px 12px",
+                        borderRadius: "var(--radius-full, 9999px)",
+                        backgroundColor: "var(--status-success-bg, #ecfdf5)",
+                        color: "var(--status-success, #059669)",
+                        border: "1px solid var(--status-success-border, #a7f3d0)",
+                        fontWeight: 600,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <Icon name="check-circle" size={14} /> Applied
+                    </span>
+                    {onNavigateApplication && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => onNavigateApplication((appliedSuccessAppId || job.activeApplicationId || (job as any).active_application_id)!)}
+                        aria-label="View Application"
+                      >
+                        View Application
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={isApplying}
+                    onClick={handleApply}
+                    style={{ minWidth: "120px" }}
+                    aria-label="Apply to Position"
+                  >
+                    {isApplying ? "Submitting..." : "Apply Now"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {applyError && (
+              <div className="feedback-box error" role="alert" style={{ marginTop: "12px", marginBottom: "12px" }}>
+                <Icon name="alert-circle" size={16} />
+                <span>{applyError}</span>
+              </div>
+            )}
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: "center" }}>
               {job.department && (
