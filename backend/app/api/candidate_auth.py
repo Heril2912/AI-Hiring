@@ -39,6 +39,7 @@ from app.schemas.candidate_access import (
     CandidateLoginResponse,
     CandidateMeResponse,
 )
+from app.schemas.profile_assembly import CandidateProfileResponse
 from app.services.candidate_access_service import activate_candidate_account
 from app.services.security import (
     dummy_verify_password,
@@ -281,6 +282,49 @@ async def get_candidate_me(
         idle_expires_at=session.idle_expires_at,
         absolute_expires_at=session.absolute_expires_at,
         csrf_token=raw_csrf_token,
+    )
+
+
+@router.get(
+    "/me/profile",
+    response_model=CandidateProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Authenticated Candidate's Own Profile",
+    description="Returns the structured profile strictly for the authenticated candidate principal.",
+)
+async def get_candidate_own_profile(
+    version: Optional[int] = None,
+    cand_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+    db: Session = Depends(get_db),
+) -> CandidateProfileResponse:
+    from app.services.candidate_authorization_kernel import load_scoped_candidate_profile
+    from app.schemas.profile_assembly import CandidateProfileResponse, ProfileAssemblyWarning
+    from app.schemas.candidate import CandidateIdentity, CandidateProfessionalProfile, EvidenceSpan
+
+    profile_rec = load_scoped_candidate_profile(
+        principal=cand_ctx.principal,
+        db=db,
+        version=version,
+    )
+
+    identity_payload = profile_rec.identity.identity_payload if profile_rec.identity else {}
+
+    return CandidateProfileResponse(
+        candidate_id=str(profile_rec.identity_id),
+        artifact_id=str(profile_rec.artifact_id),
+        profile_id=str(profile_rec.profile_id),
+        profile_version=profile_rec.profile_version,
+        schema_version=profile_rec.schema_version,
+        parser_pipeline_version=profile_rec.parser_pipeline_version,
+        provenance=profile_rec.provenance,
+        parent_profile_id=str(profile_rec.parent_profile_id) if profile_rec.parent_profile_id else None,
+        parent_profile_version=profile_rec.parent_profile_version,
+        created_at=profile_rec.created_at.isoformat() if profile_rec.created_at else None,
+        review_required=profile_rec.review_required,
+        warnings=[ProfileAssemblyWarning.model_validate(w) for w in (profile_rec.warning_metadata or [])],
+        identity=CandidateIdentity.model_validate(identity_payload),
+        professional_profile=CandidateProfessionalProfile.model_validate(profile_rec.professional_profile),
+        evidence=[EvidenceSpan.model_validate(ev) for ev in (profile_rec.evidence_spans or [])],
     )
 
 
