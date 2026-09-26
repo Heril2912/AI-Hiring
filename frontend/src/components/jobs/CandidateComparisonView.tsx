@@ -669,6 +669,14 @@ export function CandidateComparisonView({
             </div>
           )}
 
+          {/* Concise Help Note */}
+          <div style={{ marginBottom: "16px", padding: "10px 14px", background: "var(--bg-surface-subtle)", borderRadius: "6px", fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.4", display: "flex", alignItems: "center", gap: "8px" }}>
+            <Icon name="info" size={14} className="text-muted" style={{ flexShrink: 0 }} />
+            <span>
+              Overall match can include experience and other configured criteria. Skill coverage counts only required skills supported by resume evidence.
+            </span>
+          </div>
+
           {results.length === 0 ? (
             <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
               No candidates were ranked in this run.
@@ -684,8 +692,8 @@ export function CandidateComparisonView({
                   <tr>
                     <th style={{ width: "90px" }}>Rank</th>
                     <th>Candidate</th>
-                    <th style={{ width: "140px" }}>Resume match</th>
-                    <th>Required evidence</th>
+                    <th style={{ width: "160px" }}>Overall match</th>
+                    <th>Required skills & evidence</th>
                     <th style={{ width: "160px", textAlign: "right" }}>Action</th>
                   </tr>
                 </thead>
@@ -716,11 +724,49 @@ export function CandidateComparisonView({
                     const canon = getCanonicalSummaryData(summary);
 
                     const isSummaryUnavailable = !canon && (item.mustHaveTotalCount === undefined || item.mustHaveTotalCount === null);
-                    const reqTotal = canon ? canon.requiredTotal : item.mustHaveTotalCount;
-                    const reqFound = canon ? canon.requiredEvidenceFound : item.mustHaveEvidencedCount;
+                    const reqTotal = canon ? canon.requiredTotal : (item.mustHaveTotalCount ?? 0);
+                    const reqFound = canon ? canon.requiredEvidenceFound : (item.mustHaveEvidencedCount ?? 0);
                     const reqPartial = canon ? canon.requiredPartialEvidence : 0;
                     const reqVerification = canon ? canon.requiredNeedsVerification : (item.needsConfirmationCount ?? 0);
                     const extractionConfidence = canon?.extractionConfidence || item.confidenceTier || "MEDIUM";
+
+                    // Compute specific required skill coverage
+                    const contribs: any[] = item.requirement_contributions || (item as any).requirementContributions || [];
+                    const requiredSkillContribs = contribs.filter(
+                      (c) => (c.necessity === "MUST_HAVE" || c.necessity === "must_have") && (c.category === "SKILL" || c.category === "skill")
+                    );
+                    const hasSkillBreakdown = requiredSkillContribs.length > 0;
+                    const reqSkillTotal = hasSkillBreakdown ? requiredSkillContribs.length : reqTotal;
+                    const reqSkillMatched = hasSkillBreakdown
+                      ? requiredSkillContribs.filter((c) => c.match_state === "MATCHED" || c.match_state === "FULL_MATCH" || c.match_value >= 1.0).length
+                      : reqFound;
+
+                    const overallScore = Math.round(Number(item.displayCompatibilityScore));
+                    const isZeroSkillWithPositiveScore = reqSkillMatched === 0 && reqSkillTotal > 0 && overallScore > 0;
+
+                    // Compute category weights and scores for compact breakdown
+                    const compScores = item.componentScores || (item as any).component_scores || {};
+                    const getCategoryWeightAndScore = (cat: string) => {
+                      const catContribs = contribs.filter((c) => (c.category || "").toUpperCase() === cat.toUpperCase());
+                      if (catContribs.length === 0) return null;
+                      const totalWeight = catContribs.reduce((sum, c) => sum + (c.weighted_contribution > 0 ? (c.effective_importance ? c.effective_importance * 100 : (c.configured_importance || 0)) : (c.configured_importance || 0)), 0);
+                      const earned = catContribs.reduce((sum, c) => sum + (c.weighted_contribution || 0), 0);
+                      const compObj = compScores[cat] || compScores[cat.toLowerCase()];
+                      const displayScore = compObj?.display_component_score !== undefined
+                        ? compObj.display_component_score
+                        : (typeof compObj === "number" ? compObj : (totalWeight > 0 ? Math.round((earned / totalWeight) * 100) : 0));
+                      return {
+                        count: catContribs.length,
+                        earned: Math.round(earned * 10) / 10,
+                        weight: Math.round(totalWeight * 10) / 10,
+                        displayScore: Math.round(Number(displayScore)),
+                      };
+                    };
+
+                    const reqSkillsContrib = contribs.filter((c) => (c.category === "SKILL" || c.category === "skill") && (c.necessity === "MUST_HAVE" || c.necessity === "must_have"));
+                    const prefSkillsContrib = contribs.filter((c) => (c.category === "SKILL" || c.category === "skill") && (c.necessity === "PREFERRED" || c.necessity === "preferred"));
+                    const expContrib = contribs.filter((c) => c.category === "EXPERIENCE" || c.category === "experience");
+                    const otherContrib = contribs.filter((c) => c.category !== "SKILL" && c.category !== "skill" && c.category !== "EXPERIENCE" && c.category !== "experience");
 
                     const isExpanded = expandedDetails.has(item.resultId);
                     const rankText = item.isTied ? `Tied #${item.rank}` : `#${item.rank}`;
@@ -746,9 +792,14 @@ export function CandidateComparisonView({
                             </div>
                           </td>
                           <td>
-                            <span className="score-cell-value">
-                              {Math.round(Number(item.displayCompatibilityScore))}%
-                            </span>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                              <span className="score-cell-value" style={{ fontSize: "15px", fontWeight: 700, color: "var(--text-primary)" }}>
+                                {overallScore}%
+                              </span>
+                              <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                                Overall match
+                              </span>
+                            </div>
                           </td>
                           <td>
                             {isSummaryUnavailable ? (
@@ -757,9 +808,22 @@ export function CandidateComparisonView({
                               </span>
                             ) : (
                               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                                <span style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: 500 }}>
-                                  {reqFound} of {reqTotal} required criteria have supporting resume evidence
-                                </span>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: 600 }}>
+                                    Required skills: {reqSkillMatched} of {reqSkillTotal}
+                                  </span>
+                                  <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                                    ({reqFound} of {reqTotal} required criteria have supporting resume evidence)
+                                  </span>
+                                </div>
+
+                                {isZeroSkillWithPositiveScore && (
+                                  <div style={{ fontSize: "11px", color: "var(--text-secondary)", background: "var(--bg-surface-subtle)", padding: "4px 8px", borderRadius: "4px", marginTop: "2px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                    <Icon name="info" size={12} className="text-muted" />
+                                    <span>The score comes from non-skill criteria; no required skill evidence was found.</span>
+                                  </div>
+                                )}
+
                                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                   {reqVerification > 0 && (
                                     <span style={{ fontSize: "11px", color: "var(--gap-partial)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
@@ -818,7 +882,7 @@ export function CandidateComparisonView({
                                 style={{ fontSize: "11px", textDecoration: "none" }}
                                 aria-expanded={isExpanded}
                               >
-                                {isExpanded ? "Hide details ▲" : "Analysis details ▼"}
+                                {isExpanded ? "Hide score breakdown ▲" : "Score breakdown ▼"}
                               </button>
                               {isLegacy && (
                                 <span
@@ -850,12 +914,56 @@ export function CandidateComparisonView({
                             </div>
                           </td>
                         </tr>
-                        {/* Expandable Analysis details row */}
+                        {/* Expandable Compact Score Breakdown row */}
                         {isExpanded && (
                           <tr style={{ backgroundColor: "var(--bg-surface-subtle)" }}>
-                            <td colSpan={5} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border-medium)" }}>
-                              <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
-                                <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
+                            <td colSpan={5} style={{ padding: "14px 18px", borderBottom: "1px solid var(--border-medium)" }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "12px", color: "var(--text-secondary)" }}>
+                                <div>
+                                  <h4 style={{ fontSize: "13px", fontWeight: 700, color: "var(--text-primary)", margin: "0 0 8px 0" }}>
+                                    Compatibility Score Breakdown
+                                  </h4>
+                                  <div style={{ maxWidth: "420px", display: "flex", flexDirection: "column", gap: "6px", background: "var(--bg-surface)", padding: "12px", borderRadius: "6px", border: "1px solid var(--border-subtle)" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px dashed var(--border-subtle)" }}>
+                                      <span>Required skills</span>
+                                      <strong style={{ color: "var(--text-primary)" }}>
+                                        {reqSkillsContrib.length > 0
+                                          ? `${Math.round(reqSkillsContrib.reduce((s, c) => s + (c.weighted_contribution || 0), 0))}% / ${Math.round(reqSkillsContrib.reduce((s, c) => s + (c.effective_importance ? c.effective_importance * 100 : (c.configured_importance || 0)), 0))}% weight`
+                                          : "0% (No required skills configured)"}
+                                      </strong>
+                                    </div>
+                                    {prefSkillsContrib.length > 0 && (
+                                      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px dashed var(--border-subtle)" }}>
+                                        <span>Preferred skills</span>
+                                        <strong style={{ color: "var(--text-primary)" }}>
+                                          {Math.round(prefSkillsContrib.reduce((s, c) => s + (c.weighted_contribution || 0), 0))}% / {Math.round(prefSkillsContrib.reduce((s, c) => s + (c.effective_importance ? c.effective_importance * 100 : (c.configured_importance || 0)), 0))}% weight
+                                        </strong>
+                                      </div>
+                                    )}
+                                    {expContrib.length > 0 && (
+                                      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px dashed var(--border-subtle)" }}>
+                                        <span>Experience</span>
+                                        <strong style={{ color: "var(--text-primary)" }}>
+                                          {Math.round(expContrib.reduce((s, c) => s + (c.weighted_contribution || 0), 0))}% / {Math.round(expContrib.reduce((s, c) => s + (c.effective_importance ? c.effective_importance * 100 : (c.configured_importance || 0)), 0))}% weight
+                                        </strong>
+                                      </div>
+                                    )}
+                                    {otherContrib.length > 0 && (
+                                      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px dashed var(--border-subtle)" }}>
+                                        <span>Education / Other criteria</span>
+                                        <strong style={{ color: "var(--text-primary)" }}>
+                                          {Math.round(otherContrib.reduce((s, c) => s + (c.weighted_contribution || 0), 0))}% / {Math.round(otherContrib.reduce((s, c) => s + (c.effective_importance ? c.effective_importance * 100 : (c.configured_importance || 0)), 0))}% weight
+                                        </strong>
+                                      </div>
+                                    )}
+                                    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0 2px 0", fontWeight: 700, color: "var(--text-primary)", borderTop: "1px solid var(--border-medium)" }}>
+                                      <span>Overall Compatibility</span>
+                                      <span style={{ color: "var(--text-primary)", fontSize: "13px" }}>{overallScore}%</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center", paddingTop: "4px" }}>
                                   <div>
                                     <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Extraction confidence: </span>
                                     <span
@@ -874,27 +982,7 @@ export function CandidateComparisonView({
                                     <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Algorithm: </span>
                                     <span>{matchRun.matcherAlgorithmVersion}</span>
                                   </div>
-                                  <div>
-                                    <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Rule version: </span>
-                                    <span>{matchRun.matchingRuleVersion}</span>
-                                  </div>
-                                  <div>
-                                    <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Policy version: </span>
-                                    <span>{matchRun.scoringPolicyVersion}</span>
-                                  </div>
                                 </div>
-                                {canon && (
-                                  <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginTop: "4px" }}>
-                                    <span>Total criteria: <strong>{canon.totalCriteria}</strong></span>
-                                    <span>Required criteria: <strong>{canon.requiredTotal}</strong></span>
-                                    <span>Evidence found: <strong>{canon.overallEvidenceFound}</strong></span>
-                                    <span>Partial evidence: <strong>{canon.overallPartialEvidence}</strong></span>
-                                    <span>Not found in resume: <strong>{canon.overallNotFound}</strong></span>
-                                    {canon.preferredTotal > 0 && (
-                                      <span>Preferred evidenced: <strong>{canon.preferredEvidenceFound} of {canon.preferredTotal}</strong></span>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                             </td>
                           </tr>

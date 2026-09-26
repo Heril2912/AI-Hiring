@@ -6,6 +6,7 @@ import {
   saveDraftRequirements,
   checkJobReadiness,
   markJobReady,
+  releaseJob,
   createSuccessorVersion,
   JobDetail,
   JobCreatePayload,
@@ -80,9 +81,16 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
   const [isMarkingReady, setIsMarkingReady] = useState(false);
   const [isCreatingSuccessor, setIsCreatingSuccessor] = useState(false);
 
+  // Job Release State
+  const [isReleasing, setIsReleasing] = useState(false);
+  const [isReleaseConfirmOpen, setIsReleaseConfirmOpen] = useState(false);
+
   const versionStatus = jobDetail?.currentVersion?.versionStatus || "DRAFT";
   const versionNumber = jobDetail?.currentVersion?.versionNumber || 1;
-  const isReadOnly = versionStatus === "READY_FOR_MATCHING";
+  const isReadOnly = versionStatus === "READY_FOR_MATCHING" || versionStatus === "APPROVED";
+  const publicationStatus = jobDetail?.publicationStatus || "NOT_RELEASED";
+  const isReleased = publicationStatus === "RELEASED";
+  const releasedAt = jobDetail?.releasedAt;
 
   // Initial Load for Existing Job
   useEffect(() => {
@@ -494,6 +502,24 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
     }
   };
 
+  const handleReleaseJob = async () => {
+    if (!jobId) return;
+    setSaveError(null);
+    setConflictError(null);
+    try {
+      setIsReleasing(true);
+      const updated = await releaseJob(jobId);
+      setJobDetail(updated);
+      setIsReleaseConfirmOpen(false);
+      setSaveSuccessMsg("Job released to candidates successfully. Candidates can now discover and apply to this job.");
+      if (onJobUpdated) onJobUpdated(jobId);
+    } catch (err: any) {
+      setSaveError(err?.message || "Failed to release job to candidates.");
+    } finally {
+      setIsReleasing(false);
+    }
+  };
+
   const handleReloadLatest = async () => {
     if (!jobId) return;
     try {
@@ -654,6 +680,19 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
                 v{versionNumber} ({isReadOnly ? "Ready for matching" : "Draft"})
               </span>
               {jobId && <span className="badge badge-revision">Rev #{currentRevision}</span>}
+              {isReleased ? (
+                <span
+                  className="badge badge-onet-confirmed"
+                  title={releasedAt ? `Released on ${new Date(releasedAt).toLocaleDateString()}` : "Released to candidates"}
+                >
+                  <Icon name="globe" size={12} style={{ marginRight: "4px" }} />
+                  Released {releasedAt ? `(${new Date(releasedAt).toLocaleDateString()})` : ""}
+                </span>
+              ) : isReadOnly ? (
+                <span className="badge badge-warning" style={{ background: "rgba(234, 179, 8, 0.12)", color: "#ca8a04", borderColor: "rgba(234, 179, 8, 0.3)" }}>
+                  Not released
+                </span>
+              ) : null}
               {isDirty && <span className="badge badge-unsaved">Unsaved Changes</span>}
             </div>
           </div>
@@ -662,6 +701,18 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
         <div className="top-bar-right">
           {isReadOnly ? (
             <>
+              {!isReleased && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-md"
+                  onClick={() => setIsReleaseConfirmOpen(true)}
+                  disabled={isReleasing}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <Icon name="globe" size={15} />
+                  <span>{isReleasing ? "Releasing..." : "Release to candidates"}</span>
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-secondary btn-md"
@@ -727,11 +778,79 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
 
       {/* Locked Ready Informational Strip */}
       {isReadOnly && (
-        <div className="locked-strip-compact" role="status">
-          <Icon name="check" size={16} className="strip-icon" />
-          <span>
-            This revision (v{versionNumber}, Rev #{currentRevision}) is locked and ready for candidate comparison. Create a new revision to change its requirements.
-          </span>
+        <div className="locked-strip-compact" role="status" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <Icon name="check" size={16} className="strip-icon" />
+            <span>
+              This revision (v{versionNumber}, Rev #{currentRevision}) is locked and ready for candidate comparison.
+              {!isReleased && (
+                <strong style={{ marginLeft: "6px", fontWeight: 500 }}>
+                  Candidates will be able to view and apply to this job once released.
+                </strong>
+              )}
+            </span>
+          </div>
+          {!isReleased && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setIsReleaseConfirmOpen(true)}
+              disabled={isReleasing}
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+            >
+              <Icon name="globe" size={13} />
+              <span>{isReleasing ? "Releasing..." : "Release to candidates"}</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Release Confirmation Dialog Modal */}
+      {isReleaseConfirmOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="release-modal-title">
+          <div className="modal-content" style={{ maxWidth: "480px" }}>
+            <div className="modal-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Icon name="globe" size={18} className="text-primary" />
+                <h3 id="release-modal-title" style={{ fontSize: "16px", fontWeight: 700, margin: 0 }}>
+                  Release Job to Candidates
+                </h3>
+              </div>
+            </div>
+            <div className="modal-body" style={{ padding: "16px 0" }}>
+              <p style={{ fontSize: "14px", color: "var(--text-primary)", marginBottom: "12px", lineHeight: "1.5" }}>
+                Are you sure you want to release <strong>{title || "this job requisition"}</strong> (Version {versionNumber}, Revision #{currentRevision}) to the public candidate portal?
+              </p>
+              <div style={{ padding: "12px", background: "var(--bg-surface-subtle)", borderRadius: "6px", fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.4" }}>
+                <p style={{ margin: 0, fontWeight: 500, color: "var(--text-primary)" }}>
+                  What happens when released:
+                </p>
+                <ul style={{ margin: "6px 0 0 16px", padding: 0 }}>
+                  <li>Candidates will be able to discover this job in Open Jobs.</li>
+                  <li>Eligible candidates can view qualifications and submit applications.</li>
+                  <li>Applications will bind to this exact approved revision.</li>
+                </ul>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-md"
+                onClick={() => setIsReleaseConfirmOpen(false)}
+                disabled={isReleasing}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-md"
+                onClick={handleReleaseJob}
+                disabled={isReleasing}
+              >
+                {isReleasing ? "Releasing..." : "Confirm & Release"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

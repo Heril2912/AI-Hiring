@@ -4,12 +4,12 @@ import { Icon } from "../Icon";
 
 interface CandidateLoginPageProps {
   onSuccess?: () => void;
-  onNavigateActivate?: () => void;
+  onNavigateRegister?: () => void;
 }
 
 export function CandidateLoginPage({
   onSuccess,
-  onNavigateActivate,
+  onNavigateRegister,
 }: CandidateLoginPageProps) {
   const { login } = useCandidateAuth();
 
@@ -49,11 +49,11 @@ export function CandidateLoginPage({
       <div className="candidate-auth-card" role="main">
         <header className="candidate-auth-header">
           <div className="candidate-badge-container">
-            <span className="candidate-portal-badge">Candidate Practice Portal</span>
+            <span className="candidate-portal-badge">Candidate Portal</span>
           </div>
           <h1 className="candidate-auth-title">Candidate Sign In</h1>
           <p className="candidate-auth-subtitle">
-            Sign in to access your practice interviews and review your sessions.
+            Sign in to access open jobs, your applications, and practice interviews.
           </p>
         </header>
 
@@ -127,7 +127,7 @@ export function CandidateLoginPage({
                   <span>Signing in...</span>
                 </>
               ) : (
-                "Sign In to Practice Portal"
+                "Sign In to Candidate Portal"
               )}
             </button>
           </div>
@@ -135,13 +135,13 @@ export function CandidateLoginPage({
 
         <footer className="candidate-auth-footer">
           <p className="footer-text">
-            Received an invitation link?{" "}
+            Don't have an account?{" "}
             <button
               type="button"
               className="link-button"
-              onClick={onNavigateActivate}
+              onClick={onNavigateRegister}
             >
-              Activate your account
+              Create candidate account
             </button>
           </p>
         </footer>

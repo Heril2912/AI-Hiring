@@ -12,6 +12,7 @@ import {
   candidateLogin,
   candidateLogout,
   activateCandidateAccount,
+  registerCandidate,
 } from "../api/candidateAuth";
 import { setApiCsrfToken, ApiError } from "../api/client";
 
@@ -26,6 +27,7 @@ export interface CandidateAuthContextValue {
   csrfToken: string | null;
   error: string | null;
   login: (email: string, password: string) => Promise<CandidateAuthResponse>;
+  register: (fullName: string, email: string, password: string) => Promise<CandidateAuthResponse>;
   activate: (token: string, password: string, confirmation: string) => Promise<CandidateAuthResponse>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
@@ -99,6 +101,15 @@ export function CandidateAuthProvider({ children }: { children: ReactNode }) {
     return data;
   };
 
+  const register = async (fullName: string, email: string, password: string) => {
+    setError(null);
+    const data = await registerCandidate(fullName, email, password);
+    if (data && data.userId && data.csrfToken) {
+      applyAuthState(data, data.csrfToken);
+    }
+    return data;
+  };
+
   const activate = async (token: string, password: string, confirmation: string): Promise<CandidateAuthResponse> => {
     setError(null);
     const data = await activateCandidateAccount(token, password, confirmation);
@@ -130,6 +141,7 @@ export function CandidateAuthProvider({ children }: { children: ReactNode }) {
         csrfToken,
         error,
         login,
+        register,
         activate,
         logout,
         refreshSession,

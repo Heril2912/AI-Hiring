@@ -135,11 +135,57 @@ export function CandidateMyApplications({
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {applications.map((app) => {
             const isSubmitted = app.status === "SUBMITTED";
-            const dateStr = new Date(app.submittedAt).toLocaleDateString(undefined, {
-              year: "numeric",
-              month: "short",
-              day: "numeric",
-            });
+            const isWithdrawn = app.status === "WITHDRAWN";
+            const isProcessing = app.status === "RESUME_PROCESSING";
+            const isReady = app.status === "READY_TO_SUBMIT";
+            const isFailed = app.status === "PROCESSING_FAILED";
+            const isDraft = app.status === "DRAFT";
+
+            const dateStr = app.submittedAt
+              ? new Date(app.submittedAt).toLocaleDateString(undefined, {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })
+              : app.createdAt
+              ? new Date(app.createdAt).toLocaleDateString(undefined, {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })
+              : "Recently";
+
+            let statusLabel = "Submitted";
+            let statusBg = "var(--status-success-bg, #ecfdf5)";
+            let statusColor = "var(--status-success, #059669)";
+            let statusBorder = "var(--status-success-border, #a7f3d0)";
+
+            if (isWithdrawn) {
+              statusLabel = "Withdrawn";
+              statusBg = "var(--bg-surface-subtle, #f1f5f9)";
+              statusColor = "var(--text-muted, #64748b)";
+              statusBorder = "var(--border-subtle, #e2e8f0)";
+            } else if (isProcessing) {
+              statusLabel = "Processing Resume";
+              statusBg = "var(--accent-subtle, #eef1fc)";
+              statusColor = "var(--accent-primary, #4f5bd5)";
+              statusBorder = "var(--accent-subtle-border, #d0e0fd)";
+            } else if (isReady) {
+              statusLabel = "Ready to Submit";
+              statusBg = "var(--accent-subtle, #eef1fc)";
+              statusColor = "var(--accent-primary, #4f5bd5)";
+              statusBorder = "var(--accent-subtle-border, #d0e0fd)";
+            } else if (isFailed) {
+              statusLabel = "Resume Error";
+              statusBg = "var(--status-danger-bg, #fef2f2)";
+              statusColor = "var(--status-danger, #dc2626)";
+              statusBorder = "var(--status-danger-border, #fecaca)";
+            } else if (isDraft) {
+              statusLabel = "Draft";
+              statusBg = "var(--bg-surface-subtle, #f1f5f9)";
+              statusColor = "var(--text-secondary, #475569)";
+              statusBorder = "var(--border-subtle, #e2e8f0)";
+            }
 
             return (
               <div
@@ -171,7 +217,7 @@ export function CandidateMyApplications({
 
                       <span style={{ fontSize: "13px", color: "var(--text-muted, #64748b)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
                         <Icon name="calendar" size={14} />
-                        Submitted on {dateStr}
+                        {app.submittedAt ? `Submitted on ${dateStr}` : `Started on ${dateStr}`}
                       </span>
 
                       {/* Status Badge */}
@@ -180,13 +226,13 @@ export function CandidateMyApplications({
                           fontSize: "12px",
                           padding: "2px 8px",
                           borderRadius: "var(--radius-full, 9999px)",
-                          backgroundColor: isSubmitted ? "var(--status-success-bg, #ecfdf5)" : "var(--bg-surface-subtle, #f1f5f9)",
-                          color: isSubmitted ? "var(--status-success, #059669)" : "var(--text-muted, #64748b)",
-                          border: `1px solid ${isSubmitted ? "var(--status-success-border, #a7f3d0)" : "var(--border-subtle, #e2e8f0)"}`,
+                          backgroundColor: statusBg,
+                          color: statusColor,
+                          border: `1px solid ${statusBorder}`,
                           fontWeight: 600,
                         }}
                       >
-                        {isSubmitted ? "Submitted" : "Withdrawn"}
+                        {statusLabel}
                       </span>
                     </div>
                   </div>

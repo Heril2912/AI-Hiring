@@ -287,7 +287,7 @@ class CandidateAuthenticatedContext:
         self,
         user: UserRecord,
         session: UserSessionRecord,
-        binding: CandidateAccountBindingRecord,
+        binding: Optional[CandidateAccountBindingRecord] = None,
     ):
         from app.services.candidate_authorization_kernel import CandidatePrincipal
         self.user = user
@@ -348,21 +348,21 @@ async def get_candidate_authenticated_context(
     if user is None or not user.is_active or user.role != UserRole.CANDIDATE:
         raise UNAUTHENTICATED_ERROR
 
-    # Verify active CandidateAccountBindingRecord
+    # Check CandidateAccountBindingRecord if it exists
     binding_stmt = select(CandidateAccountBindingRecord).where(
         CandidateAccountBindingRecord.user_id == user.user_id
     )
     binding = db.execute(binding_stmt).scalar_one_or_none()
-    if binding is None or binding.status != CandidateBindingStatus.ACTIVE.value:
+    if binding is not None and binding.status != CandidateBindingStatus.ACTIVE.value:
         _record_audit_event(
             db=db,
             event_type=AuditEventType.ACCESS_DENIED,
             result=AuditResult.DENIED,
-            reason_code=AuditReasonCode.BINDING_SUSPENDED if (binding and binding.status == "SUSPENDED") else AuditReasonCode.UNAUTHORIZED,
+            reason_code=AuditReasonCode.BINDING_SUSPENDED,
             actor_user_id=user.user_id,
             resource_type="candidate_account_binding",
-            resource_id=str(binding.binding_id) if binding else None,
-            safe_metadata={"status": binding.status if binding else "MISSING", "portal": "CANDIDATE"},
+            resource_id=str(binding.binding_id),
+            safe_metadata={"status": binding.status, "portal": "CANDIDATE"},
         )
         db.commit()
         raise HTTPException(
@@ -389,7 +389,7 @@ async def get_candidate_authenticated_context(
 async def require_candidate(
     cand_ctx: CandidateAuthenticatedContext = Depends(get_candidate_authenticated_context),
 ) -> CandidateAuthenticatedContext:
-    """Enforces active Candidate session with active binding."""
+    """Enforces active Candidate session for an active candidate user."""
     return cand_ctx
 
 

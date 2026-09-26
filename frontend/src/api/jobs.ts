@@ -3,6 +3,7 @@ import { apiFetch } from "./client";
 export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERNSHIP" | "TEMPORARY";
 export type WorkplaceType = "ON_SITE" | "HYBRID" | "REMOTE";
 export type JobLifecycleStatus = "ACTIVE" | "ARCHIVED";
+export type JobPublicationStatus = "NOT_RELEASED" | "RELEASED" | "CLOSED";
 export type JobVersionStatus = "DRAFT" | "READY_FOR_MATCHING" | "APPROVED";
 
 export type RequirementCategory =
@@ -144,6 +145,10 @@ export interface JobSummary {
   jobId: string;
   createdByUserId: string;
   status: JobLifecycleStatus;
+  publicationStatus?: JobPublicationStatus;
+  releasedAt?: string | null;
+  releasedByUserId?: string | null;
+  releasedJobVersionId?: string | null;
   createdAt: string;
   updatedAt: string;
   currentVersion: JobVersionSummary;
@@ -153,6 +158,10 @@ export interface JobDetail {
   jobId: string;
   createdByUserId: string;
   status: JobLifecycleStatus;
+  publicationStatus?: JobPublicationStatus;
+  releasedAt?: string | null;
+  releasedByUserId?: string | null;
+  releasedJobVersionId?: string | null;
   createdAt: string;
   updatedAt: string;
   currentVersion: JobVersionDetail;
@@ -254,6 +263,12 @@ export async function markJobReady(
   return apiFetch<JobDetail>(`/api/v1/jobs/${jobId}/ready`, {
     method: "POST",
     body: JSON.stringify({ expected_revision: expectedRevision }),
+  });
+}
+
+export async function releaseJob(jobId: string): Promise<JobDetail> {
+  return apiFetch<JobDetail>(`/api/v1/jobs/${jobId}/release`, {
+    method: "POST",
   });
 }
 

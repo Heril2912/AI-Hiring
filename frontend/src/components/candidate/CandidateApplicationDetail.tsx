@@ -159,17 +159,47 @@ export function CandidateApplicationDetailView({
                   fontSize: "13px",
                   padding: "4px 12px",
                   borderRadius: "var(--radius-full, 9999px)",
-                  backgroundColor: isSubmitted ? "var(--status-success-bg, #ecfdf5)" : "var(--bg-surface-subtle, #f1f5f9)",
-                  color: isSubmitted ? "var(--status-success, #059669)" : "var(--text-muted, #64748b)",
-                  border: `1px solid ${isSubmitted ? "var(--status-success-border, #a7f3d0)" : "var(--border-subtle, #e2e8f0)"}`,
+                  backgroundColor:
+                    application.status === "SUBMITTED"
+                      ? "var(--status-success-bg, #ecfdf5)"
+                      : application.status === "WITHDRAWN"
+                      ? "var(--bg-surface-subtle, #f1f5f9)"
+                      : application.status === "PROCESSING_FAILED"
+                      ? "var(--status-danger-bg, #fef2f2)"
+                      : "var(--accent-subtle, #eef1fc)",
+                  color:
+                    application.status === "SUBMITTED"
+                      ? "var(--status-success, #059669)"
+                      : application.status === "WITHDRAWN"
+                      ? "var(--text-muted, #64748b)"
+                      : application.status === "PROCESSING_FAILED"
+                      ? "var(--status-danger, #dc2626)"
+                      : "var(--accent-primary, #4f5bd5)",
+                  border: `1px solid ${
+                    application.status === "SUBMITTED"
+                      ? "var(--status-success-border, #a7f3d0)"
+                      : application.status === "PROCESSING_FAILED"
+                      ? "var(--status-danger-border, #fecaca)"
+                      : "var(--border-subtle, #e2e8f0)"
+                  }`,
                   fontWeight: 600,
                   display: "inline-flex",
                   alignItems: "center",
                   gap: "4px",
                 }}
               >
-                <Icon name={isSubmitted ? "check-circle" : "slash"} size={14} />
-                {isSubmitted ? "Submitted" : "Withdrawn"}
+                <Icon name={application.status === "SUBMITTED" ? "check-circle" : "file-text"} size={14} />
+                {application.status === "SUBMITTED"
+                  ? "Submitted"
+                  : application.status === "WITHDRAWN"
+                  ? "Withdrawn"
+                  : application.status === "READY_TO_SUBMIT"
+                  ? "Ready to Submit"
+                  : application.status === "RESUME_PROCESSING"
+                  ? "Processing Resume"
+                  : application.status === "PROCESSING_FAILED"
+                  ? "Resume Error"
+                  : "Draft"}
               </span>
 
               {application.canWithdraw && (
@@ -192,10 +222,14 @@ export function CandidateApplicationDetailView({
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
             <div style={{ backgroundColor: "var(--bg-surface-subtle, #f8fafc)", padding: "16px", borderRadius: "var(--radius-md, 8px)" }}>
               <span style={{ fontSize: "12px", color: "var(--text-muted, #64748b)", display: "block", marginBottom: "4px" }}>
-                Submission Date
+                {application.submittedAt ? "Submission Date" : "Created Date"}
               </span>
               <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary, #0f172a)" }}>
-                {new Date(application.submittedAt).toLocaleString()}
+                {application.submittedAt
+                  ? new Date(application.submittedAt).toLocaleString()
+                  : application.createdAt
+                  ? new Date(application.createdAt).toLocaleString()
+                  : "N/A"}
               </span>
             </div>
 
@@ -204,7 +238,7 @@ export function CandidateApplicationDetailView({
                 Job Revision Snapshot
               </span>
               <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary, #0f172a)" }}>
-                Revision #{application.jobRevision}
+                {application.jobRevision ? `Revision #${application.jobRevision}` : "Active Revision"}
               </span>
             </div>
 
@@ -213,7 +247,7 @@ export function CandidateApplicationDetailView({
                 Profile Version Frozen
               </span>
               <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary, #0f172a)" }}>
-                Version #{application.profileVersion}
+                {application.profileVersion ? `Version #${application.profileVersion}` : "Pending Submission"}
               </span>
             </div>
 

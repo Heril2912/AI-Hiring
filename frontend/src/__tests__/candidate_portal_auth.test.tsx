@@ -10,6 +10,7 @@ import * as candidateAuthApi from "../api/candidateAuth";
 import { getPortalContext, getPortalOrigin, getLoginPortalSubtitle } from "../utils/portal";
 
 vi.mock("../api/candidateAuth", () => ({
+  registerCandidate: vi.fn(),
   candidateLogin: vi.fn(),
   candidateLogout: vi.fn(),
   getCandidateMe: vi.fn(),
@@ -140,6 +141,51 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
     });
   });
 
+  describe("CandidateRegisterPage", () => {
+    it("validates form fields and calls register on submit", async () => {
+      const { CandidateRegisterPage } = await import("../components/candidate/CandidateRegisterPage");
+      vi.mocked(candidateAuthApi.registerCandidate).mockResolvedValueOnce({
+        userId: "cand-user-reg",
+        candidateId: undefined,
+        organizationId: undefined,
+        email: "newcand@example.com",
+        displayName: "New Candidate",
+        role: "CANDIDATE",
+        bindingStatus: undefined,
+        csrfToken: "fresh-reg-csrf",
+      });
+
+      const onSuccess = vi.fn();
+
+      render(
+        <CandidateAuthProvider>
+          <CandidateRegisterPage onSuccess={onSuccess} />
+        </CandidateAuthProvider>
+      );
+
+      const nameInput = screen.getByLabelText(/Full Name/i);
+      const emailInput = screen.getByLabelText(/Email Address/i);
+      const passInput = screen.getByLabelText(/^Password/i);
+      const confirmInput = screen.getByLabelText(/Confirm Password/i);
+      const submitBtn = screen.getByRole("button", { name: /Create Account/i });
+
+      fireEvent.change(nameInput, { target: { value: "New Candidate" } });
+      fireEvent.change(emailInput, { target: { value: "newcand@example.com" } });
+      fireEvent.change(passInput, { target: { value: "Password123!" } });
+      fireEvent.change(confirmInput, { target: { value: "Password123!" } });
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(candidateAuthApi.registerCandidate).toHaveBeenCalledWith(
+          "New Candidate",
+          "newcand@example.com",
+          "Password123!"
+        );
+        expect(onSuccess).toHaveBeenCalled();
+      });
+    });
+  });
+
   describe("CandidateLoginPage", () => {
     it("submits valid credentials and triggers onSuccess callback", async () => {
       vi.mocked(candidateAuthApi.candidateLogin).mockResolvedValueOnce({
@@ -163,7 +209,7 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
 
       const emailInput = screen.getByLabelText(/Email Address/i);
       const passwordInput = screen.getByLabelText(/^Password/i);
-      const submitBtn = screen.getByRole("button", { name: /Sign In to Practice Portal/i });
+      const submitBtn = screen.getByRole("button", { name: /Sign In to Candidate Portal/i });
 
       fireEvent.change(emailInput, { target: { value: "candidate@example.com" } });
       fireEvent.change(passwordInput, { target: { value: "SecretPass123" } });
@@ -191,7 +237,7 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
 
       const emailInput = screen.getByLabelText(/Email Address/i);
       const passwordInput = screen.getByLabelText(/^Password/i);
-      const submitBtn = screen.getByRole("button", { name: /Sign In to Practice Portal/i });
+      const submitBtn = screen.getByRole("button", { name: /Sign In to Candidate Portal/i });
 
       fireEvent.change(emailInput, { target: { value: "candidate@example.com" } });
       fireEvent.change(passwordInput, { target: { value: "WrongPass" } });
@@ -204,7 +250,7 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
   });
 
   describe("CandidateShell", () => {
-    it("renders candidate portal branding and practice placeholder view", async () => {
+    it("renders candidate portal branding and navigation", async () => {
       render(
         <CandidateAuthProvider>
           <CandidateShell />
@@ -212,14 +258,13 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("No assigned practice sessions yet")).toBeInTheDocument();
+        expect(screen.getByText("Open Jobs")).toBeInTheDocument();
       });
-      expect(screen.getByText("Candidate Practice")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Sign out of Candidate Practice Portal/i })).toBeInTheDocument();
+      expect(screen.getByText("Candidate Portal")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Sign out of Candidate Portal/i })).toBeInTheDocument();
 
       // Ensure no staff navigation elements appear
-      expect(screen.queryByText(/Candidates/i)).not.toBeInTheDocument();
-      expect(screen.queryByText(/Jobs/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Candidates Directory/i)).not.toBeInTheDocument();
       expect(screen.queryByText(/ATS Integrations/i)).not.toBeInTheDocument();
     });
 
@@ -234,7 +279,7 @@ describe("Candidate Portal Authentication & Lifecycle", () => {
         </CandidateAuthProvider>
       );
 
-      const logoutBtn = screen.getByRole("button", { name: /Sign out of Candidate Practice Portal/i });
+      const logoutBtn = screen.getByRole("button", { name: /Sign out of Candidate Portal/i });
       fireEvent.click(logoutBtn);
 
       await waitFor(() => {

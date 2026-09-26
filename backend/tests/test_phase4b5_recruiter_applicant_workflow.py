@@ -63,6 +63,7 @@ from app.models.interview import AiInterviewQuestionSetRecord
 from app.models.job import (
     EmploymentType,
     JobLifecycleStatus,
+    JobPublicationStatus,
     JobRequisition,
     JobVersion,
     JobVersionStatus,
@@ -226,6 +227,7 @@ def setup_test_job(
         job_id=uuid.uuid4(),
         created_by_user_id=recruiter.user_id,
         status=status,
+        publication_status=JobPublicationStatus.RELEASED,
     )
     db.add(job)
     db.commit()
@@ -248,6 +250,11 @@ def setup_test_job(
         approved_at=datetime.now(timezone.utc),
     )
     db.add(jver)
+    db.flush()
+
+    job.released_job_version_id = jver.job_version_id
+    job.released_at = datetime.now(timezone.utc)
+    job.released_by_user_id = recruiter.user_id
     db.commit()
 
     return job, jver

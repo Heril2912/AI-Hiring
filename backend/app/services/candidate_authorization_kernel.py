@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.auth import (
@@ -50,10 +50,10 @@ class CandidatePrincipal:
     user_id: UUID
     role: str
     session_id: UUID
-    candidate_id: UUID
-    binding_id: UUID
-    organization_id: UUID
-    binding_status: str
+    candidate_id: Optional[UUID] = None
+    binding_id: Optional[UUID] = None
+    organization_id: Optional[UUID] = None
+    binding_status: Optional[str] = None
     must_change_password: bool = False
 
     @classmethod
@@ -61,16 +61,16 @@ class CandidatePrincipal:
         cls,
         user: UserRecord,
         session: UserSessionRecord,
-        binding: CandidateAccountBindingRecord,
+        binding: Optional[CandidateAccountBindingRecord] = None,
     ) -> "CandidatePrincipal":
         return cls(
             user_id=user.user_id,
             role=user.role.value if hasattr(user.role, "value") else str(user.role),
             session_id=session.session_id,
-            candidate_id=binding.candidate_id,
-            binding_id=binding.binding_id,
-            organization_id=binding.organization_id,
-            binding_status=binding.status,
+            candidate_id=binding.candidate_id if binding else None,
+            binding_id=binding.binding_id if binding else None,
+            organization_id=binding.organization_id if binding else None,
+            binding_status=binding.status if binding else None,
             must_change_password=bool(user.must_change_password),
         )
 
@@ -110,13 +110,13 @@ def authorize_view_own_profile(
     db: Session,
 ) -> None:
     """Enforces that candidate may only access their own profile."""
-    if principal.role != UserRole.CANDIDATE.value or principal.binding_status != CandidateBindingStatus.ACTIVE.value:
+    if principal.role != UserRole.CANDIDATE.value or (principal.binding_status and principal.binding_status != CandidateBindingStatus.ACTIVE.value):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "CANDIDATE_ACCESS_DENIED", "message": "Candidate account or binding is not active."},
         )
 
-    if principal.candidate_id != target_candidate_id:
+    if not principal.candidate_id or principal.candidate_id != target_candidate_id:
         _record_authz_audit(
             db=db,
             principal=principal,
@@ -307,6 +307,12 @@ def load_scoped_candidate_profile(
     version: Optional[int] = None,
 ) -> CandidateProfileRecord:
     """Loads CandidateProfileRecord for the authenticated candidate principal."""
+    if not principal.candidate_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "PROFILE_NOT_FOUND", "message": "Candidate profile not found."},
+        )
+
     stmt = (
         select(CandidateProfileRecord)
         .options(
@@ -336,13 +342,20 @@ def authorize_access_application(
     action: str = "ACCESS_APPLICATION",
 ) -> None:
     """Enforces ownership and binding status checks for candidate applications."""
-    if principal.role != UserRole.CANDIDATE.value or principal.binding_status != CandidateBindingStatus.ACTIVE.value:
+    if principal.role != UserRole.CANDIDATE.value or (principal.binding_status and principal.binding_status != CandidateBindingStatus.ACTIVE.value):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "CANDIDATE_ACCESS_DENIED", "message": "Candidate account or binding is not active."},
         )
 
-    if application.binding_id != principal.binding_id or application.candidate_id != principal.candidate_id:
+    # Ownership check: either matching user_id or matching binding_id
+    is_owner = False
+    if application.user_id and application.user_id == principal.user_id:
+        is_owner = True
+    elif principal.binding_id and application.binding_id == principal.binding_id:
+        is_owner = True
+
+    if not is_owner:
         _record_authz_audit(
             db=db,
             principal=principal,
@@ -351,7 +364,7 @@ def authorize_access_application(
             reason_code=AuditReasonCode.UNAUTHORIZED,
             resource_type="candidate_application",
             resource_id=str(application.application_id),
-            safe_metadata={"action": action, "denial": "OWNERSHIP_OR_BINDING_MISMATCH"},
+            safe_metadata={"action": action, "denial": "OWNERSHIP_MISMATCH"},
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -367,17 +380,21 @@ def load_scoped_candidate_application(
     action: str = "LOAD_APPLICATION",
 ) -> CandidateApplicationRecord:
     """Loads a CandidateApplicationRecord strictly scoped to the authenticated candidate principal."""
+    conditions = [CandidateApplicationRecord.user_id == principal.user_id]
+    if principal.binding_id:
+        conditions.append(CandidateApplicationRecord.binding_id == principal.binding_id)
+
     stmt = (
         select(CandidateApplicationRecord)
         .options(
             selectinload(CandidateApplicationRecord.job),
             selectinload(CandidateApplicationRecord.job_version),
             selectinload(CandidateApplicationRecord.profile),
+            selectinload(CandidateApplicationRecord.artifact),
         )
         .where(
             CandidateApplicationRecord.application_id == application_id,
-            CandidateApplicationRecord.binding_id == principal.binding_id,
-            CandidateApplicationRecord.candidate_id == principal.candidate_id,
+            or_(*conditions),
         )
     )
     if for_update:
@@ -392,4 +409,5 @@ def load_scoped_candidate_application(
 
     authorize_access_application(principal=principal, application=app_rec, db=db, action=action)
     return app_rec
+
 
