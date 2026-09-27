@@ -28,6 +28,7 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
   const [error, setError] = useState<string | null>(null);
   const [isUpdatingState, setIsUpdatingState] = useState<boolean>(false);
   const [isReleasing, setIsReleasing] = useState<boolean>(false);
+  const [showReleaseConfirm, setShowReleaseConfirm] = useState<boolean>(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   const loadDetail = async () => {
@@ -72,6 +73,7 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
     if (!detail) return;
     try {
       setIsReleasing(true);
+      setShowReleaseConfirm(false);
       setActionSuccess(null);
       setError(null);
       const res = await releaseApplicantInterview(
@@ -312,12 +314,12 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
         )}
       </div>
 
-      {/* AI Interview Release Section */}
+      {/* AI Interview Access & Release Section */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
             <Icon name="sparkles" size={18} className="text-blue-600" />
-            Approved AI Interview Release
+            Interview Access
           </h3>
           {onOpenAiInterviews && (
             <button
@@ -330,45 +332,139 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
           )}
         </div>
 
-        <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3 text-sm">
-          <div className="flex items-start justify-between">
+        <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-4 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="bg-white p-3 rounded border border-gray-200">
+              <span className="text-gray-500 block">Job Revision</span>
+              <strong className="text-gray-900 text-sm">Rev #{detail.jobRevision}</strong>
+            </div>
+            <div className="bg-white p-3 rounded border border-gray-200">
+              <span className="text-gray-500 block">Review Stage</span>
+              <strong className="text-gray-900 text-sm">{detail.recruiterReviewState}</strong>
+            </div>
+            <div className="bg-white p-3 rounded border border-gray-200">
+              <span className="text-gray-500 block">Approved Questions</span>
+              <strong className="text-gray-900 text-sm">{interviewEligibility.questionCount} Questions</strong>
+            </div>
+            <div className="bg-white p-3 rounded border border-gray-200">
+              <span className="text-gray-500 block">Official Status</span>
+              <strong className={interviewEligibility.existingReleaseId ? "text-emerald-700 text-sm font-semibold" : "text-gray-700 text-sm"}>
+                {interviewEligibility.existingReleaseId ? "RELEASED" : "NOT RELEASED"}
+              </strong>
+            </div>
+          </div>
+
+          <div className="flex items-start justify-between pt-2 border-t border-gray-200">
             <div>
-              <div className="font-medium text-gray-800">
-                Release Status:{" "}
-                <span className={interviewEligibility.existingReleaseId ? "text-emerald-700 font-semibold" : "text-gray-600"}>
-                  {interviewEligibility.existingReleaseId ? "RELEASED" : "NOT RELEASED"}
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">{interviewEligibility.message}</p>
+              <p className="text-xs text-gray-600">{interviewEligibility.message}</p>
             </div>
             {interviewEligibility.isEligible && (
               <button
                 type="button"
-                onClick={handleReleaseInterview}
+                onClick={() => setShowReleaseConfirm(true)}
                 disabled={isReleasing || isWithdrawn}
                 className="btn btn-primary btn-sm flex items-center gap-1.5"
               >
                 <Icon name="sparkles" size={14} />
-                {isReleasing ? "Releasing..." : "Release Interview"}
+                <span>Release Interview</span>
               </button>
             )}
           </div>
 
           {!interviewEligibility.isEligible && !interviewEligibility.existingReleaseId && (
-            <div className="text-xs text-amber-700 bg-amber-50 p-2.5 rounded border border-amber-200 mt-2 flex items-center gap-2">
+            <div className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200 flex items-center gap-2">
               <Icon name="alert-triangle" size={14} />
               <span>{interviewEligibility.message}</span>
             </div>
           )}
 
           {interviewEligibility.existingReleaseId && (
-            <div className="text-xs text-emerald-800 bg-emerald-50 p-2.5 rounded border border-emerald-200 mt-2 flex items-center gap-2">
-              <Icon name="check" size={14} />
-              <span>Interview released and available on Candidate Interviews portal.</span>
+            <div className="text-xs text-emerald-800 bg-emerald-50 p-3 rounded border border-emerald-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Icon name="check" size={16} />
+                <span>Interview released and active for candidate on Interviews portal.</span>
+              </div>
+              <span className="text-emerald-700 font-semibold uppercase text-[11px] tracking-wide">
+                Interview Released
+              </span>
             </div>
           )}
         </div>
       </div>
+
+      {/* Confirmation Dialog Modal */}
+      {showReleaseConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="release-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
+        >
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shrink-0">
+                <Icon name="sparkles" size={20} />
+              </div>
+              <div>
+                <h3 id="release-modal-title" className="text-base font-bold text-gray-900">
+                  Release Official Interview
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Application for {detail.candidateName}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 space-y-1.5 border border-gray-200">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Job Title:</span>
+                <span className="font-semibold text-gray-900">{detail.jobTitle}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Job Revision:</span>
+                <span className="font-semibold text-gray-900">Rev #{detail.jobRevision}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Approved Questions:</span>
+                <span className="font-semibold text-gray-900">{interviewEligibility.questionCount} Questions</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Releasing this official interview will freeze these exact approved questions to the candidate's application and make it available in their portal.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowReleaseConfirm(false)}
+                disabled={isReleasing}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm flex items-center gap-1.5"
+                onClick={handleReleaseInterview}
+                disabled={isReleasing}
+              >
+                {isReleasing ? (
+                  <>
+                    <Icon name="spinner" size={14} className="animate-spin" />
+                    <span>Releasing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="check" size={14} />
+                    <span>Confirm Release</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
     from app.models.interview import AiInterviewQuestionSetRecord, JobInterviewTemplateRecord
     from app.models.job import JobRequisition, JobVersion
+    from app.models.matching import MatchResultRecord
     from app.models.resume import ResumeArtifact
 
 
@@ -309,6 +310,15 @@ class CandidatePracticeReleaseRecord(Base):
         ),
         nullable=True,
     )
+    match_result_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "match_results.result_id",
+            ondelete="SET NULL",
+            name="fk_candidate_practice_releases_match_result_id",
+        ),
+        nullable=True,
+    )
     set_version: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -383,6 +393,9 @@ class CandidatePracticeReleaseRecord(Base):
     )
     ai_set: Mapped[Optional["AiInterviewQuestionSetRecord"]] = relationship(
         "AiInterviewQuestionSetRecord",
+    )
+    match_result: Mapped[Optional["MatchResultRecord"]] = relationship(
+        "MatchResultRecord",
     )
     sessions: Mapped[List["CandidatePracticeSessionRecord"]] = relationship(
         "CandidatePracticeSessionRecord",

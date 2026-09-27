@@ -140,6 +140,9 @@ def _get_match_evidence(job_id: UUID, profile_id: UUID, db: Session) -> Optional
     )
 
 
+from app.services.ai_provenance_service import evaluate_release_eligibility
+
+
 def _evaluate_interview_eligibility(
     application: CandidateApplicationRecord,
     db: Session,
@@ -170,11 +173,11 @@ def _evaluate_interview_eligibility(
         )
 
     # 2. Check application status
-    if application.status == CandidateApplicationStatus.WITHDRAWN.value:
+    if application.status != CandidateApplicationStatus.SUBMITTED.value:
         return RecruiterInterviewReleaseEligibilityDto(
             is_eligible=False,
-            reason_code="APPLICATION_WITHDRAWN",
-            message="Cannot release interview for a withdrawn application.",
+            reason_code="APPLICATION_NOT_SUBMITTED",
+            message="Cannot release interview for a non-submitted or withdrawn application.",
         )
 
     # 3. Check recruiter review state
@@ -216,6 +219,19 @@ def _evaluate_interview_eligibility(
             reason_code="NO_APPROVED_QUESTION_SET",
             message=f"No approved AI interview question set exists for submitted job revision (Rev #{application.job_revision}).",
         )
+
+    # 6. Provenance & Server Validation Check
+    if application.job_version:
+        prov_eval = evaluate_release_eligibility(ai_set=ai_set, target_job_version=application.job_version)
+        if not prov_eval.is_eligible:
+            return RecruiterInterviewReleaseEligibilityDto(
+                is_eligible=False,
+                reason_code=prov_eval.reason_code.value if prov_eval.reason_code else "PROVENANCE_INELIGIBLE",
+                message=prov_eval.safe_message or "Question set validation failed for release.",
+                question_set_id=ai_set.ai_set_id,
+                set_version=ai_set.set_version,
+                question_count=0,
+            )
 
     # Check question count
     items = ai_set.items or []
@@ -546,10 +562,20 @@ def release_interview_for_application(
             detail={"code": "APPLICATION_NOT_FOUND", "message": "Candidate application not found in this job context."},
         )
 
-    if app.status == CandidateApplicationStatus.WITHDRAWN.value:
+    if app.status != CandidateApplicationStatus.SUBMITTED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "APPLICATION_WITHDRAWN", "message": "Cannot release an interview for a withdrawn application."},
+            detail={"code": "APPLICATION_NOT_SUBMITTED", "message": "Cannot release an interview for a non-submitted or withdrawn application."},
+        )
+
+    # Check recruiter review state
+    if app.recruiter_review_state != RecruiterReviewState.INTERVIEW_READY.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "NOT_INTERVIEW_READY",
+                "message": f"Application review state is currently '{app.recruiter_review_state}'. Must be INTERVIEW_READY to release.",
+            },
         )
 
     # Check candidate binding
@@ -602,6 +628,18 @@ def release_interview_for_application(
             detail={"code": "NO_VALID_QUESTIONS", "message": "The approved question set contains no questions."},
         )
 
+    # Server-side validation and provenance check
+    if app.job_version:
+        prov_eval = evaluate_release_eligibility(ai_set=ai_set, target_job_version=app.job_version)
+        if not prov_eval.is_eligible:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": prov_eval.reason_code.value if prov_eval.reason_code else "PROVENANCE_INELIGIBLE",
+                    "message": prov_eval.safe_message or "Question set is not eligible for release.",
+                },
+            )
+
     now = datetime.now(timezone.utc)
 
     # Idempotency / duplicate check for exact release
@@ -646,6 +684,20 @@ def release_interview_for_application(
             existing_release.revoked_by_user_id = actor.user_id
             existing_release.revoked_at = now
 
+    # Look up existing compatible MatchResult if available
+    stmt_match = (
+        select(MatchResultRecord)
+        .join(MatchRunRecord, MatchResultRecord.run_id == MatchRunRecord.run_id)
+        .where(
+            MatchRunRecord.job_id == app.job_id,
+            MatchResultRecord.profile_id == app.profile_id,
+            MatchResultRecord.profile_version == app.profile_version,
+        )
+        .order_by(desc(MatchRunRecord.completed_at))
+    )
+    match_res = db.execute(stmt_match).scalars().first()
+    match_result_id = match_res.result_id if match_res else None
+
     # Create new release linked to this application
     new_release = CandidatePracticeReleaseRecord(
         release_id=uuid.uuid4(),
@@ -657,6 +709,7 @@ def release_interview_for_application(
         job_revision=app.job_revision,
         template_id=ai_set.template_id,
         ai_set_id=ai_set.ai_set_id,
+        match_result_id=match_result_id,
         set_version=ai_set.set_version,
         status=PracticeReleaseStatus.RELEASED.value,
         released_by_user_id=actor.user_id,
@@ -678,6 +731,7 @@ def release_interview_for_application(
             "job_id": str(job_id),
             "revision": app.job_revision,
             "ai_set_id": str(ai_set.ai_set_id),
+            "match_result_id": str(match_result_id) if match_result_id else None,
         },
     )
     db.commit()

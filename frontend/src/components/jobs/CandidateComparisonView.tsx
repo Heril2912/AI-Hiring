@@ -752,9 +752,10 @@ export function CandidateComparisonView({
                       const totalWeight = catContribs.reduce((sum, c) => sum + (c.weighted_contribution > 0 ? (c.effective_importance ? c.effective_importance * 100 : (c.configured_importance || 0)) : (c.configured_importance || 0)), 0);
                       const earned = catContribs.reduce((sum, c) => sum + (c.weighted_contribution || 0), 0);
                       const compObj = compScores[cat] || compScores[cat.toLowerCase()];
-                      const displayScore = compObj?.display_component_score !== undefined
-                        ? compObj.display_component_score
-                        : (typeof compObj === "number" ? compObj : (totalWeight > 0 ? Math.round((earned / totalWeight) * 100) : 0));
+                      const displayScore =
+                        typeof compObj === "object" && compObj !== null && (compObj as any).display_component_score !== undefined
+                          ? (compObj as any).display_component_score
+                          : (typeof compObj === "number" ? compObj : (totalWeight > 0 ? Math.round((earned / totalWeight) * 100) : 0));
                       return {
                         count: catContribs.length,
                         earned: Math.round(earned * 10) / 10,

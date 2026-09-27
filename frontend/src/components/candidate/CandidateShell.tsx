@@ -100,7 +100,7 @@ export function CandidateShell({ onLogout, initialTab = "jobs" }: CandidateShell
             aria-current={activeTab === "practice" ? "page" : undefined}
           >
             <Icon name="message-square" size={14} aria-hidden="true" />
-            <span>Practice Interviews</span>
+            <span>Interviews</span>
           </button>
         </nav>
 
