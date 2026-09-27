@@ -167,6 +167,9 @@ describe("Candidate Applications Lifecycle (Phase 4B.4)", () => {
           submittedAt: "2026-09-26T10:00:00Z",
           withdrawnAt: null,
           canWithdraw: true,
+          canSubmit: false,
+          createdAt: "2026-09-26T09:00:00Z",
+          updatedAt: "2026-09-26T10:00:00Z",
           job: sampleJobSummary1,
         },
         {
@@ -179,6 +182,9 @@ describe("Candidate Applications Lifecycle (Phase 4B.4)", () => {
           submittedAt: "2026-09-20T10:00:00Z",
           withdrawnAt: "2026-09-22T10:00:00Z",
           canWithdraw: false,
+          canSubmit: false,
+          createdAt: "2026-09-20T09:00:00Z",
+          updatedAt: "2026-09-22T10:00:00Z",
           job: sampleJobSummary2,
         },
       ],
@@ -216,6 +222,9 @@ describe("Candidate Applications Lifecycle (Phase 4B.4)", () => {
       submittedAt: "2026-09-26T10:00:00Z",
       withdrawnAt: null,
       canWithdraw: true,
+      canSubmit: false,
+      createdAt: "2026-09-26T09:00:00Z",
+      updatedAt: "2026-09-26T10:00:00Z",
       job: sampleJobSummary1,
     });
 
@@ -229,6 +238,9 @@ describe("Candidate Applications Lifecycle (Phase 4B.4)", () => {
       submittedAt: "2026-09-26T10:00:00Z",
       withdrawnAt: "2026-09-26T12:00:00Z",
       canWithdraw: false,
+      canSubmit: false,
+      createdAt: "2026-09-26T09:00:00Z",
+      updatedAt: "2026-09-26T12:00:00Z",
       job: sampleJobSummary1,
     });
 

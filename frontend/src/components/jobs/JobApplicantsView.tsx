@@ -209,7 +209,7 @@ export const JobApplicantsView: React.FC<JobApplicantsViewProps> = ({
                     </span>
                   </td>
                   <td className="py-3 px-4">
-                    {app.matchStatus === "Evaluated" && app.matchScore !== null ? (
+                    {app.matchStatus === "Evaluated" && app.matchScore !== null && app.matchScore !== undefined ? (
                       <span className="font-semibold text-purple-900">
                         {app.matchScore.toFixed(1)}% <span className="text-[10px] text-purple-600">({app.confidenceTier})</span>
                       </span>
