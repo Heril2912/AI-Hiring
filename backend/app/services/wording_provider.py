@@ -1003,7 +1003,7 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.2,
-            "max_tokens": min(self.profile.max_output_tokens, 2048),
+            "max_tokens": max(self.profile.max_output_tokens, 2048),
             "stream": False,
         }
 
@@ -1102,7 +1102,7 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
             "model": self.profile.model_identifier or "default",
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": min(self.profile.max_output_tokens, 2048),
+            "max_tokens": max(self.profile.max_output_tokens, 2048),
             "stream": False,
         }
 
@@ -1165,7 +1165,7 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
                 "model": self.profile.model_identifier or "default",
                 "messages": repair_msgs,
                 "temperature": 0.1,
-                "max_tokens": min(self.profile.max_output_tokens, 2048),
+                "max_tokens": max(self.profile.max_output_tokens, 2048),
                 "stream": False,
             }
             repair_resp = await self._send_bounded_request(chat_url, repair_payload)

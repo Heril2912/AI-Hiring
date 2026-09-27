@@ -649,4 +649,102 @@ async def retry_practice_report_endpoint(
     )
 
 
+# ==========================================
+# Phase 4C.2: Official Interview Endpoints
+# ==========================================
 
+from app.schemas.candidate_interview import (
+    CandidateInterviewSessionResponse,
+    CandidateSaveAnswerRequest,
+    CandidateSaveAnswerResponse,
+    CandidateSubmitInterviewRequest,
+    CandidateSubmitInterviewResponse,
+)
+from app.services.candidate_interview_service import (
+    get_interview_session,
+    save_interview_answer,
+    start_or_resume_interview_session,
+    submit_interview_session,
+)
+
+
+@router.post(
+    "/candidate/interviews/{release_id}/start",
+    response_model=CandidateInterviewSessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Start or Resume Official Interview Session",
+    description="Starts or resumes an official interview session for an approved, candidate-owned assignment release.",
+)
+async def start_or_resume_interview_session_endpoint(
+    release_id: UUID,
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+) -> CandidateInterviewSessionResponse:
+    return start_or_resume_interview_session(
+        candidate_user=cand_ctx.user,
+        release_id=release_id,
+        db=db,
+    )
+
+
+@router.get(
+    "/candidate/interviews/sessions/{session_id}",
+    response_model=CandidateInterviewSessionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Official Interview Session",
+    description="Retrieves the current official interview session state and saved answers for the authenticated candidate.",
+)
+async def get_interview_session_endpoint(
+    session_id: UUID,
+    cand_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+    db: Session = Depends(get_db),
+) -> CandidateInterviewSessionResponse:
+    return get_interview_session(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
+        db=db,
+    )
+
+
+@router.put(
+    "/candidate/interviews/sessions/{session_id}/answers/{slot_id}",
+    response_model=CandidateSaveAnswerResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Save Official Interview Answer",
+    description="Persists or updates a candidate's answer for a question slot in an in-progress official interview session.",
+)
+async def save_interview_answer_endpoint(
+    session_id: UUID,
+    slot_id: str,
+    payload: CandidateSaveAnswerRequest,
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+) -> CandidateSaveAnswerResponse:
+    return save_interview_answer(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
+        slot_id=slot_id,
+        payload=payload,
+        db=db,
+    )
+
+
+@router.post(
+    "/candidate/interviews/sessions/{session_id}/submit",
+    response_model=CandidateSubmitInterviewResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Submit Official Interview Session",
+    description="Atomically submits and locks an official interview session.",
+)
+async def submit_interview_session_endpoint(
+    session_id: UUID,
+    payload: CandidateSubmitInterviewRequest = CandidateSubmitInterviewRequest(),
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+) -> CandidateSubmitInterviewResponse:
+    return submit_interview_session(
+        candidate_user=cand_ctx.user,
+        session_id=session_id,
+        payload=payload,
+        db=db,
+    )

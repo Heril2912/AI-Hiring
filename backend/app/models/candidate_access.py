@@ -1641,4 +1641,245 @@ class CandidateApplicationRecord(Base):
     )
 
 
+class CandidateInterviewSessionRecord(Base):
+    __tablename__ = "candidate_interview_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('IN_PROGRESS', 'SUBMITTED')",
+            name="ck_candidate_interview_sessions_status",
+        ),
+        CheckConstraint(
+            "job_revision >= 1",
+            name="ck_candidate_interview_sessions_job_rev_positive",
+        ),
+        CheckConstraint(
+            "set_version >= 1",
+            name="ck_candidate_interview_sessions_set_ver_positive",
+        ),
+        CheckConstraint(
+            "length(snapshot_hash) = 64",
+            name="ck_candidate_interview_sessions_hash_length",
+        ),
+        Index("ix_candidate_interview_sessions_release_id", "release_id"),
+        Index("ix_candidate_interview_sessions_candidate_id", "candidate_id"),
+        Index("ix_candidate_interview_sessions_org_id", "organization_id"),
+        Index("ix_candidate_interview_sessions_status", "status"),
+    )
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    release_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_practice_releases.release_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_sessions_release_id",
+        ),
+        nullable=False,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_identities.identity_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_sessions_candidate_id",
+        ),
+        nullable=False,
+    )
+    application_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        nullable=True,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_requisitions.job_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_sessions_job_id",
+        ),
+        nullable=False,
+    )
+    job_version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_versions.job_version_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_sessions_job_version_id",
+        ),
+        nullable=False,
+    )
+    job_revision: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    ai_set_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "ai_interview_question_sets.ai_set_id",
+            ondelete="SET NULL",
+            name="fk_candidate_interview_sessions_ai_set_id",
+        ),
+        nullable=True,
+    )
+    set_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    snapshot_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    questions_snapshot: Mapped[List[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="IN_PROGRESS",
+        server_default=text("'IN_PROGRESS'"),
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    last_saved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    candidate: Mapped["CandidateIdentityRecord"] = relationship(
+        "CandidateIdentityRecord",
+    )
+    release: Mapped["CandidatePracticeReleaseRecord"] = relationship(
+        "CandidatePracticeReleaseRecord",
+    )
+    job: Mapped["JobRequisition"] = relationship(
+        "JobRequisition",
+    )
+    job_version: Mapped["JobVersion"] = relationship(
+        "JobVersion",
+    )
+    ai_set: Mapped[Optional["AiInterviewQuestionSetRecord"]] = relationship(
+        "AiInterviewQuestionSetRecord",
+    )
+    answers: Mapped[List["CandidateInterviewAnswerRecord"]] = relationship(
+        "CandidateInterviewAnswerRecord",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="CandidateInterviewAnswerRecord.answer_order",
+    )
+
+
+class CandidateInterviewAnswerRecord(Base):
+    __tablename__ = "candidate_interview_answers"
+    __table_args__ = (
+        CheckConstraint(
+            "question_format IN ('CONVERSATION', 'MCQ_SINGLE_ANSWER')",
+            name="ck_candidate_interview_answers_format",
+        ),
+        UniqueConstraint(
+            "session_id",
+            "slot_id",
+            name="uq_candidate_interview_answers_session_slot",
+        ),
+        Index("ix_candidate_interview_answers_session_id", "session_id"),
+        Index("ix_candidate_interview_answers_slot_id", "slot_id"),
+    )
+
+    answer_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_interview_sessions.session_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_answers_session_id",
+        ),
+        nullable=False,
+    )
+    slot_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    question_format: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+    text_answer: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    selected_option_id: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+    answer_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    is_skipped: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    saved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    session: Mapped["CandidateInterviewSessionRecord"] = relationship(
+        "CandidateInterviewSessionRecord",
+        back_populates="answers",
+    )
+
+
+
 
