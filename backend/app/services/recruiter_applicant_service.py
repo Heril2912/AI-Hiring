@@ -180,15 +180,7 @@ def _evaluate_interview_eligibility(
             message="Cannot release interview for a non-submitted or withdrawn application.",
         )
 
-    # 3. Check recruiter review state
-    if application.recruiter_review_state != RecruiterReviewState.INTERVIEW_READY.value:
-        return RecruiterInterviewReleaseEligibilityDto(
-            is_eligible=False,
-            reason_code="NOT_INTERVIEW_READY",
-            message=f"Application review state is currently '{application.recruiter_review_state}'. Move to 'INTERVIEW_READY' to enable release.",
-        )
-
-    # 4. Check candidate active account binding
+    # 3. Check candidate active account binding
     stmt_binding = select(CandidateAccountBindingRecord).where(
         CandidateAccountBindingRecord.candidate_id == application.candidate_id,
         CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
@@ -566,16 +558,6 @@ def release_interview_for_application(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "APPLICATION_NOT_SUBMITTED", "message": "Cannot release an interview for a non-submitted or withdrawn application."},
-        )
-
-    # Check recruiter review state
-    if app.recruiter_review_state != RecruiterReviewState.INTERVIEW_READY.value:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "NOT_INTERVIEW_READY",
-                "message": f"Application review state is currently '{app.recruiter_review_state}'. Must be INTERVIEW_READY to release.",
-            },
         )
 
     # Check candidate binding

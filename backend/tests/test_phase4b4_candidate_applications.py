@@ -412,7 +412,7 @@ def test_my_applications_and_cross_candidate_isolation(client, test_db):
 
 
 def test_candidate_withdrawal_lifecycle(client, test_db):
-    cand_user, cand_tok, _, _, _ = _seed_candidate_with_session(test_db)
+    cand_user, cand_tok, _, _, profile = _seed_candidate_with_session(test_db)
     rec_user, _, _ = _seed_staff_with_session(test_db)
     job, _ = _create_approved_job(test_db, rec_user.user_id)
 
@@ -433,13 +433,29 @@ def test_candidate_withdrawal_lifecycle(client, test_db):
     assert res_repeat.status_code == status.HTTP_200_OK
     assert res_repeat.json()["status"] == "WITHDRAWN"
 
+    # Recruiter candidate directory (/api/v1/resumes) excludes candidate after withdrawal
+    rec_client = client
+    rec_user, staff_tok, _ = _seed_staff_with_session(test_db, email="recruiter2@example.com")
+    rec_client.cookies.set("ai_hiring_session", staff_tok)
+    res_rec_resumes = rec_client.get("/api/v1/resumes")
+    assert res_rec_resumes.status_code == status.HTTP_200_OK
+    assert not any(item["artifactId"] == str(profile.artifact_id) for item in res_rec_resumes.json())
+
     # Reapplication is permitted because previous application is WITHDRAWN
+    client.cookies.set("ai_hiring_candidate_session", cand_tok)
     res_reapply = client.post(f"/api/v1/candidate/applications/jobs/{job.job_id}", json={})
     assert res_reapply.status_code == status.HTTP_201_CREATED
     new_app_id = res_reapply.json()["applicationId"]
     assert new_app_id != app_id
 
+    # Recruiter candidate directory now includes candidate again
+    rec_client.cookies.set("ai_hiring_session", staff_tok)
+    res_rec_resumes_after = rec_client.get("/api/v1/resumes")
+    assert res_rec_resumes_after.status_code == status.HTTP_200_OK
+    assert any(item["artifactId"] == str(profile.artifact_id) for item in res_rec_resumes_after.json())
+
     # My Applications shows both rows (historical withdrawn + new active submitted)
+    client.cookies.set("ai_hiring_candidate_session", cand_tok)
     res_my_apps = client.get("/api/v1/candidate/applications")
     assert res_my_apps.status_code == status.HTTP_200_OK
     assert res_my_apps.json()["total"] == 2

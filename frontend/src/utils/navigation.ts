@@ -82,6 +82,42 @@ export function validateInternalReturnUrl(url: string | null | undefined): strin
 }
 
 /**
+ * Validates a return URL specifically for candidate portal authentication redirects.
+ * Only permits safe internal candidate routes: /candidate/jobs, /candidate/applications,
+ * /candidate/interviews, /candidate/profile, or /candidate (optionally with safe query params).
+ */
+export function validateCandidateReturnUrl(url: string | null | undefined): string | null {
+  const sanitized = validateInternalReturnUrl(url);
+  if (!sanitized) {
+    return null;
+  }
+
+  // Extract the pathname from the sanitized relative URL
+  try {
+    const dummyOrigin = "http://localhost";
+    const parsed = new URL(sanitized, dummyOrigin);
+    const pathname = parsed.pathname.toLowerCase();
+
+    // Check if it's a valid candidate route (not login/register to avoid infinite loops)
+    const allowedPrefixes = [
+      "/candidate/jobs",
+      "/candidate/applications",
+      "/candidate/interviews",
+      "/candidate/profile",
+      "/candidate/activate",
+    ];
+
+    if (pathname === "/candidate" || allowedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix + "/"))) {
+      return sanitized;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Validates a return URL specifically for processed matching results or gap report context.
  * Confirms internal URL safety and returns the valid route or null.
  */

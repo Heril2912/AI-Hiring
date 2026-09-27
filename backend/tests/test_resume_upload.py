@@ -116,10 +116,13 @@ class MockDBSession:
 
         from app.models.resume import ResumeArtifact
         from app.models.candidate import CandidateProfileRecord
+        from app.models.candidate_access import CandidateApplicationRecord
 
         stmt_str = str(statement).lower()
         if "candidate_profiles" in stmt_str:
             records = [r for r in self.added_records if isinstance(r, CandidateProfileRecord)]
+        elif "candidate_applications" in stmt_str:
+            records = [r for r in self.added_records if isinstance(r, CandidateApplicationRecord)]
         else:
             records = [r for r in self.added_records if isinstance(r, ResumeArtifact)]
         return MockResult(records)

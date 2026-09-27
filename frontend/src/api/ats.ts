@@ -51,6 +51,7 @@ export async function triggerATSImport(
   payload: {
     is_dry_run: boolean;
     destination_job_id?: string;
+    destination_job_version_id?: string;
     preview_token?: string;
     preview_hash?: string;
     file_content_b64?: string;

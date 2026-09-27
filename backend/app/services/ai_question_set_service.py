@@ -304,11 +304,12 @@ def _build_canonical_generation_packet(
     else:
         org_id = uuid.UUID(str(raw_org))
 
+    raw_rev = getattr(job_version, "revision", None) or getattr(job_version, "version_number", None) or 1
     packet = CanonicalGenerationSourcePacket(
         organization_id=org_id,
         job_id=job.job_id,
         job_version_id=job_version.job_version_id,
-        job_revision=job_version.version_number,
+        job_revision=raw_rev,
         job_title=job_version.title or f"Job #{str(job.job_id)[:8]}",
         seniority_level=None,
         role_summary=job_version.summary,
@@ -326,7 +327,7 @@ def _build_canonical_generation_packet(
     internal_plan = {
         "job_id": str(job.job_id),
         "job_version_id": str(job_version.job_version_id),
-        "job_revision": job_version.version_number,
+        "job_revision": raw_rev,
         "job_title": packet.job_title,
         "fingerprint": fingerprint,
         "source_requirement_ids": [str(r.requirement_id) for r in selected_reqs],
@@ -511,11 +512,12 @@ def _map_record_to_detail_dto(
         ).where(JobRequisition.job_id == ai_set.job_id)
         job = db.execute(job_stmt).scalar_one_or_none()
         if job and job.versions:
-            latest_v = job.versions[-1]
+            latest_v = sorted(job.versions, key=lambda v: (getattr(v, "version_number", 0) or 0, getattr(v, "revision", 0) or 0))[-1]
+            target_v_rev = getattr(latest_v, "revision", None) or getattr(latest_v, "version_number", None) or 1
             # If revision number changed, it is definitely stale
-            if ai_set.job_revision and ai_set.job_revision != latest_v.version_number:
+            if ai_set.job_revision and ai_set.job_revision != target_v_rev:
                 is_stale = True
-                stale_reason = f"Job revision was updated from #{ai_set.job_revision} to #{latest_v.version_number}."
+                stale_reason = f"Job revision was updated from #{ai_set.job_revision} to #{target_v_rev}."
             else:
                 p, i_plan = _build_canonical_generation_packet(job, latest_v)
                 canon_fp = i_plan["fingerprint"]
@@ -561,7 +563,7 @@ def _map_record_to_detail_dto(
                 )
                 canon_6_fp = _compute_canonical_source_fingerprint(packet_6)
                 req_ids = [str(r.requirement_id) for r in (latest_v.requirements or [])]
-                legacy_fp = _compute_requirement_fingerprint(job.job_id, latest_v.job_version_id, latest_v.version_number, req_ids)
+                legacy_fp = _compute_requirement_fingerprint(job.job_id, latest_v.job_version_id, getattr(latest_v, "version_number", 1), req_ids)
                 if ai_set.source_content_hash not in (canon_fp, canon_6_fp, legacy_fp):
                     is_stale = True
                     stale_reason = "Job requirements were updated since AI question set generation."
@@ -659,13 +661,13 @@ def _map_record_to_detail_dto(
         ver = db.execute(stmt_ver).scalar_one_or_none()
         if ver and ver.title:
             job_title = ver.title
-            job_revision = ver.version_number
+            job_revision = getattr(ver, "revision", None) or getattr(ver, "version_number", None) or 1
     elif ai_set.job_id:
-        stmt_ver = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number))
+        stmt_ver = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number), desc(JobVersion.revision))
         ver = db.execute(stmt_ver).scalars().first()
         if ver and ver.title:
             job_title = ver.title
-            job_revision = ver.version_number
+            job_revision = getattr(ver, "revision", None) or getattr(ver, "version_number", None) or 1
 
     source_req_set_uuids = [
         UUID(rid) if isinstance(rid, str) else rid
@@ -680,7 +682,7 @@ def _map_record_to_detail_dto(
         stmt_ver = select(JobVersion).where(JobVersion.job_version_id == ver_id)
         target_job_ver = db.execute(stmt_ver).scalar_one_or_none()
     elif ai_set.job_id:
-        stmt_ver = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number))
+        stmt_ver = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number), desc(JobVersion.revision))
         target_job_ver = db.execute(stmt_ver).scalars().first()
 
     is_legacy = any(
@@ -817,7 +819,7 @@ def list_ai_question_sets(
             if ver and ver.title:
                 title = ver.title
         elif ai_set.job_id:
-            stmt_ver = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number))
+            stmt_ver = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number), desc(JobVersion.revision))
             ver = db.execute(stmt_ver).scalars().first()
             if ver and ver.title:
                 title = ver.title
@@ -1096,13 +1098,14 @@ async def generate_ai_questions_by_job_id(
         pass
 
     org_id = packet.organization_id
+    effective_rev = getattr(latest_version, "revision", None) or getattr(latest_version, "version_number", None) or 1
     new_set = AiInterviewQuestionSetRecord(
         ai_set_id=uuid.uuid4(),
         organization_id=org_id,
         template_id=None,
         job_id=job.job_id,
         job_version_id=latest_version.job_version_id,
-        job_revision=latest_version.version_number,
+        job_revision=effective_rev,
         source_mode="REQUIREMENT_GROUNDED",
         source_template_version=None,
         source_content_hash=canonical_fp,
@@ -1515,6 +1518,27 @@ def _ensure_editable_set(
     if not ai_set.is_immutable and ai_set.lifecycle_status != "APPROVED":
         return ai_set
 
+    # Resolve latest job version if available
+    job_ver_id = ai_set.job_version_id
+    job_rev = ai_set.job_revision
+    src_hash = ai_set.source_content_hash
+    if ai_set.source_mode == "REQUIREMENT_GROUNDED" and ai_set.job_id:
+        stmt_jv = select(JobVersion).where(JobVersion.job_id == ai_set.job_id).order_by(desc(JobVersion.version_number), desc(JobVersion.revision))
+        latest_jv = db.execute(stmt_jv).scalars().first()
+        if latest_jv:
+            job_ver_id = latest_jv.job_version_id
+            job_rev = getattr(latest_jv, "revision", None) or getattr(latest_jv, "version_number", None) or 1
+            # Recompute canonical hash for latest version
+            job_stmt = select(JobRequisition).options(
+                selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
+            ).where(JobRequisition.job_id == ai_set.job_id)
+            job_rec = db.execute(job_stmt).scalar_one_or_none()
+            if job_rec and latest_jv:
+                _, i_plan = _build_canonical_generation_packet(job_rec, latest_jv, actor=actor)
+                src_hash = i_plan.get("fingerprint", src_hash)
+    elif ai_set.source_mode == "BLUEPRINT_GROUNDED" and ai_set.template:
+        src_hash = ai_set.template.content_hash or src_hash
+
     # Branch successor draft
     next_version = ai_set.set_version + 1
     new_set = AiInterviewQuestionSetRecord(
@@ -1522,11 +1546,11 @@ def _ensure_editable_set(
         organization_id=ai_set.organization_id,
         template_id=ai_set.template_id,
         job_id=ai_set.job_id,
-        job_version_id=ai_set.job_version_id,
-        job_revision=ai_set.job_revision,
+        job_version_id=job_ver_id,
+        job_revision=job_rev,
         source_mode=ai_set.source_mode,
         source_template_version=ai_set.source_template_version,
-        source_content_hash=ai_set.source_content_hash,
+        source_content_hash=src_hash,
         source_requirement_ids=list(ai_set.source_requirement_ids or []),
         set_version=next_version,
         lifecycle_status="DRAFT",
@@ -1576,12 +1600,12 @@ async def generate_mcq_slots_for_template(
     items = list(editable_set.items or [])
     current_mcqs = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
 
-    if len(current_mcqs) + payload.count > 10:
+    if len(current_mcqs) + payload.count > 5:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "code": "MAX_MCQS_EXCEEDED",
-                "message": f"Adding {payload.count} MCQs would exceed maximum 10 MCQs allowed (currently {len(current_mcqs)}).",
+                "message": f"Adding {payload.count} MCQs would exceed maximum 5 MCQs allowed (currently {len(current_mcqs)}).",
             },
         )
 
@@ -1757,10 +1781,10 @@ def add_manual_mcq_slot(
     items = list(editable_set.items or [])
     current_mcqs = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
 
-    if len(current_mcqs) >= 10:
+    if len(current_mcqs) >= 5:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "MAX_MCQS_EXCEEDED", "message": "Maximum 10 multiple-choice questions permitted per question set."},
+            detail={"code": "MAX_MCQS_EXCEEDED", "message": "Maximum 5 multiple-choice questions permitted per question set."},
         )
 
     opts = [{"option_id": o.option_id, "text": o.text} for o in payload.options]
@@ -2060,9 +2084,10 @@ def validate_ai_question_set(
         ).where(JobRequisition.job_id == ai_set.job_id)
         job_rec = db.execute(job_stmt).scalar_one_or_none()
         if job_rec and job_rec.versions:
-            latest_v = job_rec.versions[-1]
-            if ai_set.job_revision and ai_set.job_revision != latest_v.version_number:
-                errors.append(f"AI question set is stale: job revision changed from #{ai_set.job_revision} to #{latest_v.version_number}. Please regenerate.")
+            latest_v = sorted(job_rec.versions, key=lambda v: (getattr(v, "version_number", 0) or 0, getattr(v, "revision", 0) or 0))[-1]
+            target_v_rev = getattr(latest_v, "revision", None) or getattr(latest_v, "version_number", None) or 1
+            if ai_set.job_revision and ai_set.job_revision != target_v_rev:
+                errors.append(f"AI question set is stale: job revision changed from #{ai_set.job_revision} to #{target_v_rev}. Please regenerate.")
             else:
                 p, i_plan = _build_canonical_generation_packet(job_rec, latest_v)
                 canon_fp = i_plan["fingerprint"]
@@ -2115,13 +2140,13 @@ def validate_ai_question_set(
     conv_items = [it for it in items if it.get("question_format") != "MCQ_SINGLE_ANSWER"]
     mcq_items = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
 
-    # 2. Composition Bounds (Max 5 conversational, Max 10 MCQs, Min 1 total)
+    # 2. Composition Bounds (Max 5 conversational, Max 5 MCQs, Min 1 total)
     if len(items) == 0:
         errors.append("Question set is empty. Add at least one conversational or multiple-choice question.")
     if len(conv_items) > 5:
         errors.append(f"Maximum 5 conversational questions allowed (currently {len(conv_items)}).")
-    if len(mcq_items) > 10:
-        errors.append(f"Maximum 10 multiple-choice questions allowed (currently {len(mcq_items)}).")
+    if len(mcq_items) > 5:
+        errors.append(f"Maximum 5 multiple-choice questions allowed (currently {len(mcq_items)}).")
 
     # 3. Conversational slot resolution check
     seen_conv_texts = set()
@@ -2363,13 +2388,14 @@ def prepare_practice_set_for_revision(
     else:
         # Create new set record in DRAFT status
         next_ver = (existing_set.set_version + 1) if existing_set else 1
+        target_rev_num = getattr(target_ver, "revision", None) or getattr(target_ver, "version_number", None) or 1
         target_set = AiInterviewQuestionSetRecord(
             ai_set_id=uuid.uuid4(),
             organization_id=old_set.organization_id,
             template_id=None,
             job_id=job.job_id,
             job_version_id=target_ver.job_version_id,
-            job_revision=target_ver.version_number,
+            job_revision=target_rev_num,
             source_mode="REQUIREMENT_GROUNDED",
             source_template_version=None,
             source_content_hash="",

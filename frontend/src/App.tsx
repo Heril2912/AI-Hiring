@@ -19,10 +19,11 @@ import { InterviewWorkspace } from "./components/interviews/InterviewWorkspace";
 import { SimulationWorkspace } from "./components/interviews/SimulationWorkspace";
 import { AiInterviewsDirectory } from "./components/ai_interviews/AiInterviewsDirectory";
 import { AiQuestionSetWorkspace } from "./components/ai_interviews/AiQuestionSetWorkspace";
+import { EvaluationWorkspace } from "./components/evaluation/EvaluationWorkspace";
 import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
-import { validateInternalReturnUrl, ComparisonNavigationState } from "./utils/navigation";
+import { validateInternalReturnUrl, validateCandidateReturnUrl, ComparisonNavigationState } from "./utils/navigation";
 import { getPortalContext, getCrossPortalUrl } from "./utils/portal";
 import { CandidateAuthProvider, useCandidateAuth } from "./context/CandidateAuthContext";
 import { CandidateRegisterPage } from "./components/candidate/CandidateRegisterPage";
@@ -30,7 +31,7 @@ import { CandidateLoginPage } from "./components/candidate/CandidateLoginPage";
 import { CandidateShell } from "./components/candidate/CandidateShell";
 
 // Re-export validation utility for direct callers and test assertions
-export { validateInternalReturnUrl };
+export { validateInternalReturnUrl, validateCandidateReturnUrl };
 
 type ConnectionState = "checking" | "connected" | "unavailable";
 
@@ -64,7 +65,7 @@ function AuthenticatedApp() {
     role === "ADMIN" ? "users" : role === "RECRUITER" ? "candidates" : "reviews"
   );
   const [activeView, setActiveView] = useState<
-    "jobs" | "new_job" | "edit_job" | "job_applicants" | "job_application_detail" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace" | "interview_simulation" | "ai_interviews" | "ai_interview_workspace"
+    "jobs" | "new_job" | "edit_job" | "job_applicants" | "job_application_detail" | "compare_candidates" | "gap_report" | "candidates" | "upload" | "profile" | "extraction" | "interview_workspace" | "interview_simulation" | "ai_interviews" | "ai_interview_workspace" | "evaluation"
   >("candidates");
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
@@ -189,6 +190,17 @@ function AuthenticatedApp() {
           setActiveView("ai_interviews");
         }
         setActiveNavTab("ai_interviews");
+      } else if (
+        window.location.pathname.startsWith("/evaluation") ||
+        tabParam === "evaluation" ||
+        tabParam === "evaluations" ||
+        viewParam === "evaluation"
+      ) {
+        setActiveView("evaluation");
+        setActiveNavTab("evaluation");
+        if (typeof window !== "undefined" && window.history?.replaceState) {
+          window.history.replaceState(null, "", "/evaluation");
+        }
       }
     } catch {
       // Ignore URL parsing errors in test environments
@@ -202,6 +214,16 @@ function AuthenticatedApp() {
     const returnUrlParam = searchParams?.get("returnUrl");
     const validReturn = validateInternalReturnUrl(returnUrlParam);
 
+    if (
+      window.location.pathname.startsWith("/evaluation") ||
+      tabParam === "evaluation" ||
+      tabParam === "evaluations" ||
+      viewParam === "evaluation"
+    ) {
+      setActiveNavTab("evaluation");
+      setActiveView("evaluation");
+      return;
+    }
     if (
       tabParam === "upload" ||
       viewParam === "upload" ||
@@ -374,6 +396,11 @@ function AuthenticatedApp() {
       setActiveView("ai_interviews");
       if (typeof window !== "undefined" && window.history?.pushState) {
         window.history.pushState(null, "", "/ai-interviews");
+      }
+    } else if (tab === "evaluation" || tab === "evaluations") {
+      setActiveView("evaluation");
+      if (typeof window !== "undefined" && window.history?.pushState) {
+        window.history.pushState(null, "", "/evaluation");
       }
     }
   };
@@ -700,7 +727,16 @@ function AuthenticatedApp() {
                       window.history.pushState(null, "", "/ai-interviews");
                     }
                   }}
+                  onOpenApplicants={(jobId, jobTitle) => {
+                    setSelectedJobId(jobId);
+                    setSelectedJobTitle(jobTitle);
+                    setActiveView("job_applicants");
+                  }}
                 />
+              )}
+
+              {activeView === "evaluation" && (
+                <EvaluationWorkspace />
               )}
             </>
           )}
@@ -712,29 +748,35 @@ function AuthenticatedApp() {
 
 function CandidateMainContent({ initialView }: { initialView?: "register" | "login" | "shell" }) {
   const { status } = useCandidateAuth();
-  const [activeView, setActiveView] = useState<"register" | "login" | "shell">(
-    initialView || (typeof window !== "undefined" && window.location.pathname.startsWith("/candidate/register") ? "register" : "shell")
+  const [pathname, setPathname] = useState<string>(
+    typeof window !== "undefined" ? window.location.pathname : "/candidate/jobs"
   );
 
-  if (activeView === "register") {
-    return (
-      <CandidateRegisterPage
-        onSuccess={() => {
-          setActiveView("shell");
-          if (typeof window !== "undefined" && window.history?.pushState) {
-            window.history.pushState(null, "", "/candidate");
-          }
-        }}
-        onNavigateLogin={() => {
-          setActiveView("login");
-          if (typeof window !== "undefined" && window.history?.pushState) {
-            window.history.pushState(null, "", "/candidate/login");
-          }
-        }}
-      />
-    );
-  }
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window !== "undefined") {
+        setPathname(window.location.pathname);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
+  const navigateCandidate = (path: string) => {
+    if (typeof window !== "undefined" && window.history?.pushState) {
+      window.history.pushState(null, "", path);
+      setPathname(path);
+    }
+  };
+
+  const getSafeReturnTo = (): string | null => {
+    if (typeof window === "undefined") return null;
+    const searchParams = new URLSearchParams(window.location.search);
+    const returnToParam = searchParams.get("returnTo");
+    return validateCandidateReturnUrl(returnToParam);
+  };
+
+  // 1. Session restoring state
   if (status === "RESTORING_SESSION") {
     return (
       <div className="auth-loading-splash" role="status" aria-live="polite">
@@ -744,32 +786,68 @@ function CandidateMainContent({ initialView }: { initialView?: "register" | "log
     );
   }
 
-  if (status === "UNAUTHENTICATED" || activeView === "login") {
+  // 2. Explicit Register page
+  const isRegisterPath = pathname === "/candidate/register" || initialView === "register";
+  if (isRegisterPath) {
+    if (status === "AUTHENTICATED") {
+      navigateCandidate("/candidate/jobs");
+      return <CandidateShell initialTab="jobs" onLogout={() => navigateCandidate("/candidate/login")} />;
+    }
     return (
-      <CandidateLoginPage
+      <CandidateRegisterPage
         onSuccess={() => {
-          setActiveView("shell");
-          if (typeof window !== "undefined" && window.history?.pushState) {
-            window.history.pushState(null, "", "/candidate");
-          }
+          const safeReturn = getSafeReturnTo();
+          navigateCandidate(safeReturn || "/candidate/jobs");
         }}
-        onNavigateRegister={() => {
-          setActiveView("register");
-          if (typeof window !== "undefined" && window.history?.pushState) {
-            window.history.pushState(null, "", "/candidate/register");
-          }
+        onNavigateLogin={() => {
+          const safeReturn = getSafeReturnTo();
+          const target = safeReturn ? `/candidate/login?returnTo=${encodeURIComponent(safeReturn)}` : "/candidate/login";
+          navigateCandidate(target);
         }}
       />
     );
   }
 
+  // 3. Unauthenticated or Login route
+  const isLoginPath = pathname === "/candidate/login" || initialView === "login";
+  if (status === "UNAUTHENTICATED" || isLoginPath) {
+    if (status === "AUTHENTICATED" && isLoginPath) {
+      const safeReturn = getSafeReturnTo();
+      navigateCandidate(safeReturn || "/candidate/jobs");
+      return <CandidateShell initialTab="jobs" onLogout={() => navigateCandidate("/candidate/login")} />;
+    }
+    return (
+      <CandidateLoginPage
+        onSuccess={() => {
+          const safeReturn = getSafeReturnTo();
+          navigateCandidate(safeReturn || "/candidate/jobs");
+        }}
+        onNavigateRegister={() => {
+          const safeReturn = getSafeReturnTo();
+          const target = safeReturn ? `/candidate/register?returnTo=${encodeURIComponent(safeReturn)}` : "/candidate/register";
+          navigateCandidate(target);
+        }}
+      />
+    );
+  }
+
+  // 4. Authenticated Candidate Shell
+  // Determine active tab from pathname
+  let initialTab: "jobs" | "applications" | "interviews" | "profile" = "jobs";
+  if (pathname.startsWith("/candidate/applications")) {
+    initialTab = "applications";
+  } else if (pathname.startsWith("/candidate/interviews")) {
+    initialTab = "interviews";
+  } else if (pathname.startsWith("/candidate/profile")) {
+    initialTab = "profile";
+  }
+
   return (
     <CandidateShell
+      key={initialTab}
+      initialTab={initialTab}
       onLogout={() => {
-        setActiveView("login");
-        if (typeof window !== "undefined" && window.history?.pushState) {
-          window.history.pushState(null, "", "/candidate/login");
-        }
+        navigateCandidate("/candidate/login");
       }}
     />
   );
@@ -799,10 +877,20 @@ function MainContent() {
 }
 
 export function App() {
-  const [pathname] = useState<string>(
+  const [pathname, setPathname] = useState<string>(
     typeof window !== "undefined" ? window.location.pathname : "/"
   );
   const portal = getPortalContext();
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window !== "undefined") {
+        setPathname(window.location.pathname);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   const isCandidateRoute =
     portal === "candidate" ||
@@ -810,9 +898,10 @@ export function App() {
 
   if (isCandidateRoute) {
     const isRegister = pathname.startsWith("/candidate/register");
+    const isLogin = pathname.startsWith("/candidate/login");
     return (
       <CandidateAuthProvider>
-        <CandidateMainContent initialView={isRegister ? "register" : undefined} />
+        <CandidateMainContent initialView={isRegister ? "register" : isLogin ? "login" : undefined} />
       </CandidateAuthProvider>
     );
   }

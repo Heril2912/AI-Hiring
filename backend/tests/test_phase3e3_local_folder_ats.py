@@ -123,7 +123,7 @@ def setup_test_data(test_db: Session):
         revision=1,
         title="Senior Backend Systems Engineer",
         department="Engineering",
-        version_status=JobVersionStatus.DRAFT,
+        version_status=JobVersionStatus.READY_FOR_MATCHING,
     )
     test_db.add_all([job_req, job_ver])
 

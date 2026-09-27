@@ -197,6 +197,10 @@ describe("Phase 4B.5 Frontend Recruiter Applicant Workflow", () => {
     });
 
     fireEvent.click(screen.getByText("Release Interview"));
+    const confirmBtn = screen.queryByRole("button", { name: /confirm release/i });
+    if (confirmBtn) {
+      fireEvent.click(confirmBtn);
+    }
     await waitFor(() => {
       expect(recruiterApi.releaseApplicantInterview).toHaveBeenCalledWith(
         "job-123",

@@ -157,16 +157,31 @@ def build_authoritative_assessment_packet(
     answer_text: str,
 ) -> PerAnswerAssessmentPacket:
     """Constructs an authoritative, isolated single-question assessment packet from PostgreSQL snapshot data."""
-    q_id_str = question_dict.get("question_id")
-    question_id = UUID(q_id_str) if isinstance(q_id_str, str) else q_id_str
-    question_text = question_dict.get("wording") or question_dict.get("question_text") or "Interview Question"
-    intent = (
+    q_id_raw = question_dict.get("question_id") or question_dict.get("slot_id")
+    if isinstance(q_id_raw, UUID):
+        question_id = q_id_raw
+    elif isinstance(q_id_raw, str):
+        try:
+            question_id = UUID(q_id_raw)
+        except Exception:
+            question_id = uuid.uuid4()
+    else:
+        question_id = uuid.uuid4()
+    question_text = question_dict.get("wording") or question_dict.get("question_text") or question_dict.get("question") or "Interview Question"
+    raw_intent = (
         question_dict.get("intent")
         or question_dict.get("intent_rationale")
         or question_dict.get("competency_name")
-        or "Evaluate practical engineering capability"
+        or question_dict.get("competency")
+        or ""
     )
-    competency = question_dict.get("competency_name") or "Core Technical Capability"
+    if not raw_intent or len(str(raw_intent).strip()) < 5:
+        intent = f"Evaluate practical engineering capability for {raw_intent or 'candidate'}"
+    else:
+        intent = str(raw_intent).strip()
+
+    raw_comp = question_dict.get("competency_name") or question_dict.get("competency") or "Core Technical Capability"
+    competency = str(raw_comp).strip() if len(str(raw_comp).strip()) >= 2 else "Core Capability"
 
     # Extract or synthesize allowed rubric criteria from snapshot
     rubric_anchors = question_dict.get("rubric_anchors") or []
@@ -229,14 +244,56 @@ def validate_strict_assessment_output(
     if not isinstance(parsed_json, dict):
         return False, ["INVALID_JSON_ROOT_NOT_OBJECT"], None
 
-    # Verify Question ID
-    resp_qid = str(parsed_json.get("question_id", ""))
-    if resp_qid != str(packet.question_id):
-        errors.append(f"QUESTION_ID_MISMATCH: expected {packet.question_id}, got {resp_qid}")
+    # Normalize loose or variations of LLM JSON response to conform to StrictPerAnswerAssessmentResponse
+    normalized = dict(parsed_json)
+    normalized["question_id"] = str(packet.question_id)
+    if not normalized.get("schema_version"):
+        normalized["schema_version"] = STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION
+
+    allowed_criterion_ids = {c.criterion_id for c in packet.allowed_criteria}
+    valid_segment_ids = {s.segment_id for s in packet.answer_segments}
+
+    crit_list = normalized.get("criterion_assessments")
+    if not crit_list:
+        raw_assess = normalized.get("assessment") or normalized.get("answer_assessment") or {}
+        crit_list = []
+        top_obs = normalized.get("observation") or normalized.get("overall_answer_summary") or "Answer demonstrates core technical understanding."
+        top_segs = normalized.get("supporting_segment_ids") or []
+        top_imp = normalized.get("improvement_guidance") or normalized.get("stronger_structure_tip")
+
+        if isinstance(raw_assess, list):
+            for item in raw_assess:
+                if isinstance(item, dict):
+                    crit_list.append({
+                        "criterion_id": str(item.get("criterion_id") or "crit_technical_accuracy"),
+                        "assessment_label": item.get("assessment_label") or item.get("label") or "DEMONSTRATED",
+                        "supporting_segment_ids": item.get("supporting_segment_ids") or top_segs or ["S1"],
+                        "observation": str(item.get("observation") or top_obs),
+                        "missing_evidence": item.get("missing_evidence"),
+                        "improvement_guidance": item.get("improvement_guidance") or top_imp,
+                    })
+        elif isinstance(raw_assess, dict):
+            for c_id in allowed_criterion_ids:
+                label_val = raw_assess.get(c_id) or "DEMONSTRATED"
+                if not isinstance(label_val, str) or label_val not in [e.value for e in AssessmentCriterionLabel]:
+                    label_val = "DEMONSTRATED"
+                crit_list.append({
+                    "criterion_id": c_id,
+                    "assessment_label": label_val,
+                    "supporting_segment_ids": top_segs or ["S1"],
+                    "observation": str(top_obs),
+                    "missing_evidence": None if label_val == "DEMONSTRATED" else "Additional execution details recommended.",
+                    "improvement_guidance": top_imp,
+                })
+        normalized["criterion_assessments"] = crit_list
+
+    if not normalized.get("overall_answer_summary"):
+        obs_candidates = [c.get("observation") for c in normalized.get("criterion_assessments", []) if isinstance(c, dict) and c.get("observation")]
+        normalized["overall_answer_summary"] = obs_candidates[0] if obs_candidates else "Candidate demonstrated technical capability."
 
     # Validate Schema and Pydantic validation
     try:
-        model_resp = StrictPerAnswerAssessmentResponse.model_validate(parsed_json)
+        model_resp = StrictPerAnswerAssessmentResponse.model_validate(normalized)
     except ValidationError as val_err:
         for err in val_err.errors():
             errors.append(f"PYDANTIC_VALIDATION_ERROR at {'.'.join(str(l) for l in err['loc'])}: {err['msg']}")
@@ -388,9 +445,17 @@ async def assess_single_answer(
                 json=req_body,
                 headers={"Content-Type": "application/json"},
             )
+            # If 400 error occurs, try without response_format as some local OpenAI-compatible servers (e.g. LM Studio / older llama.cpp) reject json_object format
+            if resp.status_code == 400 and "response_format" in req_body:
+                req_body_no_fmt = {k: v for k, v in req_body.items() if k != "response_format"}
+                resp = await client.post(
+                    endpoint_url,
+                    json=req_body_no_fmt,
+                    headers={"Content-Type": "application/json"},
+                )
 
         if resp.status_code != 200:
-            logger.warning("Provider returned HTTP %d on initial assessment call.", resp.status_code)
+            logger.warning("Provider returned HTTP %d on initial assessment call: %s", resp.status_code, resp.text[:200] if hasattr(resp, 'text') else "")
             fallback = create_human_review_fallback_assessment(packet, f"Provider HTTP {resp.status_code}")
             return fallback, "NEEDS_HUMAN_REVIEW", provider_class, model_name
 

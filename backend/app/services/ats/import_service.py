@@ -30,6 +30,7 @@ from app.models.ats import (
     ATSSyncCheckpointRecord,
 )
 from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
+from app.models.candidate_access import CandidateApplicationRecord
 from app.models.job import (
     JobLifecycleStatus,
     JobRequisition,
@@ -575,19 +576,57 @@ class ATSImportService:
             raise ValueError("A destination job must be selected before scanning or importing folder resumes.")
 
         job_req = self.db.execute(
-            select(JobRequisition).where(JobRequisition.job_id == destination_job_id)
+            select(JobRequisition).where(
+                JobRequisition.job_id == destination_job_id,
+                JobRequisition.deleted_at.is_(None),
+            )
         ).scalar_one_or_none()
 
         if not job_req:
             raise ValueError("Selected destination job was not found or is unavailable.")
 
-        # Get latest job title
-        latest_version = self.db.execute(
-            select(JobVersion)
-            .where(JobVersion.job_id == destination_job_id)
-            .order_by(JobVersion.version_number.desc())
-        ).scalars().first()
-        job_title = latest_version.title if latest_version else "Untitled Job Requisition"
+        if job_req.status == JobLifecycleStatus.ARCHIVED:
+            raise ValueError("Cannot import candidates into an archived job.")
+
+        # Find target job version
+        target_version: Optional[JobVersion] = None
+        if request.destination_job_version_id:
+            target_version = self.db.execute(
+                select(JobVersion).where(
+                    JobVersion.job_version_id == request.destination_job_version_id,
+                    JobVersion.job_id == destination_job_id,
+                )
+            ).scalar_one_or_none()
+            if not target_version:
+                raise ValueError("Specified destination job revision was not found.")
+        else:
+            # Pick latest ready or approved version
+            target_version = self.db.execute(
+                select(JobVersion)
+                .where(
+                    JobVersion.job_id == destination_job_id,
+                    JobVersion.version_status.in_([JobVersionStatus.READY_FOR_MATCHING, JobVersionStatus.APPROVED]),
+                )
+                .order_by(JobVersion.version_number.desc())
+            ).scalars().first()
+
+            if not target_version:
+                # Fallback to latest version
+                target_version = self.db.execute(
+                    select(JobVersion)
+                    .where(JobVersion.job_id == destination_job_id)
+                    .order_by(JobVersion.version_number.desc())
+                ).scalars().first()
+
+        if not target_version:
+            raise ValueError("Selected destination job has no valid version.")
+
+        if target_version.version_status == JobVersionStatus.DRAFT:
+            raise ValueError("Target job revision is still in DRAFT status and is not eligible for import.")
+
+        job_title = target_version.title or "Untitled Job Requisition"
+        job_version_id = target_version.job_version_id
+        job_revision = target_version.revision
 
         adapter = LocalFolderATSAdapter()
         settings = get_settings()
@@ -756,6 +795,7 @@ class ATSImportService:
                 "organization_id": str(organization_id),
                 "connection_id": str(connection.connection_id),
                 "destination_job_id": str(destination_job_id),
+                "destination_job_version_id": str(job_version_id),
                 "user_id": str(user_id),
                 "files": [{"ext_id": itm["external_id"], "hash": itm["content_hash"], "status": itm["status"]} for itm in preview_files_meta],
                 "expires_at": expires_at.isoformat(),
@@ -773,7 +813,9 @@ class ATSImportService:
             run.summary_json = {
                 "is_dry_run": True,
                 "destination_job_id": str(destination_job_id),
+                "destination_job_version_id": str(job_version_id),
                 "destination_job_title": job_title,
+                "destination_job_revision": job_revision,
                 "preview_hash": preview_hash,
                 "preview_token": preview_token,
                 "expires_at": expires_at.isoformat(),
@@ -1029,6 +1071,37 @@ class ATSImportService:
                 )
                 self.db.add(new_mapping)
 
+                # Check if CandidateApplicationRecord already exists for this job revision and candidate
+                existing_app = self.db.execute(
+                    select(CandidateApplicationRecord).where(
+                        CandidateApplicationRecord.organization_id == organization_id,
+                        CandidateApplicationRecord.job_id == destination_job_id,
+                        CandidateApplicationRecord.job_version_id == job_version_id,
+                        CandidateApplicationRecord.candidate_id == identity_id,
+                    )
+                ).scalar_one_or_none()
+
+                if not existing_app:
+                    app_record = CandidateApplicationRecord(
+                        application_id=uuid4(),
+                        organization_id=organization_id,
+                        user_id=None,
+                        binding_id=None,
+                        candidate_id=identity_id,
+                        job_id=destination_job_id,
+                        job_version_id=job_version_id,
+                        job_revision=job_revision,
+                        artifact_id=artifact_id,
+                        profile_id=profile.profile_id if profile else None,
+                        profile_version=profile.profile_version if profile else 1,
+                        status="SUBMITTED",
+                        recruiter_review_state="RECEIVED",
+                        submission_source="ATS_IMPORT",
+                        idempotency_key=f"ats_import:{connection.connection_id}:{itm.external_id}:{job_version_id}",
+                        submitted_at=datetime.now(timezone.utc),
+                    )
+                    self.db.add(app_record)
+
                 successful_count += 1
                 item_results.append(
                     ATSImportItemResultRecord(
@@ -1074,7 +1147,9 @@ class ATSImportService:
         run.summary_json = {
             "is_dry_run": False,
             "destination_job_id": str(destination_job_id),
+            "destination_job_version_id": str(job_version_id),
             "destination_job_title": job_title,
+            "destination_job_revision": job_revision,
             "preview_hash": request.preview_hash,
             "successful_count": successful_count,
             "duplicate_count": duplicate_count,
