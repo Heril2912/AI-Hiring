@@ -53,7 +53,7 @@ export function CandidateInterviewWorkspace({
       setMcqDraft(activeQuestion.saved_selected_option_id || "");
       setSaveState("idle");
     }
-  }, [currentQuestionIndex, session?.questions]);
+  }, [currentQuestionIndex, activeQuestion?.slot_id]);
 
   // Initial load / fetch
   useEffect(() => {
@@ -107,6 +107,14 @@ export function CandidateInterviewWorkspace({
     }
   };
 
+  const isConversationalQuestion = (q?: CandidateInterviewQuestionDto): boolean => {
+    if (!q) return true;
+    const fmt = (q.question_format || "").toUpperCase();
+    if (fmt === "MCQ" || fmt === "MCQ_SINGLE_ANSWER") return false;
+    if (q.options && q.options.length > 0) return false;
+    return true;
+  };
+
   const handleSaveAnswer = async (
     customText?: string,
     customMcq?: string
@@ -115,10 +123,11 @@ export function CandidateInterviewWorkspace({
 
     const t = customText !== undefined ? customText : textDraft;
     const m = customMcq !== undefined ? customMcq : mcqDraft;
+    const isConv = isConversationalQuestion(activeQuestion);
 
     const payload = {
-      text_answer: activeQuestion.question_format === "CONVERSATIONAL" ? t : undefined,
-      selected_option_id: activeQuestion.question_format === "MCQ" ? m : undefined,
+      text_answer: isConv ? t : undefined,
+      selected_option_id: !isConv ? m : undefined,
     };
 
     try {
@@ -180,14 +189,14 @@ export function CandidateInterviewWorkspace({
 
   const handleReviewClick = async () => {
     // Optionally save current question first if modified
-    if (
-      activeQuestion &&
-      ((activeQuestion.question_format === "CONVERSATIONAL" &&
-        textDraft !== (activeQuestion.saved_text_answer || "")) ||
-        (activeQuestion.question_format === "MCQ" &&
-          mcqDraft !== (activeQuestion.saved_selected_option_id || "")))
-    ) {
-      await handleSaveAnswer();
+    if (activeQuestion) {
+      const isConv = isConversationalQuestion(activeQuestion);
+      if (
+        (isConv && textDraft !== (activeQuestion.saved_text_answer || "")) ||
+        (!isConv && mcqDraft !== (activeQuestion.saved_selected_option_id || ""))
+      ) {
+        await handleSaveAnswer();
+      }
     }
     setCurrentView("review");
   };
@@ -604,11 +613,13 @@ export function CandidateInterviewWorkspace({
           {session.questions.map((q, idx) => {
             const hasAnswer = q.is_answered;
             let previewText = "No answer recorded";
-            if (q.question_format === "CONVERSATIONAL" && q.saved_text_answer) {
+            if (isConversationalQuestion(q) && q.saved_text_answer) {
               previewText = q.saved_text_answer;
-            } else if (q.question_format === "MCQ" && q.saved_selected_option_id) {
-              const opt = q.options.find((o) => o.option_id === q.saved_selected_option_id);
-              previewText = opt ? `Selected: ${opt.label}` : "Option selected";
+            } else if (!isConversationalQuestion(q) && q.saved_selected_option_id) {
+              const opt = (q.options || []).find(
+                (o) => (o.option_id || o.id) === q.saved_selected_option_id
+              );
+              previewText = opt ? `Selected: ${opt.label || opt.text || opt.option_id || opt.id}` : "Option selected";
             }
 
             return (
@@ -868,7 +879,7 @@ export function CandidateInterviewWorkspace({
         </h2>
 
         {/* Answer Input depending on Question Format */}
-        {activeQuestion.question_format === "CONVERSATIONAL" ? (
+        {isConversationalQuestion(activeQuestion) ? (
           <div>
             <label
               htmlFor={`answer-text-${activeQuestion.slot_id}`}
@@ -915,12 +926,14 @@ export function CandidateInterviewWorkspace({
               </legend>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {activeQuestion.options.map((option) => {
-                  const isChecked = mcqDraft === option.option_id;
+                {(activeQuestion.options || []).map((option) => {
+                  const optId = option.option_id || option.id || "";
+                  const optLabel = option.label || option.text || optId;
+                  const isChecked = mcqDraft === optId;
                   return (
                     <label
-                      key={option.option_id}
-                      htmlFor={`opt-${option.option_id}`}
+                      key={optId}
+                      htmlFor={`opt-${optId}`}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -937,15 +950,15 @@ export function CandidateInterviewWorkspace({
                     >
                       <input
                         type="radio"
-                        id={`opt-${option.option_id}`}
+                        id={`opt-${optId}`}
                         name={`question-mcq-${activeQuestion.slot_id}`}
-                        value={option.option_id}
+                        value={optId}
                         checked={isChecked}
-                        onChange={() => setMcqDraft(option.option_id)}
+                        onChange={() => setMcqDraft(optId)}
                         style={{ accentColor: "#2563eb" }}
                       />
                       <span style={{ fontSize: "14px", color: "var(--text-primary, #0f172a)" }}>
-                        {option.label}
+                        {optLabel}
                       </span>
                     </label>
                   );

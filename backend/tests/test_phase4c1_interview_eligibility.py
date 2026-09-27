@@ -331,26 +331,8 @@ def test_phase4c1_interview_eligibility_and_release(client, test_db):
     app_a_id = res.json()["applicationId"]
     client.cookies.clear()
 
-    # 1. Rejection for non-interview ready application
+    # 1. Rejection when no approved question set exists
     client.cookies.set("ai_hiring_session", recruiter_1_token)
-    res_rel_not_ready = client.post(
-        f"/api/v1/jobs/{job_1.job_id}/applications/{app_a_id}/release-interview",
-        json={},
-    )
-    assert res_rel_not_ready.status_code == status.HTTP_400_BAD_REQUEST
-    assert res_rel_not_ready.json()["detail"]["code"] == "NOT_INTERVIEW_READY"
-
-    # Move application to IN_REVIEW -> INTERVIEW_READY
-    client.patch(
-        f"/api/v1/jobs/{job_1.job_id}/applications/{app_a_id}/review-state",
-        json={"newState": "IN_REVIEW"},
-    )
-    client.patch(
-        f"/api/v1/jobs/{job_1.job_id}/applications/{app_a_id}/review-state",
-        json={"newState": "INTERVIEW_READY"},
-    )
-
-    # 2. Rejection when no approved question set exists
     res_no_set = client.post(
         f"/api/v1/jobs/{job_1.job_id}/applications/{app_a_id}/release-interview",
         json={},
@@ -440,6 +422,6 @@ def test_phase4c1_interview_eligibility_and_release(client, test_db):
         )
     ).scalar_one()
     assert app_db.status == CandidateApplicationStatus.SUBMITTED.value
-    assert app_db.recruiter_review_state == RecruiterReviewState.INTERVIEW_READY.value
+    assert app_db.recruiter_review_state == RecruiterReviewState.RECEIVED.value
     assert app_db.job_revision == 1
     assert app_db.profile_version == 1

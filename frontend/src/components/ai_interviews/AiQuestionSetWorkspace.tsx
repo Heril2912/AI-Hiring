@@ -11,11 +11,14 @@ import {
 import { SafeRubricModal } from "./SafeRubricModal";
 import { McqAuthoringModal, McqFormData } from "./McqAuthoringModal";
 import { CandidateSafePreviewModal } from "./CandidateSafePreviewModal";
+import { ReleaseInterviewSetModal } from "./ReleaseInterviewSetModal";
+import { fetchJobApplicants } from "../../api/recruiterApplications";
 import "./ai-interviews.css";
 
 interface AiQuestionSetWorkspaceProps {
   templateId: string;
   onNavigateBack: () => void;
+  onOpenApplicants?: (jobId: string, jobTitle: string) => void;
 }
 
 type WorkspaceTab = "CONVERSATIONAL" | "MCQ";
@@ -23,6 +26,7 @@ type WorkspaceTab = "CONVERSATIONAL" | "MCQ";
 export function AiQuestionSetWorkspace({
   templateId,
   onNavigateBack,
+  onOpenApplicants,
 }: AiQuestionSetWorkspaceProps) {
   const [detail, setDetail] = useState<AiQuestionSetDetail | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("CONVERSATIONAL");
@@ -36,6 +40,10 @@ export function AiQuestionSetWorkspace({
   const [isGeneratingMcqs, setIsGeneratingMcqs] = useState<boolean>(false);
   const [validationResult, setValidationResult] = useState<AiQuestionSetValidateResult | null>(null);
   const [activeRubric, setActiveRubric] = useState<{ rubric: SafeRubricDto; competencyName: string } | null>(null);
+
+  // Release Set Modal State & Stats
+  const [isReleaseModalOpen, setIsReleaseModalOpen] = useState<boolean>(false);
+  const [releaseStats, setReleaseStats] = useState<{ eligibleCount: number; releasedCount: number } | null>(null);
 
   // Edit wording state for conversational questions
   const [isEditingWording, setIsEditingWording] = useState<boolean>(false);
@@ -55,6 +63,7 @@ export function AiQuestionSetWorkspace({
 
   const [showProvenanceDrawer, setShowProvenanceDrawer] = useState<boolean>(false);
   const [isRegeneratingLegacy, setIsRegeneratingLegacy] = useState<boolean>(false);
+  const [isRegeneratingStale, setIsRegeneratingStale] = useState<boolean>(false);
 
   // Ref to return focus to rubric button after closing modal
   const viewRubricBtnRef = useRef<HTMLButtonElement>(null);
@@ -133,6 +142,27 @@ export function AiQuestionSetWorkspace({
       .replace(/\b\w/g, (c) => c.toUpperCase());
   };
 
+  const loadReleaseStats = async (jobId: string, jobRev: number) => {
+    try {
+      const res = await fetchJobApplicants(jobId, { limit: 100 });
+      const items = res.items || [];
+      const eligible = items.filter(
+        (a) =>
+          a.status === "SUBMITTED" &&
+          a.recruiterReviewState === "INTERVIEW_READY" &&
+          a.jobRevision === jobRev &&
+          a.interviewStatus !== "RELEASED" &&
+          !a.releaseId
+      ).length;
+      const released = items.filter(
+        (a) => a.jobRevision === jobRev && (a.interviewStatus === "RELEASED" || Boolean(a.releaseId))
+      ).length;
+      setReleaseStats({ eligibleCount: eligible, releasedCount: released });
+    } catch {
+      // Ignore background stats fetch errors
+    }
+  };
+
   const loadQuestionSet = async (isInitial = false) => {
     try {
       if (isInitial) setIsLoading(true);
@@ -144,6 +174,9 @@ export function AiQuestionSetWorkspace({
       );
       if (convSlots.length > 0) {
         setEditedWordingText(convSlots[activeSlotIndex]?.ai_wording || "");
+      }
+      if ((res.lifecycle_status === "APPROVED" || res.is_immutable) && res.job_id) {
+        loadReleaseStats(res.job_id, res.job_revision);
       }
     } catch (err: any) {
       setError(err?.message || "Failed to load AI question set.");
@@ -286,6 +319,28 @@ export function AiQuestionSetWorkspace({
       setError(err?.message || "Failed to regenerate set with local model.");
     } finally {
       setIsRegeneratingLegacy(false);
+    }
+  };
+
+  const handleRegenerateForLatestJobVersion = async () => {
+    if (!detail?.job_id) return;
+    try {
+      setIsRegeneratingStale(true);
+      setError(null);
+      setActionFeedback(null);
+      const res = await apiFetch<AiQuestionSetDetail>(
+        `/api/v1/ai-interviews/generate`,
+        {
+          method: "POST",
+          body: JSON.stringify({ job_id: detail.job_id, force_regenerate: true }),
+        }
+      );
+      setDetail(res);
+      setActionFeedback("Question set successfully regenerated for latest job version & requirements.");
+    } catch (err: any) {
+      setError(err?.message || "Failed to regenerate questions for latest job version.");
+    } finally {
+      setIsRegeneratingStale(false);
     }
   };
 
@@ -569,18 +624,29 @@ export function AiQuestionSetWorkspace({
               <Icon name="sparkles" size={12} />
               <span>{detail.model_display_name || "Qwen3-4B MLX"}</span>
             </span>
-          </div>
 
-          <div className="aiq-progress-group">
-            <span className="aiq-progress-text">
-              {conversationalSlots.length} Conversational · {mcqSlots.length} MCQs ({reviewedCount} of {totalCount} reviewed)
-            </span>
-            <div className="aiq-progress-track">
-              <div
-                className={`aiq-progress-fill ${progressPercent === 100 ? "complete" : ""}`}
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
+            {/* Compact Release Summary Badge */}
+            {isApproved && !isLegacy && releaseStats && (
+              <span
+                className="badge"
+                style={{
+                  fontSize: "12px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  backgroundColor: "#ecfdf5",
+                  color: "#065f46",
+                  border: "1px solid #a7f3d0",
+                  padding: "3px 8px",
+                  borderRadius: "6px",
+                }}
+              >
+                <Icon name="users" size={12} />
+                <span>
+                  {releaseStats.eligibleCount} eligible applicant{releaseStats.eligibleCount === 1 ? "" : "s"} · {releaseStats.releasedCount} interview{releaseStats.releasedCount === 1 ? "" : "s"} released
+                </span>
+              </span>
+            )}
           </div>
         </div>
 
@@ -605,6 +671,31 @@ export function AiQuestionSetWorkspace({
             <Icon name="eye" size={15} />
             <span>Candidate Preview</span>
           </button>
+
+          {isStale && !isLegacy && Boolean(detail.job_id) && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleRegenerateForLatestJobVersion}
+              disabled={isRegeneratingStale}
+              title="Regenerate interview questions based on the latest approved job revision & requirements"
+            >
+              <Icon name="sparkles" size={15} className={isRegeneratingStale ? "animate-spin" : ""} />
+              <span>{isRegeneratingStale ? "Regenerating..." : "Regenerate for latest job version"}</span>
+            </button>
+          )}
+
+          {isApproved && !isLegacy && !isStale && Boolean(detail.job_id) && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setIsReleaseModalOpen(true)}
+              title="Release this sealed interview set to eligible applicants"
+            >
+              <Icon name="user-check" size={15} />
+              <span>Release Interview Set</span>
+            </button>
+          )}
 
           {isLegacy && (
             <button
@@ -751,13 +842,24 @@ export function AiQuestionSetWorkspace({
           }}
         >
           <Icon name="alert-triangle" size={18} style={{ color: "var(--status-warn, #d97706)", flexShrink: 0, marginTop: "2px" }} />
-          <div>
+          <div style={{ flex: 1 }}>
             <strong style={{ display: "block", color: "#92400e", marginBottom: "2px", fontSize: "15px" }}>
               Job Requirements Modified
             </strong>
-            <p style={{ color: "#78350f", fontSize: "14px", margin: 0 }}>
+            <p style={{ color: "#78350f", fontSize: "14px", margin: "0 0 10px 0" }}>
               {detail.stale_reason || "The approved job requirements have changed. Please regenerate or re-verify questions."}
             </p>
+            {detail.job_id && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-xs"
+                onClick={handleRegenerateForLatestJobVersion}
+                disabled={isRegeneratingStale}
+              >
+                <Icon name="sparkles" size={13} className={isRegeneratingStale ? "animate-spin" : ""} />
+                <span>{isRegeneratingStale ? "Regenerating..." : "Regenerate questions for latest job version"}</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -840,7 +942,7 @@ export function AiQuestionSetWorkspace({
           onClick={() => setActiveTab("MCQ")}
         >
           <Icon name="badge-check" size={15} />
-          <span>Multiple Choice Questions ({mcqSlots.length}/10)</span>
+          <span>Multiple Choice Questions ({mcqSlots.length}/5)</span>
         </button>
       </div>
 
@@ -1088,7 +1190,7 @@ export function AiQuestionSetWorkspace({
           >
             <div>
               <h2 style={{ fontSize: "16px", fontWeight: 600, color: "var(--text-primary, #0f172a)", margin: "0 0 4px 0" }}>
-                Multiple Choice Questions ({mcqSlots.length} / 10 max)
+                Multiple Choice Questions ({mcqSlots.length} / 5 max)
               </h2>
               <p style={{ fontSize: "13px", color: "var(--text-secondary, #64748b)", margin: 0 }}>
                 Author or generate standardized knowledge questions. Each MCQ requires 2–5 distinct options, 1 designated correct answer, and an explanation.
@@ -1101,7 +1203,7 @@ export function AiQuestionSetWorkspace({
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={() => setShowGenerateMcqDialog(true)}
-                  disabled={mcqSlots.length >= 10 || isGeneratingMcqs}
+                  disabled={mcqSlots.length >= 5 || isGeneratingMcqs}
                 >
                   <Icon name="sparkles" size={14} className={isGeneratingMcqs ? "animate-spin" : ""} />
                   <span>{isGeneratingMcqs ? "Generating..." : "Generate MCQs with AI"}</span>
@@ -1111,7 +1213,7 @@ export function AiQuestionSetWorkspace({
                   type="button"
                   className="btn btn-primary btn-sm"
                   onClick={handleOpenAddMcq}
-                  disabled={mcqSlots.length >= 10}
+                  disabled={mcqSlots.length >= 5}
                 >
                   <Icon name="plus" size={14} />
                   <span>Add MCQ</span>
@@ -1151,15 +1253,15 @@ export function AiQuestionSetWorkspace({
                   </p>
                   <div>
                     <label className="aiq-form-label" htmlFor="mcq-gen-count">
-                      Number of MCQs to generate (1 to {10 - mcqSlots.length})
+                      Number of MCQs to generate (1 to {5 - mcqSlots.length})
                     </label>
                     <input
                       id="mcq-gen-count"
                       type="number"
                       min={1}
-                      max={Math.min(10, 10 - mcqSlots.length)}
+                      max={Math.min(5, 5 - mcqSlots.length)}
                       value={mcqGenerateCount}
-                      onChange={(e) => setMcqGenerateCount(Math.max(1, Math.min(10 - mcqSlots.length, Number(e.target.value))))}
+                      onChange={(e) => setMcqGenerateCount(Math.max(1, Math.min(5 - mcqSlots.length, Number(e.target.value))))}
                       className="aiq-input"
                     />
                   </div>
@@ -1202,7 +1304,7 @@ export function AiQuestionSetWorkspace({
                 No Multiple Choice Questions Yet
               </h3>
               <p style={{ fontSize: "14px", color: "var(--text-secondary, #64748b)", maxWidth: "440px", margin: "0 auto 16px auto" }}>
-                Practice sets can contain up to 10 MCQs alongside conversational questions. Click below to author one manually or generate them with local AI.
+                Practice sets can contain up to 5 MCQs alongside conversational questions. Click below to author one manually or generate them with local AI.
               </p>
               <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
                 <button
@@ -1451,6 +1553,21 @@ export function AiQuestionSetWorkspace({
           isOpen={isPreviewModalOpen}
           detail={detail}
           onClose={() => setIsPreviewModalOpen(false)}
+        />
+      )}
+
+      {/* Release Interview Set Modal */}
+      {isReleaseModalOpen && detail && (
+        <ReleaseInterviewSetModal
+          isOpen={isReleaseModalOpen}
+          detail={detail}
+          onClose={() => setIsReleaseModalOpen(false)}
+          onSuccessRelease={() => {
+            if (detail.job_id) {
+              loadReleaseStats(detail.job_id, detail.job_revision);
+            }
+          }}
+          onOpenApplicants={onOpenApplicants}
         />
       )}
     </div>

@@ -65,25 +65,49 @@ def _format_candidate_safe_questions(
     snapshot_items: List[Dict[str, Any]],
     saved_answers: Dict[UUID, CandidateInterviewAnswerRecord],
 ) -> List[CandidateInterviewQuestionDto]:
+    # 1. Classify items into Conversational and MCQ
+    conversational_items: List[Dict[str, Any]] = []
+    mcq_items: List[Dict[str, Any]] = []
+
+    for raw_item in snapshot_items:
+        raw_fmt = (raw_item.get("question_format") or "").upper()
+        if raw_fmt in ("MCQ", "MCQ_SINGLE_ANSWER") or (raw_item.get("options") and len(raw_item.get("options", [])) > 0):
+            mcq_items.append(raw_item)
+        else:
+            conversational_items.append(raw_item)
+
+    # Order strictly: conversational first, MCQs after
+    ordered_items = conversational_items + mcq_items
+
     formatted: List[CandidateInterviewQuestionDto] = []
-    for idx, raw_item in enumerate(snapshot_items):
+    for idx, raw_item in enumerate(ordered_items):
         slot_id_str = raw_item.get("slot_id") or raw_item.get("question_id") or str(uuid.uuid4())
         try:
-            slot_id = UUID(slot_id_str)
+            slot_id = UUID(str(slot_id_str))
         except Exception:
             slot_id = uuid.uuid4()
 
-        q_format = raw_item.get("question_format") or ("MCQ_SINGLE_ANSWER" if "options" in raw_item else "CONVERSATION")
-        q_text = raw_item.get("question") or raw_item.get("stem") or raw_item.get("text") or "Interview Question"
+        raw_fmt = (raw_item.get("question_format") or "").upper()
+        is_mcq = raw_fmt in ("MCQ", "MCQ_SINGLE_ANSWER") or (raw_item.get("options") and len(raw_item.get("options", [])) > 0)
+        q_format = "MCQ_SINGLE_ANSWER" if is_mcq else "CONVERSATION"
+
+        q_text = (
+            raw_item.get("question_text")
+            or raw_item.get("ai_wording")
+            or raw_item.get("question")
+            or raw_item.get("stem")
+            or raw_item.get("text")
+            or "Interview Question"
+        )
         competency = raw_item.get("competency") or raw_item.get("competency_name")
         is_supp = raw_item.get("is_supplemental", False) or raw_item.get("layer") == "SUPPLEMENTAL_EVIDENCE"
 
         options_dto: List[CandidateInterviewMcqOptionDto] = []
-        if q_format == "MCQ_SINGLE_ANSWER" and "options" in raw_item:
+        if is_mcq and "options" in raw_item:
             raw_options = raw_item.get("options") or []
             for opt in raw_options:
                 if isinstance(opt, dict):
-                    opt_id = str(opt.get("id") or opt.get("key") or "")
+                    opt_id = str(opt.get("option_id") or opt.get("id") or opt.get("key") or "")
                     opt_text = str(opt.get("text") or opt.get("label") or "")
                 else:
                     opt_id = str(opt)
@@ -361,7 +385,12 @@ def save_interview_answer(
             )
         if payload.selected_option_id is not None:
             raw_options = matched_q.get("options") or []
-            valid_opt_ids = [str(o.get("id") or o.get("key")) if isinstance(o, dict) else str(o) for o in raw_options]
+            valid_opt_ids = [
+                str(o.get("option_id") or o.get("id") or o.get("key") or "")
+                if isinstance(o, dict)
+                else str(o)
+                for o in raw_options
+            ]
             if payload.selected_option_id not in valid_opt_ids:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

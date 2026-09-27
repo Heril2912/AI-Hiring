@@ -182,6 +182,25 @@ export function AuthenticatedShell({
                   <span className="nav-count-pill">{aiQuestionsCount}</span>
                 )}
               </button>
+
+              <button
+                type="button"
+                className={`nav-tab-btn ${
+                  activeNavTab === "evaluation" || activeNavTab === "evaluations"
+                    ? "tab-active"
+                    : ""
+                }`}
+                aria-current={
+                  activeNavTab === "evaluation" || activeNavTab === "evaluations"
+                    ? "page"
+                    : undefined
+                }
+                aria-label="Evaluation workspace"
+                onClick={() => onNavigateTab?.("evaluation")}
+              >
+                <Icon name="clipboard-check" size={15} />
+                <span>Evaluation</span>
+              </button>
             </>
           )}
 

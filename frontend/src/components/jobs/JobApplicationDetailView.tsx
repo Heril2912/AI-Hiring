@@ -92,25 +92,28 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 space-y-4">
-        <Icon name="spinner" size={28} className="animate-spin text-indigo-600" />
-        <p className="text-gray-500 font-medium">Loading applicant details...</p>
+      <div className="applicant-detail-page" style={{ textAlign: "center", padding: "64px 24px" }}>
+        <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />
+        <p style={{ color: "var(--text-secondary, #64748b)", fontSize: "14px" }}>
+          Loading applicant details...
+        </p>
       </div>
     );
   }
 
   if (error && !detail) {
     return (
-      <div className="p-6 space-y-4 max-w-3xl mx-auto">
+      <div className="applicant-detail-page">
         <button
           type="button"
           onClick={onNavigateBack}
-          className="btn btn-secondary btn-sm flex items-center gap-1"
+          className="btn btn-secondary btn-sm"
+          style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: "6px" }}
         >
-          <Icon name="arrow-left" size={14} /> Back to Applicants
+          <Icon name="arrow-left" size={14} /> <span>Back to Applicants</span>
         </button>
-        <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
-          <p className="font-semibold">{error}</p>
+        <div className="feedback-box error" style={{ padding: "16px" }}>
+          <p style={{ margin: 0, fontWeight: 600 }}>{error}</p>
         </div>
       </div>
     );
@@ -122,98 +125,105 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
   const { interviewEligibility, matchEvidence } = detail;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="applicant-detail-page">
       {/* Navigation & Header */}
-      <div className="flex items-center justify-between">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
         <button
           type="button"
           onClick={onNavigateBack}
-          className="btn btn-secondary btn-sm flex items-center gap-1.5"
+          className="btn btn-secondary btn-sm"
+          style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
         >
-          <Icon name="arrow-left" size={14} /> Back to Applicants
+          <Icon name="arrow-left" size={14} /> <span>Back to Applicants</span>
         </button>
-        <div className="flex items-center gap-2">
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span
-            className={`px-3 py-1 text-xs font-semibold rounded-full ${
-              detail.status === "SUBMITTED"
-                ? "bg-emerald-100 text-emerald-800"
-                : "bg-gray-200 text-gray-700"
-            }`}
+            className={`badge ${detail.status === "SUBMITTED" ? "badge-success" : "badge-secondary"}`}
+            style={{ padding: "3px 10px", fontSize: "12px", fontWeight: 600 }}
           >
-            {detail.status}
+            {detail.status === "SUBMITTED" ? "Active (Submitted)" : detail.status}
           </span>
-          <span className="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+          <span
+            className="badge badge-info"
+            style={{ padding: "3px 10px", fontSize: "12px", fontWeight: 600 }}
+          >
             Review: {detail.recruiterReviewState}
           </span>
         </div>
       </div>
 
       {actionSuccess && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-sm flex items-center gap-2">
-          <Icon name="check" size={16} />
+        <div className="feedback-box success" style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: "8px" }}>
+          <Icon name="check-circle" size={16} />
           <span>{actionSuccess}</span>
         </div>
       )}
 
       {error && (
-        <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-sm flex items-center gap-2">
+        <div className="feedback-box error" style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: "8px" }}>
           <Icon name="alert-triangle" size={16} />
           <span>{error}</span>
         </div>
       )}
 
       {/* Main Applicant Identity Card */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
-        <div className="flex items-start justify-between">
+      <div className="applicant-detail-card">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">{detail.candidateName}</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Applied to <span className="font-medium text-gray-700">{detail.jobTitle}</span> (Submitted Revision: Rev #{detail.jobRevision})
+            <h1 style={{ fontSize: "24px", fontWeight: 700, margin: "0 0 6px 0", color: "var(--text-primary, #0f172a)" }}>
+              {detail.candidateName}
+            </h1>
+            <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary, #64748b)" }}>
+              Applied to <strong style={{ color: "var(--text-primary, #0f172a)" }}>{detail.jobTitle}</strong> (Submitted Revision: Rev #{detail.jobRevision})
             </p>
           </div>
-          <div className="text-right text-xs text-gray-400">
+          <div style={{ textAlign: "right", fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
             <div>Submitted: {new Date(detail.submittedAt).toLocaleString()}</div>
             {detail.withdrawnAt && (
-              <div className="text-amber-600 mt-0.5">Withdrawn: {new Date(detail.withdrawnAt).toLocaleString()}</div>
+              <div style={{ color: "#d97706", marginTop: "4px" }}>
+                Withdrawn: {new Date(detail.withdrawnAt).toLocaleString()}
+              </div>
             )}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-gray-100 text-sm">
-          <div>
-            <span className="text-gray-400 block text-xs uppercase tracking-wider">Email</span>
-            <span className="text-gray-800 font-medium">{detail.candidateEmail || "Not provided"}</span>
+        <div className="applicant-meta-grid">
+          <div className="applicant-meta-item">
+            <span className="applicant-meta-label">Email</span>
+            <span className="applicant-meta-value">{detail.candidateEmail || "Not provided"}</span>
           </div>
-          <div>
-            <span className="text-gray-400 block text-xs uppercase tracking-wider">Phone</span>
-            <span className="text-gray-800 font-medium">{detail.candidatePhone || "Not provided"}</span>
+          <div className="applicant-meta-item">
+            <span className="applicant-meta-label">Phone</span>
+            <span className="applicant-meta-value">{detail.candidatePhone || "Not provided"}</span>
           </div>
-          <div>
-            <span className="text-gray-400 block text-xs uppercase tracking-wider">Profile Version</span>
-            <span className="text-gray-800 font-medium">v{detail.profileVersion}</span>
+          <div className="applicant-meta-item">
+            <span className="applicant-meta-label">Profile Version</span>
+            <span className="applicant-meta-value">v{detail.profileVersion}</span>
           </div>
         </div>
       </div>
 
       {/* Internal Recruiter Review Controls */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
-        <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-          <Icon name="user-check" size={18} className="text-indigo-600" />
-          Internal Review Stage
-        </h3>
-        <p className="text-xs text-gray-500">
-          Move the application through the review stages. Progressing to <span className="font-medium">INTERVIEW_READY</span> enables interview release.
+      <div className="applicant-detail-card">
+        <h2 className="applicant-detail-card-title">
+          <Icon name="user-check" size={18} style={{ color: "var(--accent-primary, #4f5bd5)" }} />
+          <span>Internal Review Stage</span>
+        </h2>
+        <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary, #64748b)", lineHeight: 1.5 }}>
+          Move the application through recruiter review stages to track your recruitment workflow.
         </p>
 
-        <div className="flex flex-wrap items-center gap-3 pt-2">
+        <div className="applicant-state-btn-row">
           {detail.recruiterReviewState === "RECEIVED" && (
             <button
               type="button"
-              className="btn btn-primary btn-sm flex items-center gap-1.5"
+              className="btn btn-primary btn-sm"
               onClick={() => handleReviewStateTransition("IN_REVIEW")}
               disabled={isUpdatingState || isWithdrawn}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             >
-              <Icon name="play" size={14} /> Start Review (Move to IN_REVIEW)
+              <Icon name="play" size={14} />
+              <span>Start Review (Move to IN_REVIEW)</span>
             </button>
           )}
 
@@ -221,19 +231,23 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
             <>
               <button
                 type="button"
-                className="btn btn-primary btn-sm flex items-center gap-1.5"
+                className="btn btn-primary btn-sm"
                 onClick={() => handleReviewStateTransition("INTERVIEW_READY")}
                 disabled={isUpdatingState || isWithdrawn}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
               >
-                <Icon name="badge-check" size={14} /> Mark as INTERVIEW_READY
+                <Icon name="badge-check" size={14} />
+                <span>Mark as INTERVIEW_READY</span>
               </button>
               <button
                 type="button"
-                className="btn btn-secondary btn-sm flex items-center gap-1.5"
+                className="btn btn-secondary btn-sm"
                 onClick={() => handleReviewStateTransition("RECEIVED")}
                 disabled={isUpdatingState || isWithdrawn}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
               >
-                <Icon name="arrow-left" size={14} /> Reset to RECEIVED
+                <Icon name="arrow-left" size={14} />
+                <span>Reset to RECEIVED</span>
               </button>
             </>
           )}
@@ -241,16 +255,18 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
           {detail.recruiterReviewState === "INTERVIEW_READY" && (
             <button
               type="button"
-              className="btn btn-secondary btn-sm flex items-center gap-1.5"
+              className="btn btn-secondary btn-sm"
               onClick={() => handleReviewStateTransition("IN_REVIEW")}
               disabled={isUpdatingState || isWithdrawn}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             >
-              <Icon name="arrow-left" size={14} /> Move back to IN_REVIEW
+              <Icon name="arrow-left" size={14} />
+              <span>Move back to IN_REVIEW</span>
             </button>
           )}
 
           {isWithdrawn && (
-            <span className="text-xs text-amber-700 italic">
+            <span style={{ fontSize: "12px", color: "#d97706", fontStyle: "italic" }}>
               Application is withdrawn; review state transitions are restricted.
             </span>
           )}
@@ -258,47 +274,90 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
       </div>
 
       {/* Deterministic Match & Skill Gap Section */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-            <Icon name="sparkles" size={18} className="text-purple-600" />
-            Deterministic Match & Skill Gap Evidence
-          </h3>
+      <div className="applicant-detail-card">
+        <div className="applicant-detail-card-header">
+          <h2 className="applicant-detail-card-title">
+            <Icon name="sparkles" size={18} style={{ color: "#7c3aed" }} />
+            <span>Deterministic Match & Skill Gap Evidence</span>
+          </h2>
           {onOpenMatchingComparison && (
             <button
               type="button"
               onClick={onOpenMatchingComparison}
-              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+              className="btn btn-secondary btn-xs"
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
             >
-              Open Match Workspace <Icon name="external-link" size={12} />
+              <span>Open Match Workspace</span>
+              <Icon name="external-link" size={12} />
             </button>
           )}
         </div>
 
         {matchEvidence ? (
-          <div className="p-4 bg-purple-50/50 border border-purple-100 rounded-lg space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-2xl font-bold text-purple-900">
+          <div
+            style={{
+              padding: "16px",
+              backgroundColor: "#faf5ff",
+              border: "1px solid #e9d5ff",
+              borderRadius: "8px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "24px", fontWeight: 700, color: "#581c87" }}>
                   {matchEvidence.displayScore.toFixed(1)}%
                 </span>
-                <span className="ml-2 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-purple-200 text-purple-800">
+                <span
+                  style={{
+                    backgroundColor: "#ede9fe",
+                    color: "#6d28d9",
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                  }}
+                >
                   {matchEvidence.confidenceTier} Tier
                 </span>
               </div>
-              <span className="text-xs text-gray-400">
+              <span style={{ fontSize: "12px", color: "#94a3b8" }}>
                 Rank #{matchEvidence.rank} • Evaluated: {new Date(matchEvidence.computedAt).toLocaleDateString()}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 pt-2 border-t border-purple-100">
-              <div>Warnings: <span className="font-semibold text-gray-800">{matchEvidence.warningCount}</span></div>
-              <div>Must-Have Warnings: <span className="font-semibold text-gray-800">{matchEvidence.mustHaveWarningCount}</span></div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "8px",
+                fontSize: "12px",
+                color: "#475569",
+                borderTop: "1px solid #e9d5ff",
+                paddingTop: "10px",
+              }}
+            >
+              <div>Warnings: <strong>{matchEvidence.warningCount}</strong></div>
+              <div>Must-Have Warnings: <strong>{matchEvidence.mustHaveWarningCount}</strong></div>
             </div>
           </div>
         ) : (
-          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Icon name="info" size={16} className="text-gray-400" />
+          <div
+            style={{
+              padding: "16px",
+              backgroundColor: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: "8px",
+              fontSize: "13px",
+              color: "#64748b",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Icon name="info" size={16} />
               <span>Not evaluated. Matching has not been computed for this job version / candidate pair yet.</span>
             </div>
             {onOpenMatchingComparison && (
@@ -315,55 +374,68 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
       </div>
 
       {/* AI Interview Access & Release Section */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-            <Icon name="sparkles" size={18} className="text-blue-600" />
-            Interview Access
-          </h3>
+      <div className="applicant-detail-card">
+        <div className="applicant-detail-card-header">
+          <h2 className="applicant-detail-card-title">
+            <Icon name="sparkles" size={18} style={{ color: "var(--accent-primary, #4f5bd5)" }} />
+            <span>Interview Access</span>
+          </h2>
           {onOpenAiInterviews && (
             <button
               type="button"
               onClick={() => onOpenAiInterviews(jobId)}
-              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+              className="btn btn-secondary btn-xs"
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
             >
-              Open AI Interviews for Rev #{detail.jobRevision} <Icon name="external-link" size={12} />
+              <span>Open AI Interviews (Rev #{detail.jobRevision})</span>
+              <Icon name="external-link" size={12} />
             </button>
           )}
         </div>
 
-        <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-4 text-sm">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <div className="bg-white p-3 rounded border border-gray-200">
-              <span className="text-gray-500 block">Job Revision</span>
-              <strong className="text-gray-900 text-sm">Rev #{detail.jobRevision}</strong>
+        <div
+          style={{
+            padding: "16px",
+            backgroundColor: "#f8fafc",
+            border: "1px solid #e2e8f0",
+            borderRadius: "8px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "14px",
+          }}
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
+            <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <span style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", display: "block" }}>Job Revision</span>
+              <strong style={{ fontSize: "14px", color: "#0f172a" }}>Rev #{detail.jobRevision}</strong>
             </div>
-            <div className="bg-white p-3 rounded border border-gray-200">
-              <span className="text-gray-500 block">Review Stage</span>
-              <strong className="text-gray-900 text-sm">{detail.recruiterReviewState}</strong>
+            <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <span style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", display: "block" }}>Review Stage</span>
+              <strong style={{ fontSize: "14px", color: "#0f172a" }}>{detail.recruiterReviewState}</strong>
             </div>
-            <div className="bg-white p-3 rounded border border-gray-200">
-              <span className="text-gray-500 block">Approved Questions</span>
-              <strong className="text-gray-900 text-sm">{interviewEligibility.questionCount} Questions</strong>
+            <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <span style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", display: "block" }}>Approved Questions</span>
+              <strong style={{ fontSize: "14px", color: "#0f172a" }}>{interviewEligibility.questionCount} Questions</strong>
             </div>
-            <div className="bg-white p-3 rounded border border-gray-200">
-              <span className="text-gray-500 block">Official Status</span>
-              <strong className={interviewEligibility.existingReleaseId ? "text-emerald-700 text-sm font-semibold" : "text-gray-700 text-sm"}>
+            <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+              <span style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", display: "block" }}>Official Status</span>
+              <strong style={{ fontSize: "14px", color: interviewEligibility.existingReleaseId ? "#059669" : "#475569" }}>
                 {interviewEligibility.existingReleaseId ? "RELEASED" : "NOT RELEASED"}
               </strong>
             </div>
           </div>
 
-          <div className="flex items-start justify-between pt-2 border-t border-gray-200">
-            <div>
-              <p className="text-xs text-gray-600">{interviewEligibility.message}</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "8px", borderTop: "1px solid #e2e8f0", flexWrap: "wrap", gap: "10px" }}>
+            <div style={{ fontSize: "13px", color: "#475569" }}>
+              {interviewEligibility.message}
             </div>
             {interviewEligibility.isEligible && (
               <button
                 type="button"
                 onClick={() => setShowReleaseConfirm(true)}
                 disabled={isReleasing || isWithdrawn}
-                className="btn btn-primary btn-sm flex items-center gap-1.5"
+                className="btn btn-primary btn-sm"
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
               >
                 <Icon name="sparkles" size={14} />
                 <span>Release Interview</span>
@@ -372,19 +444,19 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
           </div>
 
           {!interviewEligibility.isEligible && !interviewEligibility.existingReleaseId && (
-            <div className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200 flex items-center gap-2">
+            <div style={{ fontSize: "12px", color: "#92400e", backgroundColor: "#fef3c7", padding: "8px 12px", borderRadius: "6px", border: "1px solid #fde68a", display: "flex", alignItems: "center", gap: "6px" }}>
               <Icon name="alert-triangle" size={14} />
               <span>{interviewEligibility.message}</span>
             </div>
           )}
 
           {interviewEligibility.existingReleaseId && (
-            <div className="text-xs text-emerald-800 bg-emerald-50 p-3 rounded border border-emerald-200 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Icon name="check" size={16} />
+            <div style={{ fontSize: "12px", color: "#065f46", backgroundColor: "#ecfdf5", padding: "10px 14px", borderRadius: "6px", border: "1px solid #a7f3d0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Icon name="check-circle" size={16} />
                 <span>Interview released and active for candidate on Interviews portal.</span>
               </div>
-              <span className="text-emerald-700 font-semibold uppercase text-[11px] tracking-wide">
+              <span style={{ fontWeight: 700, textTransform: "uppercase", fontSize: "11px" }}>
                 Interview Released
               </span>
             </div>
@@ -398,43 +470,94 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
           role="dialog"
           aria-modal="true"
           aria-labelledby="release-modal-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.4)",
+            backdropFilter: "blur(2px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+            padding: "16px",
+          }}
         >
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4 border border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shrink-0">
+          <div
+            style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2)",
+              maxWidth: "480px",
+              width: "100%",
+              padding: "24px",
+              border: "1px solid #e2e8f0",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div
+                style={{
+                  width: "40px",
+                  height: "40px",
+                  borderRadius: "50%",
+                  backgroundColor: "#e0e7ff",
+                  border: "1px solid #c7d2fe",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#4338ca",
+                  flexShrink: 0,
+                }}
+              >
                 <Icon name="sparkles" size={20} />
               </div>
               <div>
-                <h3 id="release-modal-title" className="text-base font-bold text-gray-900">
+                <h3 id="release-modal-title" style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
                   Release Official Interview
                 </h3>
-                <p className="text-xs text-gray-500">
+                <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>
                   Application for {detail.candidateName}
                 </p>
               </div>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 space-y-1.5 border border-gray-200">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Job Title:</span>
-                <span className="font-semibold text-gray-900">{detail.jobTitle}</span>
+            <div
+              style={{
+                backgroundColor: "#f8fafc",
+                borderRadius: "8px",
+                padding: "12px 14px",
+                fontSize: "13px",
+                color: "#334155",
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+                border: "1px solid #e2e8f0",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#64748b" }}>Job Title:</span>
+                <strong style={{ color: "#0f172a" }}>{detail.jobTitle}</strong>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Job Revision:</span>
-                <span className="font-semibold text-gray-900">Rev #{detail.jobRevision}</span>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#64748b" }}>Job Revision:</span>
+                <strong style={{ color: "#0f172a" }}>Rev #{detail.jobRevision}</strong>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Approved Questions:</span>
-                <span className="font-semibold text-gray-900">{interviewEligibility.questionCount} Questions</span>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#64748b" }}>Approved Questions:</span>
+                <strong style={{ color: "#0f172a" }}>{interviewEligibility.questionCount} Questions</strong>
               </div>
             </div>
 
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Releasing this official interview will freeze these exact approved questions to the candidate's application and make it available in their portal.
+            <p style={{ fontSize: "13px", color: "#64748b", margin: 0, lineHeight: 1.5 }}>
+              Releasing this official interview will freeze these exact approved questions to the candidate's application and make it available in their candidate portal.
             </p>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", paddingTop: "8px", borderTop: "1px solid #f1f5f9" }}>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -445,9 +568,10 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
               </button>
               <button
                 type="button"
-                className="btn btn-primary btn-sm flex items-center gap-1.5"
+                className="btn btn-primary btn-sm"
                 onClick={handleReleaseInterview}
                 disabled={isReleasing}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
               >
                 {isReleasing ? (
                   <>

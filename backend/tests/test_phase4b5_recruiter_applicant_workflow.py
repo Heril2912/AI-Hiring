@@ -400,9 +400,9 @@ def test_recruiter_applicant_workflow_lifecycle_and_security(client, test_db):
     detail_data = res.json()
     assert detail_data["recruiterReviewState"] == "RECEIVED"
     assert detail_data["matchEvidence"] is None
-    # Question set not yet created/approved, so eligibility should report not ready
+    # Question set not yet created/approved, so eligibility reports NO_APPROVED_QUESTION_SET
     assert detail_data["interviewEligibility"]["isEligible"] is False
-    assert detail_data["interviewEligibility"]["reasonCode"] == "NOT_INTERVIEW_READY"
+    assert detail_data["interviewEligibility"]["reasonCode"] == "NO_APPROVED_QUESTION_SET"
 
     # 7. Recruiter review state transitions:
     # Attempt invalid jump RECEIVED -> INTERVIEW_READY (fails)

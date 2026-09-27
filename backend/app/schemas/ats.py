@@ -92,6 +92,7 @@ class ATSImportRunRequest(BaseModel):
 
     is_dry_run: bool = False
     destination_job_id: Optional[UUID] = None
+    destination_job_version_id: Optional[UUID] = None
     preview_token: Optional[str] = None
     preview_hash: Optional[str] = None
     raw_payload: Optional[Dict[str, Any]] = None
@@ -120,6 +121,7 @@ class ATSImportRunResponse(BaseModel):
     is_dry_run: bool
     status: ATSImportStatus
     destination_job_id: Optional[UUID] = None
+    destination_job_version_id: Optional[UUID] = None
     preview_token: Optional[str] = None
     preview_hash: Optional[str] = None
     expires_at: Optional[datetime] = None

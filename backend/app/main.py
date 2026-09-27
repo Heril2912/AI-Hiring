@@ -10,6 +10,7 @@ from app.api.candidate_auth import router as candidate_auth_router
 from app.api.candidate_invitations import router as candidate_invitations_router
 from app.api.candidate_jobs import router as candidate_jobs_router
 from app.api.candidate_practice import router as candidate_practice_router
+from app.api.candidate_evaluation import router as candidate_evaluation_router
 from app.api.gap_reports import gap_reports_router, result_reports_router
 from app.api.interviews import router as interviews_router, simulations_router
 from app.api.ai_interviews import router as ai_interviews_router
@@ -65,6 +66,7 @@ app.include_router(candidate_applications_router)
 app.include_router(candidate_invitations_router)
 app.include_router(candidate_jobs_router)
 app.include_router(candidate_practice_router)
+app.include_router(candidate_evaluation_router)
 app.include_router(admin_router)
 app.include_router(ats_router)
 app.include_router(jobs_router)

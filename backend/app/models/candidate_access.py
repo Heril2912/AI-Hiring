@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -1798,6 +1799,12 @@ class CandidateInterviewSessionRecord(Base):
         cascade="all, delete-orphan",
         order_by="CandidateInterviewAnswerRecord.answer_order",
     )
+    evaluation: Mapped[Optional["CandidateInterviewEvaluationRecord"]] = relationship(
+        "CandidateInterviewEvaluationRecord",
+        back_populates="session",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class CandidateInterviewAnswerRecord(Base):
@@ -1879,6 +1886,297 @@ class CandidateInterviewAnswerRecord(Base):
         "CandidateInterviewSessionRecord",
         back_populates="answers",
     )
+
+
+class CandidateInterviewEvaluationRecord(Base):
+    __tablename__ = "candidate_interview_evaluations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('NOT_STARTED', 'IN_REVIEW', 'FINALIZED')",
+            name="ck_candidate_interview_evaluations_status",
+        ),
+        CheckConstraint(
+            "candidate_feedback_status IN ('UNPUBLISHED', 'PUBLISHED')",
+            name="ck_candidate_interview_evaluations_fb_status",
+        ),
+        UniqueConstraint(
+            "session_id",
+            name="uq_candidate_interview_evaluations_session_id",
+        ),
+        Index("ix_candidate_interview_evaluations_org_id", "organization_id"),
+        Index("ix_candidate_interview_evaluations_job_id", "job_id"),
+        Index("ix_candidate_interview_evaluations_candidate_id", "candidate_id"),
+        Index("ix_candidate_interview_evaluations_status", "status"),
+    )
+
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_interview_sessions.session_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_evaluations_session_id",
+        ),
+        nullable=False,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_requisitions.job_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_evaluations_job_id",
+        ),
+        nullable=False,
+    )
+    job_version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "job_versions.job_version_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_evaluations_job_version_id",
+        ),
+        nullable=False,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_identities.identity_id",
+            ondelete="CASCADE",
+            name="fk_candidate_interview_evaluations_candidate_id",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="NOT_STARTED",
+        server_default=text("'NOT_STARTED'"),
+    )
+    questions_reviewed: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    core_questions_included: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    supplemental_questions_excluded: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    scoring_policy_version: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="1.0.0",
+        server_default=text("'1.0.0'"),
+    )
+    aggregate_score: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    aggregate_summary: Mapped[Dict[str, Any]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+    finalized_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "users.user_id",
+            ondelete="SET NULL",
+            name="fk_candidate_interview_evaluations_finalized_by",
+        ),
+        nullable=True,
+    )
+    finalized_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    candidate_feedback_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="UNPUBLISHED",
+        server_default=text("'UNPUBLISHED'"),
+    )
+    candidate_feedback_published_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    candidate_feedback_payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        json_type,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    session: Mapped["CandidateInterviewSessionRecord"] = relationship(
+        "CandidateInterviewSessionRecord",
+        back_populates="evaluation",
+    )
+    candidate: Mapped["CandidateIdentityRecord"] = relationship(
+        "CandidateIdentityRecord",
+    )
+    job: Mapped["JobRequisition"] = relationship(
+        "JobRequisition",
+    )
+    job_version: Mapped["JobVersion"] = relationship(
+        "JobVersion",
+    )
+    question_evaluations: Mapped[List["CandidateQuestionEvaluationRecord"]] = relationship(
+        "CandidateQuestionEvaluationRecord",
+        back_populates="evaluation",
+        cascade="all, delete-orphan",
+    )
+
+
+class CandidateQuestionEvaluationRecord(Base):
+    __tablename__ = "candidate_question_evaluations"
+    __table_args__ = (
+        CheckConstraint(
+            "review_state IN ('ACCEPTED', 'EDITED', 'OVERRIDDEN', 'INSUFFICIENT', 'UNREVIEWED')",
+            name="ck_candidate_question_evaluations_review_state",
+        ),
+        CheckConstraint(
+            "reviewed_rating IS NULL OR (reviewed_rating >= 1 AND reviewed_rating <= 5)",
+            name="ck_candidate_question_evaluations_rating_range",
+        ),
+        UniqueConstraint(
+            "session_id",
+            "slot_id",
+            name="uq_candidate_question_evaluations_session_slot",
+        ),
+        Index("ix_candidate_question_evaluations_eval_id", "evaluation_id"),
+        Index("ix_candidate_question_evaluations_session_id", "session_id"),
+        Index("ix_candidate_question_evaluations_slot_id", "slot_id"),
+    )
+
+    question_evaluation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_interview_evaluations.evaluation_id",
+            ondelete="CASCADE",
+            name="fk_candidate_question_evaluations_eval_id",
+        ),
+        nullable=False,
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_interview_sessions.session_id",
+            ondelete="CASCADE",
+            name="fk_candidate_question_evaluations_session_id",
+        ),
+        nullable=False,
+    )
+    answer_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "candidate_interview_answers.answer_id",
+            ondelete="SET NULL",
+            name="fk_candidate_question_evaluations_answer_id",
+        ),
+        nullable=True,
+    )
+    slot_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        nullable=False,
+    )
+    source_analysis_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        Uuid,
+        nullable=True,
+    )
+    review_state: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="UNREVIEWED",
+        server_default=text("'UNREVIEWED'"),
+    )
+    reviewed_rating: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    reviewed_observations: Mapped[Dict[str, Any]] = mapped_column(
+        json_type,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
+    )
+    override_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    recruiter_note: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    reviewer_user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey(
+            "users.user_id",
+            ondelete="CASCADE",
+            name="fk_candidate_question_evaluations_reviewer",
+        ),
+        nullable=False,
+    )
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    evaluation: Mapped["CandidateInterviewEvaluationRecord"] = relationship(
+        "CandidateInterviewEvaluationRecord",
+        back_populates="question_evaluations",
+    )
+    session: Mapped["CandidateInterviewSessionRecord"] = relationship(
+        "CandidateInterviewSessionRecord",
+    )
+    answer: Mapped[Optional["CandidateInterviewAnswerRecord"]] = relationship(
+        "CandidateInterviewAnswerRecord",
+    )
+
 
 
 

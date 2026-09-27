@@ -57,6 +57,8 @@ export type IconName =
   | "play"
   | "pause"
   | "lock"
+  | "clipboard-check"
+  | "send"
   | "folder";
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {
@@ -447,6 +449,21 @@ export function Icon({ name, size = 18, className = "", "aria-label": ariaLabel,
           <>
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </>
+        );
+      case "clipboard-check":
+        return (
+          <>
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+            <path d="m9 14 2 2 4-4" />
+          </>
+        );
+      case "send":
+        return (
+          <>
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
           </>
         );
       case "folder":

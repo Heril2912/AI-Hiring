@@ -234,6 +234,22 @@ export function LoginPage() {
             <p className="auth-footer-note">
               Access is limited to authorised recruitment staff. Unauthorized access attempts are monitored and logged.
             </p>
+            <div style={{ marginTop: "12px", textAlign: "center", borderTop: "1px solid var(--border-subtle, #e2e8f0)", paddingTop: "12px" }}>
+              <a
+                href="/candidate/login"
+                className="link-button"
+                style={{ fontSize: "13px", fontWeight: 500, color: "var(--brand-primary, #4f5bd5)", textDecoration: "none" }}
+                onClick={(e) => {
+                  if (typeof window !== "undefined" && window.history?.pushState) {
+                    e.preventDefault();
+                    window.history.pushState(null, "", "/candidate/login");
+                    window.dispatchEvent(new PopStateEvent("popstate"));
+                  }
+                }}
+              >
+                Candidate login &rarr;
+              </a>
+            </div>
           </div>
         </div>
       </div>

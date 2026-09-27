@@ -346,6 +346,11 @@ def trigger_ats_import(
                 resp.destination_job_id = UUID(run.summary_json["destination_job_id"])
             except (ValueError, TypeError):
                 pass
+        if "destination_job_version_id" in run.summary_json and run.summary_json["destination_job_version_id"]:
+            try:
+                resp.destination_job_version_id = UUID(run.summary_json["destination_job_version_id"])
+            except (ValueError, TypeError):
+                pass
         resp.preview_token = run.summary_json.get("preview_token")
         resp.preview_hash = run.summary_json.get("preview_hash")
         if "expires_at" in run.summary_json and run.summary_json["expires_at"]:

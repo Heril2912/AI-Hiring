@@ -342,12 +342,20 @@ def evaluate_release_eligibility(
         )
 
     # 2. Revision check
+    raw_rev = getattr(target_job_version, "revision", None)
+    if isinstance(raw_rev, int):
+        target_rev = raw_rev
+    else:
+        raw_vnum = getattr(target_job_version, "version_number", None)
+        target_rev = raw_vnum if isinstance(raw_vnum, int) else 1
+
     if (ai_set.job_version_id and ai_set.job_version_id != target_job_version.job_version_id) or \
-       (ai_set.job_revision and ai_set.job_revision != target_job_version.version_number):
+       (ai_set.job_revision and ai_set.job_revision != target_rev):
         return ReleaseEligibilityResult(
             is_eligible=False,
             reason_code=ReleaseIneligibilityReasonCode.STALE_JOB_REVISION,
-            safe_message=f"Question set was approved for revision #{ai_set.job_revision or 'unknown'}, but current job revision is #{target_job_version.version_number}.",
+            safe_message=f"Question set was approved for revision #{ai_set.job_revision or 'unknown'}, but current job revision is #{target_rev}.",
+            blocking_items=[],
         )
 
     items = ai_set.items or []

@@ -10,9 +10,10 @@ interface AtsImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImportComplete?: () => void;
+  onOpenApplicants?: (jobId: string) => void;
 }
 
-export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportModalProps) {
+export function AtsImportModal({ isOpen, onClose, onImportComplete, onOpenApplicants }: AtsImportModalProps) {
   const auth = useOptionalAuth();
   const user = auth?.user || null;
   const [connections, setConnections] = useState<ATSConnection[]>([]);
@@ -77,12 +78,19 @@ export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportM
       setIsLoadingConns(false);
     }
 
-    // 2. Load jobs
+    // 2. Load jobs & filter for ready/approved/released jobs
     try {
       const jobList = await fetchJobs();
-      setJobs(jobList || []);
-      if (jobList && jobList.length > 0) {
-        setSelectedJobId(jobList[0].jobId);
+      // Filter out archived jobs or jobs where currentVersion is explicitly DRAFT
+      const eligible = (jobList || []).filter((j) => {
+        if (j.status === "ARCHIVED") return false;
+        const vStatus = j.currentVersion?.versionStatus;
+        if (!vStatus) return true;
+        return vStatus === "READY_FOR_MATCHING" || vStatus === "APPROVED" || j.publicationStatus === "RELEASED";
+      });
+      setJobs(eligible);
+      if (eligible.length > 0) {
+        setSelectedJobId(eligible[0].jobId);
       }
     } catch (err: any) {
       console.warn("Failed to load jobs for ATS import modal:", err);
@@ -107,6 +115,8 @@ export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportM
   const selectedConn = connections.find((c) => c.connection_id === selectedConnId);
   const isLocalFolder = selectedConn?.adapter_type === "LOCAL_FOLDER_DEMO";
   const isFileAdapter = selectedConn?.adapter_type === "CSV" || selectedConn?.adapter_type === "JSON";
+  const selectedJob = jobs.find((j) => j.jobId === selectedJobId);
+  const selectedJobVersionId = selectedJob?.currentVersion?.jobVersionId;
 
   // Check preview expiry periodically if preview is active
   useEffect(() => {
@@ -136,6 +146,7 @@ export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportM
       const res = await triggerATSImport(selectedConnId, {
         is_dry_run: true,
         destination_job_id: isLocalFolder ? selectedJobId : undefined,
+        destination_job_version_id: isLocalFolder ? selectedJobVersionId : undefined,
         file_content_b64: isFileAdapter ? fileBase64 : undefined,
         filename: selectedFile?.name,
       });
@@ -169,6 +180,7 @@ export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportM
         const scanRes = await triggerATSImport(selectedConnId, {
           is_dry_run: true,
           destination_job_id: selectedJobId,
+          destination_job_version_id: selectedJobVersionId,
         });
         setDryRunResult(scanRes);
         previewToken = scanRes.preview_token;
@@ -185,6 +197,7 @@ export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportM
       const res = await triggerATSImport(selectedConnId, {
         is_dry_run: false,
         destination_job_id: isLocalFolder ? selectedJobId : undefined,
+        destination_job_version_id: isLocalFolder ? selectedJobVersionId : undefined,
         preview_token: isLocalFolder ? (previewToken || undefined) : undefined,
         preview_hash: isLocalFolder ? (previewHash || undefined) : undefined,
         file_content_b64: isFileAdapter ? fileBase64 : undefined,
@@ -399,6 +412,22 @@ export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportM
             </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              {liveResult.summary_json?.destination_job_id && onOpenApplicants && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-md"
+                  onClick={() => {
+                    const destJobId = liveResult.summary_json?.destination_job_id;
+                    onClose();
+                    if (onImportComplete) onImportComplete();
+                    if (destJobId) onOpenApplicants(destJobId);
+                  }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                >
+                  <Icon name="users" size={14} />
+                  <span>View Applicants</span>
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-primary btn-md"
@@ -458,13 +487,13 @@ export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportM
             {/* Destination Job Selector */}
             <div style={{ marginBottom: "16px" }}>
               <label className="form-label" htmlFor="select-destination-job" style={{ display: "block", marginBottom: "6px", fontSize: "13px", fontWeight: 600 }}>
-                Destination Job Requisition *
+                Destination Job Requisition & Revision *
               </label>
               {isLoadingJobs ? (
                 <p style={{ fontSize: "13px", color: "var(--text-secondary)" }}>Loading active jobs...</p>
               ) : jobs.length === 0 ? (
                 <div style={{ fontSize: "13px", color: "var(--text-secondary)", padding: "8px 12px", backgroundColor: "var(--bg-surface-subtle)", borderRadius: "var(--radius-md)" }}>
-                  No jobs found. Please create a job requisition first.
+                  No eligible jobs found. Please create or approve a job requisition first.
                 </div>
               ) : (
                 <select
@@ -483,7 +512,7 @@ export function AtsImportModal({ isOpen, onClose, onImportComplete }: AtsImportM
                 >
                   {jobs.map((j) => (
                     <option key={j.jobId} value={j.jobId}>
-                      {j.currentVersion?.title || "Untitled Job"} {j.currentVersion?.department ? `(${j.currentVersion.department})` : ""}
+                      {j.currentVersion?.title || "Untitled Job"} {j.currentVersion?.department ? `(${j.currentVersion.department})` : ""} · Rev #{j.currentVersion?.revision || 1} ({j.publicationStatus === "RELEASED" ? "Released" : j.currentVersion?.versionStatus || "Ready"})
                     </option>
                   ))}
                 </select>

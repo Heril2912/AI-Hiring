@@ -1,15 +1,19 @@
 import { apiFetch } from "./client";
 
 export interface CandidateInterviewMcqOptionDto {
-  option_id: string;
-  label: string;
+  id?: string;
+  option_id?: string;
+  text?: string;
+  label?: string;
 }
 
 export interface CandidateInterviewQuestionDto {
   slot_id: string;
-  order: number;
-  question_format: "CONVERSATIONAL" | "MCQ";
+  question_order?: number;
+  order?: number;
+  question_format: "CONVERSATIONAL" | "CONVERSATION" | "MCQ" | "MCQ_SINGLE_ANSWER";
   question_text: string;
+  competency?: string | null;
   options: CandidateInterviewMcqOptionDto[];
   is_supplemental: boolean;
   saved_text_answer?: string | null;

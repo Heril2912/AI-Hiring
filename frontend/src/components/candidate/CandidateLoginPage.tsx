@@ -133,8 +133,8 @@ export function CandidateLoginPage({
           </div>
         </form>
 
-        <footer className="candidate-auth-footer">
-          <p className="footer-text">
+        <footer className="candidate-auth-footer" style={{ display: "flex", flexDirection: "column", gap: "8px", textAlign: "center" }}>
+          <p className="footer-text" style={{ margin: 0 }}>
             Don't have an account?{" "}
             <button
               type="button"
@@ -143,6 +143,23 @@ export function CandidateLoginPage({
             >
               Create candidate account
             </button>
+          </p>
+          <p className="footer-text" style={{ margin: 0, fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
+            Are you a recruiter or hiring manager?{" "}
+            <a
+              href="/"
+              className="link-button"
+              style={{ fontSize: "12px", color: "var(--brand-primary, #4f5bd5)" }}
+              onClick={(e) => {
+                if (typeof window !== "undefined" && window.history?.pushState) {
+                  e.preventDefault();
+                  window.history.pushState(null, "", "/");
+                  window.dispatchEvent(new PopStateEvent("popstate"));
+                }
+              }}
+            >
+              Staff sign in
+            </a>
           </p>
         </footer>
       </div>

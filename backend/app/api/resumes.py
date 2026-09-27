@@ -935,14 +935,13 @@ async def list_candidate_resumes(
 ) -> list[CandidateListItemResponse]:
     try:
         from app.models.candidate import CandidateProfileRecord
+        from app.models.candidate_access import CandidateApplicationRecord, CandidateApplicationStatus
 
         stmt_art = select(ResumeArtifact).options(selectinload(ResumeArtifact.extraction)).order_by(ResumeArtifact.created_at.desc())
         artifacts = db.execute(stmt_art).scalars().all()
 
         results = []
         for art in artifacts:
-            has_ext = getattr(art, "extraction", None) is not None
-            
             stmt_prof = (
                 select(CandidateProfileRecord)
                 .options(selectinload(CandidateProfileRecord.identity))
@@ -951,6 +950,27 @@ async def list_candidate_resumes(
             )
             latest_prof = db.execute(stmt_prof).scalars().first()
 
+            # Check if this artifact or profile is associated with candidate application(s)
+            app_conditions = [CandidateApplicationRecord.artifact_id == art.artifact_id]
+            if latest_prof and latest_prof.identity_id:
+                app_conditions.append(CandidateApplicationRecord.candidate_id == latest_prof.identity_id)
+
+            from sqlalchemy import or_
+            stmt_apps = select(CandidateApplicationRecord).where(or_(*app_conditions))
+            associated_apps = db.execute(stmt_apps).scalars().all()
+
+            if associated_apps:
+                # If there are candidate applications associated with this artifact/candidate,
+                # only keep the candidate in recruiter directory if at least one application is active/submitted
+                # (i.e. not all applications are WITHDRAWN or non-submitted)
+                has_active_submission = any(
+                    a.status == CandidateApplicationStatus.SUBMITTED.value for a in associated_apps
+                )
+                if not has_active_submission:
+                    # All associated applications are withdrawn or drafts; exclude from active candidate directory
+                    continue
+
+            has_ext = getattr(art, "extraction", None) is not None
             full_name = None
             headline = None
             rev_req = False

@@ -70,7 +70,7 @@ class McqUpdateRequest(StrictSchema):
 
 class McqGenerateRequest(StrictSchema):
     """Server-authoritative generation request for MCQs."""
-    count: int = Field(default=5, ge=1, le=10)
+    count: int = Field(default=5, ge=1, le=5)
     difficulty: QuestionDifficulty = QuestionDifficulty.FOUNDATIONAL
     requirement_ids: Optional[List[UUID]] = None
 

@@ -664,86 +664,87 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
 
   return (
     <div className="job-editor-container">
-      {/* Top Action Header */}
-      <div className="job-editor-top-bar">
-        <div className="top-bar-left">
-          <button type="button" onClick={handleSafeNavigateBack} className="btn btn-secondary btn-sm">
-            <Icon name="arrow-left" size={14} />
-            <span>Jobs Directory</span>
-          </button>
-          <div>
-            <h2 className="editor-heading-title">
-              {jobId ? (title || "Job Draft") : "Create New Job Requisition"}
-            </h2>
-            <div className="editor-status-pills">
-              <span className={`badge ${isReadOnly ? "badge-ready" : "badge-version"}`}>
-                v{versionNumber} ({isReadOnly ? "Ready for matching" : "Draft"})
-              </span>
-              {jobId && <span className="badge badge-revision">Rev #{currentRevision}</span>}
-              {isReleased ? (
-                <span
-                  className="badge badge-onet-confirmed"
-                  title={releasedAt ? `Released on ${new Date(releasedAt).toLocaleDateString()}` : "Released to candidates"}
-                >
-                  <Icon name="globe" size={12} style={{ marginRight: "4px" }} />
-                  Released {releasedAt ? `(${new Date(releasedAt).toLocaleDateString()})` : ""}
-                </span>
-              ) : isReadOnly ? (
-                <span className="badge badge-warning" style={{ background: "rgba(234, 179, 8, 0.12)", color: "#ca8a04", borderColor: "rgba(234, 179, 8, 0.3)" }}>
-                  Not released
-                </span>
-              ) : null}
-              {isDirty && <span className="badge badge-unsaved">Unsaved Changes</span>}
-            </div>
-          </div>
-        </div>
+      {/* Top Navigation */}
+      <nav className="job-editor-top-nav" aria-label="Job navigation">
+        <button
+          type="button"
+          onClick={handleSafeNavigateBack}
+          className="job-editor-back-nav"
+          aria-label="Back to Jobs Directory"
+        >
+          <Icon name="arrow-left" size={14} />
+          <span>Back to Jobs Directory</span>
+        </button>
+      </nav>
 
-        <div className="top-bar-right">
-          {isReadOnly ? (
-            <>
+      {/* Main Header Content */}
+      <header className="job-editor-header-main">
+        <div className="job-editor-header-left">
+          <h1 className="job-editor-heading-title">
+            {jobId ? (title || "Job Draft") : "Create New Job Requisition"}
+          </h1>
+
+          <div className="job-editor-meta-row">
+            <span className={`badge ${isReadOnly ? "badge-ready" : "badge-version"}`}>
+              <Icon name={isReadOnly ? "check-circle" : "file-text"} size={12} />
+              <span>v{versionNumber} ({isReadOnly ? "Ready for matching" : "Draft"})</span>
+            </span>
+            {jobId && (
+              <span className="badge badge-revision">
+                <Icon name="layers" size={12} />
+                <span>Revision {currentRevision}</span>
+              </span>
+            )}
+            {isReleased ? (
+              <span
+                className="badge badge-onet-confirmed"
+                title={releasedAt ? `Released on ${new Date(releasedAt).toLocaleDateString()}` : "Released to candidates"}
+              >
+                <Icon name="globe" size={12} />
+                <span>
+                  Released {releasedAt ? new Date(releasedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : ""}
+                </span>
+              </span>
+            ) : isReadOnly ? (
+              <span className="badge badge-warning" style={{ background: "rgba(234, 179, 8, 0.12)", color: "#ca8a04", borderColor: "rgba(234, 179, 8, 0.3)" }}>
+                <Icon name="lock" size={12} />
+                <span>Not released</span>
+              </span>
+            ) : null}
+            {isDirty && (
+              <span className="badge badge-unsaved">
+                <Icon name="alert-circle" size={12} />
+                <span>Unsaved Changes</span>
+              </span>
+            )}
+          </div>
+
+          {/* Compact Locked Revision Note */}
+          {isReadOnly && (
+            <div className="job-locked-note" role="status">
+              <Icon name="lock" size={13} />
+              <span>
+                This revision (v{versionNumber}, Rev #{currentRevision}) is locked and ready for candidate comparison. Create a new revision to make changes.
+              </span>
               {!isReleased && (
                 <button
                   type="button"
-                  className="btn btn-primary btn-md"
+                  className="btn btn-secondary btn-xs"
                   onClick={() => setIsReleaseConfirmOpen(true)}
                   disabled={isReleasing}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                  style={{ marginLeft: "8px", display: "inline-flex", alignItems: "center", gap: "4px" }}
                 >
-                  <Icon name="globe" size={15} />
+                  <Icon name="globe" size={12} />
                   <span>{isReleasing ? "Releasing..." : "Release to candidates"}</span>
                 </button>
               )}
-              <button
-                type="button"
-                className="btn btn-secondary btn-md"
-                onClick={handleCreateSuccessor}
-                disabled={isCreatingSuccessor}
-              >
-                <Icon name="plus" size={14} />
-                <span>{isCreatingSuccessor ? "Creating..." : "Create new revision"}</span>
-              </button>
-              {jobId && onOpenApplicants && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-md"
-                  onClick={() => onOpenApplicants(jobId, title || "Job Requisition")}
-                  title="View applicants for this job"
-                >
-                  <Icon name="users" size={14} />
-                  <span>Applicants</span>
-                </button>
-              )}
-              {jobId && onOpenAiInterviews && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-md"
-                  onClick={() => onOpenAiInterviews(jobId)}
-                  title="Open AI Interviews workspace for this requisition"
-                >
-                  <Icon name="sparkles" size={14} />
-                  <span>AI Interviews</span>
-                </button>
-              )}
+            </div>
+          )}
+        </div>
+
+        <div className="job-editor-header-actions">
+          {isReadOnly ? (
+            <>
               <button
                 type="button"
                 className="btn btn-primary btn-md"
@@ -761,6 +762,41 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
                 <Icon name="badge-check" size={15} />
                 <span>Compare candidates</span>
               </button>
+
+              {jobId && onOpenApplicants && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-md"
+                  onClick={() => onOpenApplicants(jobId, title || "Job Requisition")}
+                  title="View applicants for this job"
+                >
+                  <Icon name="users" size={14} />
+                  <span>Applicants</span>
+                </button>
+              )}
+
+              {jobId && onOpenAiInterviews && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-md"
+                  onClick={() => onOpenAiInterviews(jobId)}
+                  title="Open AI Interviews workspace for this requisition"
+                >
+                  <Icon name="sparkles" size={14} />
+                  <span>AI Interviews</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-ghost btn-md"
+                onClick={handleCreateSuccessor}
+                disabled={isCreatingSuccessor}
+                title="Create a new draft revision"
+              >
+                <Icon name="plus" size={14} />
+                <span>{isCreatingSuccessor ? "Creating..." : "Create new revision"}</span>
+              </button>
             </>
           ) : (
             <button
@@ -774,36 +810,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
             </button>
           )}
         </div>
-      </div>
-
-      {/* Locked Ready Informational Strip */}
-      {isReadOnly && (
-        <div className="locked-strip-compact" role="status" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Icon name="check" size={16} className="strip-icon" />
-            <span>
-              This revision (v{versionNumber}, Rev #{currentRevision}) is locked and ready for candidate comparison.
-              {!isReleased && (
-                <strong style={{ marginLeft: "6px", fontWeight: 500 }}>
-                  Candidates will be able to view and apply to this job once released.
-                </strong>
-              )}
-            </span>
-          </div>
-          {!isReleased && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setIsReleaseConfirmOpen(true)}
-              disabled={isReleasing}
-              style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
-            >
-              <Icon name="globe" size={13} />
-              <span>{isReleasing ? "Releasing..." : "Release to candidates"}</span>
-            </button>
-          )}
-        </div>
-      )}
+      </header>
 
       {/* Release Confirmation Dialog Modal */}
       {isReleaseConfirmOpen && (
