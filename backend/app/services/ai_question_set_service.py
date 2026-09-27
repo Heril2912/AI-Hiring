@@ -104,6 +104,11 @@ class AiQuestionSetError(Exception):
 
 
 def _check_recruiter_access(actor: UserRecord, job: JobRequisition) -> None:
+    if getattr(job, "deleted_at", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job requisition has been deleted."},
+        )
     if actor.role == UserRole.RECRUITER and job.created_by_user_id != actor.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -206,7 +211,7 @@ def _build_canonical_generation_packet(
 
     eligible.sort(key=sort_key)
 
-    target_count = min(6, max(len(eligible), 1))
+    target_count = min(5, max(len(eligible), 1))
     selected_reqs = eligible[:target_count]
 
     canonical_reqs: List[CanonicalRequirementItem] = []
@@ -514,9 +519,50 @@ def _map_record_to_detail_dto(
             else:
                 p, i_plan = _build_canonical_generation_packet(job, latest_v)
                 canon_fp = i_plan["fingerprint"]
+                # Also check with target_count=min(6, ...) for backward compatibility with sets generated prior to 5-slot cap
+                eligible_reqs = [r for r in (latest_v.requirements or []) if _is_requirement_eligible(r)] or list(latest_v.requirements or [])
+                def _sk(r):
+                    nec = getattr(r, "necessity", getattr(r, "importance", None))
+                    nec_str = nec.value if hasattr(nec, "value") else str(nec or "")
+                    prio = getattr(r, "priority", None)
+                    prio_str = prio.value if hasattr(prio, "value") else str(prio or "")
+                    return 0 if (nec_str.upper() == "MUST_HAVE" or prio_str.upper() in ("CRITICAL", "HIGH")) else 1
+                eligible_reqs.sort(key=_sk)
+                target_6 = min(6, max(len(eligible_reqs), 1))
+                selected_6 = eligible_reqs[:target_6]
+                canon_6_reqs = [
+                    CanonicalRequirementItem(
+                        requirement_id=r.requirement_id,
+                        label=r.label.strip(),
+                        category=r.category.value if hasattr(r.category, "value") else str(r.category),
+                        necessity=r.necessity.value if hasattr(r.necessity, "value") else str(r.necessity),
+                        priority=r.priority.value if hasattr(r.priority, "value") else str(r.priority),
+                        rationale=r.rationale.strip() if r.rationale else None,
+                        is_interview_eligible=True,
+                    )
+                    for r in selected_6
+                ]
+                packet_6 = CanonicalGenerationSourcePacket(
+                    organization_id=p.organization_id,
+                    job_id=p.job_id,
+                    job_version_id=p.job_version_id,
+                    job_revision=p.job_revision,
+                    job_title=p.job_title,
+                    seniority_level=p.seniority_level,
+                    role_summary=p.role_summary,
+                    key_responsibilities=p.key_responsibilities,
+                    planned_slots=p.planned_slots[:target_6],
+                    canonical_requirements=canon_6_reqs,
+                    requested_question_count=target_6,
+                    delivery_mode=p.delivery_mode,
+                    generation_policy_version=p.generation_policy_version,
+                    prompt_contract_version=p.prompt_contract_version,
+                    guardrail_version=p.guardrail_version,
+                )
+                canon_6_fp = _compute_canonical_source_fingerprint(packet_6)
                 req_ids = [str(r.requirement_id) for r in (latest_v.requirements or [])]
                 legacy_fp = _compute_requirement_fingerprint(job.job_id, latest_v.job_version_id, latest_v.version_number, req_ids)
-                if ai_set.source_content_hash not in (canon_fp, legacy_fp):
+                if ai_set.source_content_hash not in (canon_fp, canon_6_fp, legacy_fp):
                     is_stale = True
                     stale_reason = "Job requirements were updated since AI question set generation."
 
@@ -726,10 +772,13 @@ def list_ai_question_sets(
         if actor_org is not None and r.organization_id != actor_org:
             continue
 
-        # Recruiter isolation
+        # Exclude deleted jobs and enforce recruiter isolation
         job_rec = r.requisition or (r.template.requisition if r.template else None)
-        if job_rec and actor.role == UserRole.RECRUITER and job_rec.created_by_user_id != actor.user_id:
-            continue
+        if job_rec:
+            if getattr(job_rec, "deleted_at", None) is not None:
+                continue
+            if actor.role == UserRole.RECRUITER and job_rec.created_by_user_id != actor.user_id:
+                continue
 
         key = str(r.template_id) if r.template_id else f"job_{r.job_id}_{r.job_revision}"
         if key not in latest_by_key or r.set_version > latest_by_key[key].set_version:
@@ -832,7 +881,10 @@ def get_eligible_jobs_for_ai_questions(
         .options(
             selectinload(JobRequisition.versions).selectinload(JobVersion.requirements)
         )
-        .where(JobRequisition.status == JobLifecycleStatus.ACTIVE)
+        .where(
+            JobRequisition.status == JobLifecycleStatus.ACTIVE,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     if actor.role == UserRole.RECRUITER:
         stmt = stmt.where(JobRequisition.created_by_user_id == actor.user_id)
@@ -1861,13 +1913,13 @@ def update_mcq_slot(
     return _map_record_to_detail_dto(editable_set, db)
 
 
-def remove_mcq_slot(
+def remove_slot(
     actor: UserRecord,
     template_id: UUID,
     slot_id: UUID,
     db: Session,
 ) -> AiQuestionSetDetailResponse:
-    """Removes a multiple-choice question slot and re-indexes remaining slots."""
+    """Removes a question slot (conversational or MCQ) from the AI question set and re-indexes remaining slots in the database."""
     stmt_set = (
         select(AiInterviewQuestionSetRecord)
         .options(
@@ -1907,6 +1959,10 @@ def remove_mcq_slot(
     db.refresh(editable_set)
 
     return _map_record_to_detail_dto(editable_set, db)
+
+
+# Backward compatibility alias
+remove_mcq_slot = remove_slot
 
 
 def reorder_mcq_slots(
@@ -2010,9 +2066,49 @@ def validate_ai_question_set(
             else:
                 p, i_plan = _build_canonical_generation_packet(job_rec, latest_v)
                 canon_fp = i_plan["fingerprint"]
+                eligible_reqs = [r for r in (latest_v.requirements or []) if _is_requirement_eligible(r)] or list(latest_v.requirements or [])
+                def _sk(r):
+                    nec = getattr(r, "necessity", getattr(r, "importance", None))
+                    nec_str = nec.value if hasattr(nec, "value") else str(nec or "")
+                    prio = getattr(r, "priority", None)
+                    prio_str = prio.value if hasattr(prio, "value") else str(prio or "")
+                    return 0 if (nec_str.upper() == "MUST_HAVE" or prio_str.upper() in ("CRITICAL", "HIGH")) else 1
+                eligible_reqs.sort(key=_sk)
+                target_6 = min(6, max(len(eligible_reqs), 1))
+                selected_6 = eligible_reqs[:target_6]
+                canon_6_reqs = [
+                    CanonicalRequirementItem(
+                        requirement_id=r.requirement_id,
+                        label=r.label.strip(),
+                        category=r.category.value if hasattr(r.category, "value") else str(r.category),
+                        necessity=r.necessity.value if hasattr(r.necessity, "value") else str(r.necessity),
+                        priority=r.priority.value if hasattr(r.priority, "value") else str(r.priority),
+                        rationale=r.rationale.strip() if r.rationale else None,
+                        is_interview_eligible=True,
+                    )
+                    for r in selected_6
+                ]
+                packet_6 = CanonicalGenerationSourcePacket(
+                    organization_id=p.organization_id,
+                    job_id=p.job_id,
+                    job_version_id=p.job_version_id,
+                    job_revision=p.job_revision,
+                    job_title=p.job_title,
+                    seniority_level=p.seniority_level,
+                    role_summary=p.role_summary,
+                    key_responsibilities=p.key_responsibilities,
+                    planned_slots=p.planned_slots[:target_6],
+                    canonical_requirements=canon_6_reqs,
+                    requested_question_count=target_6,
+                    delivery_mode=p.delivery_mode,
+                    generation_policy_version=p.generation_policy_version,
+                    prompt_contract_version=p.prompt_contract_version,
+                    guardrail_version=p.guardrail_version,
+                )
+                canon_6_fp = _compute_canonical_source_fingerprint(packet_6)
                 req_ids = [str(r.requirement_id) for r in (latest_v.requirements or [])]
                 legacy_fp = _compute_requirement_fingerprint(job_rec.job_id, latest_v.job_version_id, latest_v.version_number, req_ids)
-                if ai_set.source_content_hash not in (canon_fp, legacy_fp):
+                if ai_set.source_content_hash not in (canon_fp, canon_6_fp, legacy_fp):
                     errors.append("AI question set is stale: job requirements have changed since generation. Please regenerate.")
 
     items = ai_set.items or []

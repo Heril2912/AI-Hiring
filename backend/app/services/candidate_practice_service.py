@@ -39,6 +39,11 @@ from app.schemas.phase3_enums import PracticeReleaseStatus
 
 
 def _check_recruiter_access(actor: UserRecord, job: JobRequisition) -> None:
+    if getattr(job, "deleted_at", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "Job requisition has been deleted."},
+        )
     if actor.role == UserRole.RECRUITER and job.created_by_user_id != actor.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -92,7 +97,10 @@ def list_eligible_jobs_for_candidate_practice(
     stmt_jobs = (
         select(JobRequisition)
         .options(selectinload(JobRequisition.versions).selectinload(JobVersion.requirements))
-        .where(JobRequisition.status == JobLifecycleStatus.ACTIVE)
+        .where(
+            JobRequisition.status == JobLifecycleStatus.ACTIVE,
+            JobRequisition.deleted_at.is_(None),
+        )
     )
     if actor.role == UserRole.RECRUITER:
         stmt_jobs = stmt_jobs.where(JobRequisition.created_by_user_id == actor.user_id)

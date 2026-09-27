@@ -237,6 +237,36 @@ export function AiQuestionSetWorkspace({
     }
   };
 
+  const handleDeleteSlot = async (slotId: string) => {
+    if (detail?.is_immutable) return;
+    if (!window.confirm("Are you sure you want to remove this question from the question set?")) return;
+
+    try {
+      setIsUpdatingSlot(true);
+      setError(null);
+      setActionFeedback(null);
+      const updated = await apiFetch<AiQuestionSetDetail>(
+        `/api/v1/ai-interviews/${templateId}/items/${slotId}`,
+        { method: "DELETE" }
+      );
+      setDetail(updated);
+      setValidationResult(null);
+      setActionFeedback("Question removed from question set.");
+
+      // Adjust active index if needed
+      const remainingConv = (updated.slots || []).filter(
+        (s) => s.question_format === "CONVERSATION" || !s.question_format
+      );
+      if (activeSlotIndex >= remainingConv.length) {
+        setActiveSlotIndex(Math.max(0, remainingConv.length - 1));
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to remove question.");
+    } finally {
+      setIsUpdatingSlot(false);
+    }
+  };
+
   const handleRegenerateLegacySet = async () => {
     if (!detail) return;
     try {
@@ -972,6 +1002,18 @@ export function AiQuestionSetWorkspace({
                           >
                             <Icon name="refresh" size={14} className={isRegenerating ? "animate-spin" : ""} />
                             <span>{isRegenerating ? "Regenerating…" : "Regenerate"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            className="aiq-tool-btn"
+                            onClick={() => handleDeleteSlot(activeSlot.slot_id)}
+                            disabled={isUpdatingSlot}
+                            style={{ color: "var(--danger, #ef4444)" }}
+                            title="Remove this question from the set and database"
+                          >
+                            <Icon name="trash" size={14} />
+                            <span>Remove question</span>
                           </button>
                         </div>
                       )}

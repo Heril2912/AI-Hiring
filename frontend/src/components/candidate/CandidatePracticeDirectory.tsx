@@ -2,11 +2,13 @@ import React, { useEffect, useState } from "react";
 import { getCandidatePracticeDiscovery } from "../../api/candidatePractice";
 import { CandidatePracticeJobSummary } from "../../types/ai_question_set";
 import { Icon } from "../Icon";
+import { CandidateInterviewWorkspace } from "./CandidateInterviewWorkspace";
 
 export function CandidatePracticeDirectory() {
   const [practiceJobs, setPracticeJobs] = useState<CandidatePracticeJobSummary[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeReleaseId, setActiveReleaseId] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
@@ -24,6 +26,18 @@ export function CandidatePracticeDirectory() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  if (activeReleaseId) {
+    return (
+      <CandidateInterviewWorkspace
+        releaseId={activeReleaseId}
+        onExit={() => {
+          setActiveReleaseId(null);
+          fetchData();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="candidate-home-container" style={{ maxWidth: "960px", margin: "0 auto", padding: "16px 20px" }}>
@@ -98,14 +112,15 @@ export function CandidatePracticeDirectory() {
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={fetchData}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             >
-              <Icon name="refresh" size={13} aria-hidden="true" />
-              <span>Check for Updates</span>
+              <Icon name="refresh" size={14} aria-hidden="true" />
+              <span>Check Again</span>
             </button>
           </div>
         </div>
       ) : practiceJobs.length === 1 ? (
-        /* Case 1: Single Assigned Official Interview - Dedicated Spotlight Card */
+        /* Case 1: Exactly 1 Released Official Interview */
         (() => {
           const singleJob = practiceJobs[0];
           const convCount = singleJob.conversation_question_count ?? singleJob.conversation_count ?? 0;
@@ -252,6 +267,19 @@ export function CandidatePracticeDirectory() {
                   This official interview was released for your submitted application. The hiring team has approved this question set for Revision #{revNum}.
                 </p>
               </div>
+
+              {/* Action Button */}
+              <div style={{ display: "flex", justifyContent: "flex-start", paddingTop: "8px" }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setActiveReleaseId(singleJob.release_id)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 20px", fontSize: "14px" }}
+                >
+                  <span>Start Interview</span>
+                  <Icon name="chevron-right" size={16} aria-hidden="true" />
+                </button>
+              </div>
             </div>
           );
         })()
@@ -347,10 +375,19 @@ export function CandidatePracticeDirectory() {
                     </div>
                   </div>
 
-                  <div style={{ paddingTop: "8px", borderTop: "1px solid var(--border-subtle, #f1f5f9)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "8px", borderTop: "1px solid var(--border-subtle, #f1f5f9)" }}>
                     <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)" }}>
-                      Released for your submitted application (~{estMinutes} Mins)
+                      ~{estMinutes} Mins
                     </span>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => setActiveReleaseId(job.release_id)}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <span>Start</span>
+                      <Icon name="chevron-right" size={14} aria-hidden="true" />
+                    </button>
                   </div>
                 </div>
               );
@@ -358,6 +395,7 @@ export function CandidatePracticeDirectory() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

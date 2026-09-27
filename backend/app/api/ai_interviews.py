@@ -33,6 +33,7 @@ from app.services.ai_question_set_service import (
     list_ai_question_sets,
     regenerate_ai_question_slot,
     remove_mcq_slot,
+    remove_slot,
     reorder_mcq_slots,
     update_ai_question_slot,
     update_mcq_slot,
@@ -223,6 +224,45 @@ async def update_ai_question_slot_endpoint(
         template_id=template_id,
         slot_id=slot_id,
         payload=payload,
+        db=db,
+    )
+
+
+@router.delete(
+    "/ai-interviews/{template_id}/items/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete Question Slot from AI Question Set",
+    description="Removes any question slot (conversational or MCQ) from the AI question set and database.",
+)
+@router.delete(
+    "/ai-interviews/{template_id}/slots/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.delete(
+    "/ai-question-sets/{template_id}/items/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.delete(
+    "/templates/{template_id}/slots/{slot_id}",
+    response_model=AiQuestionSetDetailResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def remove_ai_question_slot_endpoint(
+    template_id: uuid.UUID,
+    slot_id: uuid.UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> AiQuestionSetDetailResponse:
+    return remove_slot(
+        actor=auth_ctx.user,
+        template_id=template_id,
+        slot_id=slot_id,
         db=db,
     )
 
