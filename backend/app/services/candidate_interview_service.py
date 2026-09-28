@@ -16,6 +16,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.config import get_settings
 from app.models.auth import AuditEventType, AuditReasonCode, AuditResult, UserRecord
 from app.models.candidate_access import (
     CandidateAccountBindingRecord,
@@ -29,6 +30,7 @@ from app.models.candidate_access import (
 from app.models.interview import AiInterviewQuestionSetRecord
 from app.models.job import JobRequisition, JobVersion
 from app.schemas.candidate_interview import (
+    CandidateInterviewCapabilityResponse,
     CandidateInterviewMcqOptionDto,
     CandidateInterviewQuestionDto,
     CandidateInterviewSessionResponse,
@@ -36,10 +38,22 @@ from app.schemas.candidate_interview import (
     CandidateSaveAnswerResponse,
     CandidateSubmitInterviewRequest,
     CandidateSubmitInterviewResponse,
+    CandidateTranscriptionResponse,
 )
 from app.schemas.phase3_enums import PracticeReleaseStatus
+from app.services.speech_service import (
+    EphemeralAudioProcessor,
+    SpeechRuntimeCapabilityService,
+    TextToSpeechAdapter,
+)
 
 logger = logging.getLogger("ai_hiring.services.candidate_interview")
+
+
+def get_interview_capabilities() -> CandidateInterviewCapabilityResponse:
+    """Returns candidate-safe capability metadata for local audio interviews."""
+    caps = SpeechRuntimeCapabilityService.get_safe_capabilities()
+    return CandidateInterviewCapabilityResponse(**caps)
 
 
 def _get_candidate_binding(candidate_user: UserRecord, db: Session) -> CandidateAccountBindingRecord:
@@ -213,17 +227,19 @@ def start_or_resume_interview_session(
             questions=questions_dto,
         )
 
-    # Phase 4D.2 Execution Gate for Audio interviews
-    # Audio releases may appear and open preparation view, but candidate cannot transition to IN_PROGRESS until Phase 4D.3
+    # Phase 4D.3 Audio interview validation
     release_mode = (release.interview_mode or (release.ai_set.interview_mode if release.ai_set else "TEXT") or "TEXT").upper()
     if release_mode == "AUDIO":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "AUDIO_INTERVIEW_NOT_READY",
-                "message": "Audio interview setup is not yet available.",
-            },
-        )
+        # 1. Require speech capability
+        caps = SpeechRuntimeCapabilityService.get_safe_capabilities()
+        if not caps["speech_to_text_available"] or not caps["text_to_speech_available"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "SPEECH_RUNTIME_UNAVAILABLE",
+                    "message": caps.get("unavailable_reason") or "Local speech runtime (whisper.cpp / Piper) is unavailable. Please check configuration.",
+                },
+            )
 
     # 3. Create new session from frozen approved question set
     ai_set = release.ai_set
@@ -234,6 +250,22 @@ def start_or_resume_interview_session(
         )
 
     snapshot_items = ai_set.items
+
+    if release_mode == "AUDIO":
+        # Reject if contains any MCQ
+        has_mcq = any(
+            (item.get("question_format") or "").upper() in ("MCQ", "MCQ_SINGLE_ANSWER")
+            or bool(item.get("options") and len(item.get("options", [])) > 0)
+            for item in snapshot_items
+        )
+        if has_mcq:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "AUDIO_MCQ_NOT_ALLOWED",
+                    "message": "Audio interviews strictly reject multiple choice questions (MCQs).",
+                },
+            )
     snapshot_hash = _compute_snapshot_hash(snapshot_items)
     now = datetime.now(timezone.utc)
 
@@ -550,4 +582,164 @@ def submit_interview_session(
         answered_questions=answered_count,
         unanswered_questions=unanswered_count,
         message="Official interview submitted successfully. Your responses have been recorded.",
+    )
+
+
+def get_question_audio(
+    session_id: UUID,
+    slot_id: str,
+    candidate_user: UserRecord,
+    db: Session,
+) -> bytes:
+    """Generates or retrieves Piper TTS speech for an approved question in an official Audio interview session."""
+    binding = _get_candidate_binding(candidate_user, db)
+
+    stmt = select(CandidateInterviewSessionRecord).where(
+        CandidateInterviewSessionRecord.session_id == session_id,
+        CandidateInterviewSessionRecord.candidate_id == binding.candidate_id,
+        CandidateInterviewSessionRecord.organization_id == binding.organization_id,
+    )
+    sess = db.execute(stmt).scalar_one_or_none()
+    if not sess:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "SESSION_NOT_FOUND", "message": "Interview session not found."},
+        )
+
+    if (sess.interview_mode or "").upper() != "AUDIO":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "AUDIO_NOT_SUPPORTED_FOR_TEXT_INTERVIEW", "message": "Question audio playback is only available for Audio interviews."},
+        )
+
+    try:
+        target_slot_uuid = UUID(slot_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_SLOT_ID", "message": "Invalid slot identifier format."},
+        )
+
+    # Find the question in the frozen snapshot
+    target_question = None
+    for item in sess.questions_snapshot:
+        item_slot_str = item.get("slot_id") or item.get("question_id")
+        if item_slot_str and UUID(str(item_slot_str)) == target_slot_uuid:
+            target_question = item
+            break
+
+    if not target_question:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "QUESTION_NOT_FOUND", "message": "Question slot not found in interview session."},
+        )
+
+    # Strictly candidate-safe question text only - never include rubrics, notes, or scoring info
+    question_text = (target_question.get("question_text") or target_question.get("text") or "").strip()
+    if not question_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "EMPTY_QUESTION_TEXT", "message": "Question text is empty and cannot be converted to speech."},
+        )
+
+    snapshot_identity = str(sess.ai_set_id or sess.session_id)
+    return TextToSpeechAdapter.synthesize_question_speech(
+        question_snapshot_id=snapshot_identity,
+        question_text=question_text,
+    )
+
+
+def transcribe_candidate_question_audio(
+    session_id: UUID,
+    slot_id: str,
+    audio_bytes: bytes,
+    original_content_type: str,
+    candidate_user: UserRecord,
+    db: Session,
+) -> CandidateTranscriptionResponse:
+    """Ephemeral conversion and local whisper.cpp transcription for candidate audio response."""
+    binding = _get_candidate_binding(candidate_user, db)
+
+    stmt = select(CandidateInterviewSessionRecord).where(
+        CandidateInterviewSessionRecord.session_id == session_id,
+        CandidateInterviewSessionRecord.candidate_id == binding.candidate_id,
+        CandidateInterviewSessionRecord.organization_id == binding.organization_id,
+    )
+    sess = db.execute(stmt).scalar_one_or_none()
+    if not sess:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "SESSION_NOT_FOUND", "message": "Interview session not found."},
+        )
+
+    if sess.status == "SUBMITTED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "SESSION_ALREADY_SUBMITTED", "message": "Cannot transcribe audio for a submitted interview."},
+        )
+
+    if (sess.interview_mode or "").upper() != "AUDIO":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "AUDIO_NOT_SUPPORTED_FOR_TEXT_INTERVIEW", "message": "Audio transcription is only available for Audio interviews."},
+        )
+
+    try:
+        target_slot_uuid = UUID(slot_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_SLOT_ID", "message": "Invalid slot identifier format."},
+        )
+
+    target_question = None
+    for item in sess.questions_snapshot:
+        item_slot_str = item.get("slot_id") or item.get("question_id")
+        if item_slot_str and UUID(str(item_slot_str)) == target_slot_uuid:
+            target_question = item
+            break
+
+    if not target_question:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "QUESTION_NOT_FOUND", "message": "Question slot not found in interview session."},
+        )
+
+    q_format = (target_question.get("question_format") or "").upper()
+    if q_format in ("MCQ", "MCQ_SINGLE_ANSWER") or (target_question.get("options") and len(target_question.get("options", [])) > 0):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "AUDIO_MCQ_NOT_ALLOWED", "message": "Audio transcription is not allowed for MCQs."},
+        )
+
+    # Process and transcribe ephemerally (zero-retention: deleted in finally)
+    try:
+        res = EphemeralAudioProcessor.process_and_transcribe(
+            audio_bytes=audio_bytes,
+            original_content_type=original_content_type,
+        )
+        if isinstance(res, tuple):
+            transcript, duration_s = res
+        else:
+            transcript, duration_s = res, None
+    except ValueError as val_err:
+        err_str = str(val_err)
+        err_code = "TRANSCRIPT_DURATION_MISMATCH" if "TRANSCRIPT_DURATION_MISMATCH" in err_str else "INVALID_AUDIO_RECORDING"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": err_code, "message": err_str},
+        )
+    except RuntimeError as run_err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "SPEECH_PROCESSING_ERROR", "message": str(run_err)},
+        )
+
+    is_empty = bool(not transcript.strip())
+    return CandidateTranscriptionResponse(
+        session_id=session_id,
+        slot_id=target_slot_uuid,
+        transcript=transcript,
+        is_empty=is_empty,
+        duration_seconds=duration_s,
     )

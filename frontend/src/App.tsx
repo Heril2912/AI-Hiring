@@ -787,12 +787,8 @@ function CandidateMainContent({ initialView }: { initialView?: "register" | "log
   }
 
   // 2. Explicit Register page
-  const isRegisterPath = pathname === "/candidate/register" || initialView === "register";
+  const isRegisterPath = (pathname === "/candidate/register" || initialView === "register") && status !== "AUTHENTICATED";
   if (isRegisterPath) {
-    if (status === "AUTHENTICATED") {
-      navigateCandidate("/candidate/jobs");
-      return <CandidateShell initialTab="jobs" onLogout={() => navigateCandidate("/candidate/login")} />;
-    }
     return (
       <CandidateRegisterPage
         onSuccess={() => {
@@ -809,13 +805,8 @@ function CandidateMainContent({ initialView }: { initialView?: "register" | "log
   }
 
   // 3. Unauthenticated or Login route
-  const isLoginPath = pathname === "/candidate/login" || initialView === "login";
+  const isLoginPath = (pathname === "/candidate/login" || initialView === "login") && status !== "AUTHENTICATED";
   if (status === "UNAUTHENTICATED" || isLoginPath) {
-    if (status === "AUTHENTICATED" && isLoginPath) {
-      const safeReturn = getSafeReturnTo();
-      navigateCandidate(safeReturn || "/candidate/jobs");
-      return <CandidateShell initialTab="jobs" onLogout={() => navigateCandidate("/candidate/login")} />;
-    }
     return (
       <CandidateLoginPage
         onSuccess={() => {

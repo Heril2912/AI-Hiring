@@ -108,6 +108,85 @@ export async function saveInterviewAnswer(
   );
 }
 
+export interface CandidateInterviewCapabilityResponse {
+  speech_to_text_available: boolean;
+  text_to_speech_available: boolean;
+  microphone_required: boolean;
+  secure_context_required: boolean;
+  max_recording_seconds: number;
+  max_upload_bytes: number;
+  unavailable_reason?: string | null;
+  configured_model_label?: string | null;
+  model_recommendation_warning?: string | null;
+}
+
+export interface CandidateTranscriptionResponse {
+  session_id: string;
+  slot_id: string;
+  transcript: string;
+  duration_seconds?: number;
+  is_empty: boolean;
+}
+
+/**
+ * Fetch candidate-safe speech capabilities for audio interviews.
+ */
+export async function fetchInterviewCapabilities(): Promise<CandidateInterviewCapabilityResponse> {
+  return apiFetch<CandidateInterviewCapabilityResponse>(
+    `/api/v1/candidate/interviews/capabilities`
+  );
+}
+
+/**
+ * Fetch Piper TTS question audio blob.
+ */
+export async function fetchQuestionAudioBlob(
+  sessionId: string,
+  slotId: string
+): Promise<Blob> {
+  const response = await fetch(
+    `/api/v1/candidate/interviews/sessions/${sessionId}/questions/${slotId}/audio`,
+    {
+      credentials: "include",
+    }
+  );
+  if (!response.ok) {
+    let errorMsg = `Audio fetch failed (${response.status})`;
+    try {
+      const data = await response.json();
+      if (data?.detail?.message) errorMsg = data.detail.message;
+      else if (typeof data?.detail === "string") errorMsg = data.detail;
+    } catch {
+      // fallback
+    }
+    throw new Error(errorMsg);
+  }
+  return response.blob();
+}
+
+/**
+ * Upload candidate recording for ephemeral transcription.
+ */
+export async function transcribeQuestionAudio(
+  sessionId: string,
+  slotId: string,
+  audioBlob: Blob,
+  signal?: AbortSignal
+): Promise<CandidateTranscriptionResponse> {
+  const formData = new FormData();
+  const fileExt = audioBlob.type.includes("wav") ? "wav" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
+  formData.append("file", audioBlob, `recording.${fileExt}`);
+
+  return apiFetch<CandidateTranscriptionResponse>(
+    `/api/v1/candidate/interviews/sessions/${sessionId}/questions/${slotId}/transcribe`,
+    {
+      method: "POST",
+      body: formData,
+      signal,
+    }
+  );
+}
+
 /**
  * Submit an official interview session.
  */
@@ -123,3 +202,4 @@ export async function submitInterview(
     }
   );
 }
+

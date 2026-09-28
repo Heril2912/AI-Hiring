@@ -26,6 +26,7 @@ export interface EvaluationCandidateSummary {
   answers_recorded_display: string;
   ai_analysis_status: string;
   recruiter_evaluation_status: string;
+  interview_mode?: "TEXT" | "AUDIO";
   resume_match_score?: number | null;
   required_skills_coverage?: string | null;
 }
@@ -157,6 +158,7 @@ export interface CandidateInterviewEvaluationDetail {
   job_title: string;
   job_revision: number;
   question_set_version: number;
+  interview_mode?: "TEXT" | "AUDIO";
   submitted_at?: string | null;
   status: string;
   candidate_feedback_status: string;
@@ -167,6 +169,31 @@ export interface CandidateInterviewEvaluationDetail {
   overview: EvaluationOverviewSummary;
   questions: EvaluationQuestionDetail[];
   activity_log: EvaluationAuditActivity[];
+}
+
+export interface CandidateEvaluationExport {
+  session_id: string;
+  evaluation_id?: string | null;
+  release_id: string;
+  candidate_id: string;
+  candidate_name: string;
+  candidate_email?: string | null;
+  job_id: string;
+  job_title: string;
+  job_revision: number;
+  question_set_version: number;
+  interview_mode: "TEXT" | "AUDIO";
+  submitted_at?: string | null;
+  status: string;
+  candidate_feedback_status: string;
+  candidate_feedback_published_at?: string | null;
+  finalized_by_name?: string | null;
+  finalized_at?: string | null;
+  resume_match_reference?: ResumeMatchReference | null;
+  overview: EvaluationOverviewSummary;
+  questions: EvaluationQuestionDetail[];
+  activity_log: EvaluationAuditActivity[];
+  exported_at: string;
 }
 
 export interface SaveQuestionReviewPayload {
@@ -228,6 +255,8 @@ export interface QuestionSafeFeedback {
 export interface CandidateSafeFeedbackReport {
   session_id: string;
   job_title: string;
+  job_revision?: number;
+  interview_mode?: "TEXT" | "AUDIO";
   completed_at: string;
   published_at: string;
   top_strengths: string[];
@@ -242,10 +271,12 @@ export async function listEvaluationJobs(): Promise<EvaluationJobSummary[]> {
 
 export async function listJobCandidatesForEvaluation(
   jobId: string,
-  jobRevision: number
+  jobRevision: number,
+  mode?: string
 ): Promise<EvaluationCandidateSummary[]> {
+  const query = mode && mode !== "ALL" ? `?mode=${encodeURIComponent(mode)}` : "";
   return apiFetch<EvaluationCandidateSummary[]>(
-    `/api/v1/recruiter/evaluations/jobs/${jobId}/revisions/${jobRevision}/candidates`
+    `/api/v1/recruiter/evaluations/jobs/${jobId}/revisions/${jobRevision}/candidates${query}`
   );
 }
 
@@ -254,6 +285,14 @@ export async function getCandidateEvaluationDetail(
 ): Promise<CandidateInterviewEvaluationDetail> {
   return apiFetch<CandidateInterviewEvaluationDetail>(
     `/api/v1/recruiter/evaluations/sessions/${sessionId}`
+  );
+}
+
+export async function exportCandidateEvaluationJson(
+  sessionId: string
+): Promise<CandidateEvaluationExport> {
+  return apiFetch<CandidateEvaluationExport>(
+    `/api/v1/recruiter/evaluations/sessions/${sessionId}/export`
   );
 }
 
@@ -317,4 +356,5 @@ export async function getCandidateFeedbackReport(
     `/api/v1/candidate/interviews/sessions/${sessionId}/feedback`
   );
 }
+
 

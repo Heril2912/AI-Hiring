@@ -531,7 +531,12 @@ def _map_record_to_detail_dto(
                 is_stale = True
                 stale_reason = f"Job revision was updated from #{ai_set.job_revision} to #{target_v_rev}."
             else:
-                p, i_plan = _build_canonical_generation_packet(job, latest_v)
+                deliv_mode = (
+                    GenerationDeliveryMode.VOICE
+                    if (getattr(ai_set, "interview_mode", None) == InterviewMode.AUDIO or str(getattr(ai_set, "interview_mode", "")) == "AUDIO")
+                    else GenerationDeliveryMode.CHAT
+                )
+                p, i_plan = _build_canonical_generation_packet(job, latest_v, delivery_mode=deliv_mode)
                 canon_fp = i_plan["fingerprint"]
                 # Also check with target_count=min(6, ...) for backward compatibility with sets generated prior to 5-slot cap
                 eligible_reqs = [r for r in (latest_v.requirements or []) if _is_requirement_eligible(r)] or list(latest_v.requirements or [])
@@ -582,6 +587,10 @@ def _map_record_to_detail_dto(
 
     if is_stale and ai_set.lifecycle_status not in ("APPROVED", "STALE"):
         ai_set.lifecycle_status = "STALE"
+        db.commit()
+    elif not is_stale and ai_set.lifecycle_status == "STALE":
+        all_rev = all(it.get("review_state") in ("KEPT", "EDITED", "RECRUITER_AUTHORED") for it in (ai_set.items or [])) if ai_set.items else False
+        ai_set.lifecycle_status = "VALIDATED" if all_rev else "DRAFT"
         db.commit()
 
     slot_dtos: List[AiQuestionSlotItemResponse] = []
@@ -1582,7 +1591,12 @@ def _ensure_editable_set(
             ).where(JobRequisition.job_id == ai_set.job_id)
             job_rec = db.execute(job_stmt).scalar_one_or_none()
             if job_rec and latest_jv:
-                _, i_plan = _build_canonical_generation_packet(job_rec, latest_jv, actor=actor)
+                deliv_mode = (
+                    GenerationDeliveryMode.VOICE
+                    if (getattr(ai_set, "interview_mode", None) == InterviewMode.AUDIO or str(getattr(ai_set, "interview_mode", "")) == "AUDIO")
+                    else GenerationDeliveryMode.CHAT
+                )
+                _, i_plan = _build_canonical_generation_packet(job_rec, latest_jv, delivery_mode=deliv_mode, actor=actor)
                 src_hash = i_plan.get("fingerprint", src_hash)
     elif ai_set.source_mode == "BLUEPRINT_GROUNDED" and ai_set.template:
         src_hash = ai_set.template.content_hash or src_hash

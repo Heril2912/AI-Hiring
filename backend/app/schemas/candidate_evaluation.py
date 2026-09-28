@@ -58,6 +58,7 @@ class EvaluationCandidateSessionSummaryDto(StrictSchema):
     total_questions_count: int
     ai_analysis_status: str  # "READY", "PENDING", "UNAVAILABLE"
     evaluation_status: str  # "AWAITING_SUBMISSION", "ANALYSIS_PENDING", "READY_FOR_REVIEW", "IN_REVIEW", "FINALIZED", "ANALYSIS_UNAVAILABLE", "MANUAL_REVIEW_AVAILABLE"
+    interview_mode: str = "TEXT"  # "TEXT", "AUDIO"
     resume_match_score: Optional[float] = None
     required_skills_coverage: Optional[str] = None
 
@@ -179,6 +180,7 @@ class CandidateInterviewEvaluationDetailResponse(StrictSchema):
     job_title: str
     job_revision: int
     question_set_version: int
+    interview_mode: str = "TEXT"  # "TEXT", "AUDIO"
     submitted_at: Optional[datetime] = None
     status: str  # "NOT_STARTED", "IN_REVIEW", "FINALIZED"
     candidate_feedback_status: str = "UNPUBLISHED"  # "UNPUBLISHED", "PUBLISHED"
@@ -264,6 +266,7 @@ class CandidateSafeFeedbackReportResponse(StrictSchema):
     session_id: uuid.UUID
     job_title: str
     job_revision: int
+    interview_mode: str = "TEXT"  # "TEXT", "AUDIO"
     submitted_at: datetime
     published_at: datetime
     reviewed_strengths: List[str] = Field(default_factory=list)
@@ -271,3 +274,34 @@ class CandidateSafeFeedbackReportResponse(StrictSchema):
     response_dimensions: Dict[str, int] = Field(default_factory=dict)
     questions_feedback: List[CandidateSafeQuestionFeedbackDto] = Field(default_factory=list)
     message: str = "Candidate interview feedback report."
+
+
+# =============================================================================
+# Level 3: Evaluation JSON Export (Zero Audio Retention)
+# =============================================================================
+
+class CandidateEvaluationExportDto(StrictSchema):
+    """Safe, sanitized export DTO containing evaluation, answers, and rubric evidence without audio binaries/paths."""
+    session_id: uuid.UUID
+    evaluation_id: Optional[uuid.UUID] = None
+    release_id: uuid.UUID
+    candidate_id: uuid.UUID
+    candidate_name: str
+    candidate_email: Optional[str] = None
+    job_id: uuid.UUID
+    job_title: str
+    job_revision: int
+    question_set_version: int
+    interview_mode: str = "TEXT"
+    submitted_at: Optional[datetime] = None
+    status: str
+    candidate_feedback_status: str = "UNPUBLISHED"
+    candidate_feedback_published_at: Optional[datetime] = None
+    finalized_by_name: Optional[str] = None
+    finalized_at: Optional[datetime] = None
+    resume_match_reference: Optional[ResumeMatchReferenceDto] = None
+    overview: EvaluationOverviewSummaryDto
+    questions: List[EvaluationQuestionDetailDto] = Field(default_factory=list)
+    activity_log: List[EvaluationAuditActivityDto] = Field(default_factory=list)
+    exported_at: datetime
+

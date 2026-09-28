@@ -241,8 +241,8 @@ describe("Phase 4D.1 Frontend: Dual-Mode Interview Foundation and Recruiter Stud
       expect(screen.getByText("Audio-based")).toBeInTheDocument();
       // MCQ tab should not be present
       expect(screen.queryByRole("tab", { name: /Multiple Choice/i })).not.toBeInTheDocument();
-      // Release action indicates Phase 4D.2 deferral
-      expect(screen.getByText(/Audio delivery completed in Phase 4D.2/i)).toBeInTheDocument();
+      // Release action is available
+      expect(screen.getByRole("button", { name: /Release Interview Set/i })).toBeInTheDocument();
     });
   });
 });

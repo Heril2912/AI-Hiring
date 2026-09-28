@@ -691,28 +691,15 @@ export function AiQuestionSetWorkspace({
           )}
 
           {isApproved && !isLegacy && !isStale && Boolean(detail.job_id) && (
-            detail.interview_mode === "AUDIO" ? (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                disabled
-                title="Audio delivery is completed in Phase 4D.2"
-                style={{ opacity: 0.85, cursor: "not-allowed" }}
-              >
-                <Icon name="mic" size={15} />
-                <span>Audio delivery completed in Phase 4D.2</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => setIsReleaseModalOpen(true)}
-                title="Release this sealed interview set to eligible applicants"
-              >
-                <Icon name="user-check" size={15} />
-                <span>Release Interview Set</span>
-              </button>
-            )
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setIsReleaseModalOpen(true)}
+              title="Release this sealed interview set to eligible applicants"
+            >
+              <Icon name={detail.interview_mode === "AUDIO" ? "mic" : "user-check"} size={15} />
+              <span>Release Interview Set</span>
+            </button>
           )}
 
           {isLegacy && (
