@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ReleaseInterviewSetModal } from "../components/ai_interviews/ReleaseInterviewSetModal";
 import { CandidatePracticeDirectory } from "../components/candidate/CandidatePracticeDirectory";
 import { CandidateInterviewWorkspace } from "../components/candidate/CandidateInterviewWorkspace";
-import type { AiInterviewQuestionSetSummary, InterviewMode } from "../types/ai_question_set";
+import type { AiQuestionSetSummary, AiQuestionSetDetail, InterviewMode } from "../types/ai_question_set";
 import * as clientModule from "../api/client";
 
 vi.mock("../api/client", () => ({
@@ -60,6 +60,8 @@ describe("Phase 4D.2 Frontend: Mode-Specific Interview Release and Candidate Ses
     reviewed_slots_count: 2,
     conversation_count: 2,
     mcq_count: 0,
+    created_at: "2026-09-28T10:00:00Z",
+    updated_at: "2026-09-28T10:00:00Z",
   };
 
   it("Recruiter Release Modal shows mode badge and conversational count for Audio set", async () => {
@@ -168,6 +170,15 @@ describe("Phase 4D.2 Frontend: Mode-Specific Interview Release and Candidate Ses
   });
 
   it("Candidate Audio Interview Workspace displays preparation view with disabled start action", async () => {
+    (clientModule.apiFetch as any).mockResolvedValueOnce({
+      speech_to_text_available: true,
+      text_to_speech_available: true,
+      microphone_required: true,
+      secure_context_required: true,
+      max_recording_seconds: 120,
+      max_upload_bytes: 10485760,
+    });
+
     render(
       <CandidateInterviewWorkspace
         releaseId="rel-audio-1"
@@ -183,13 +194,11 @@ describe("Phase 4D.2 Frontend: Mode-Specific Interview Release and Candidate Ses
     expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
 
     // Preparation notices
-    expect(screen.getByText(/Privacy & Data Handling:/i)).toBeInTheDocument();
-    expect(screen.getByText(/Voice recordings are strictly ephemeral/i)).toBeInTheDocument();
-    expect(screen.getByText(/Spoken responses will be evaluated from transcripts/i)).toBeInTheDocument();
-    expect(screen.getByText(/Working Microphone/i)).toBeInTheDocument();
-    expect(screen.getByText(/Audio interview setup is not yet available\./i)).toBeInTheDocument();
+    expect(screen.getByText(/Zero Audio Retention Policy:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Your spoken recording is processed entirely locally/i)).toBeInTheDocument();
+    expect(screen.getByText(/Transcript Confirmation:/i)).toBeInTheDocument();
 
-    // Verify start button is disabled
+    // Verify start button is disabled until acknowledgement
     const startBtn = screen.getByRole("button", { name: /Start Audio Interview/i });
     expect(startBtn).toBeDisabled();
   });

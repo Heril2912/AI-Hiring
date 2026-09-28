@@ -650,22 +650,41 @@ async def retry_practice_report_endpoint(
 
 
 # ==========================================
-# Phase 4C.2: Official Interview Endpoints
+# Phase 4C.2 & 4D.3: Official Interview Endpoints
 # ==========================================
 
+from fastapi import File, Response, UploadFile
 from app.schemas.candidate_interview import (
+    CandidateInterviewCapabilityResponse,
     CandidateInterviewSessionResponse,
     CandidateSaveAnswerRequest,
     CandidateSaveAnswerResponse,
     CandidateSubmitInterviewRequest,
     CandidateSubmitInterviewResponse,
+    CandidateTranscriptionResponse,
 )
 from app.services.candidate_interview_service import (
+    get_interview_capabilities,
     get_interview_session,
+    get_question_audio,
     save_interview_answer,
     start_or_resume_interview_session,
     submit_interview_session,
+    transcribe_candidate_question_audio,
 )
+
+
+@router.get(
+    "/candidate/interviews/capabilities",
+    response_model=CandidateInterviewCapabilityResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Interview Capabilities",
+    description="Returns candidate-safe speech capabilities and constraints for local audio interview sessions.",
+)
+async def get_interview_capabilities_endpoint(
+    cand_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+) -> CandidateInterviewCapabilityResponse:
+    return get_interview_capabilities()
 
 
 @router.post(
@@ -702,6 +721,60 @@ async def get_interview_session_endpoint(
     return get_interview_session(
         candidate_user=cand_ctx.user,
         session_id=session_id,
+        db=db,
+    )
+
+
+@router.get(
+    "/candidate/interviews/sessions/{session_id}/questions/{slot_id}/audio",
+    status_code=status.HTTP_200_OK,
+    summary="Get Question Audio Speech",
+    description="Synthesizes or retrieves Piper TTS question audio for an active candidate Audio interview session.",
+)
+async def get_question_audio_endpoint(
+    session_id: UUID,
+    slot_id: str,
+    cand_ctx: CandidateAuthenticatedContext = Depends(require_candidate),
+    db: Session = Depends(get_db),
+) -> Response:
+    audio_bytes = get_question_audio(
+        session_id=session_id,
+        slot_id=slot_id,
+        candidate_user=cand_ctx.user,
+        db=db,
+    )
+    return Response(
+        content=audio_bytes,
+        media_type="audio/wav",
+        headers={
+            "Cache-Control": "private, no-cache, no-store, must-revalidate",
+            "Content-Disposition": f'inline; filename="question_{slot_id}.wav"',
+        },
+    )
+
+
+@router.post(
+    "/candidate/interviews/sessions/{session_id}/questions/{slot_id}/transcribe",
+    response_model=CandidateTranscriptionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Transcribe Question Audio Ephemerally",
+    description="Ephemerally converts and transcribes candidate speech via whisper.cpp. Zero retention, never persisted to database.",
+)
+async def transcribe_question_audio_endpoint(
+    session_id: UUID,
+    slot_id: str,
+    file: UploadFile = File(...),
+    cand_ctx: CandidateAuthenticatedContext = Depends(verify_candidate_csrf_and_origin),
+    db: Session = Depends(get_db),
+) -> CandidateTranscriptionResponse:
+    content_type = file.content_type or "audio/webm"
+    audio_bytes = await file.read()
+    return transcribe_candidate_question_audio(
+        session_id=session_id,
+        slot_id=slot_id,
+        audio_bytes=audio_bytes,
+        original_content_type=content_type,
+        candidate_user=cand_ctx.user,
         db=db,
     )
 

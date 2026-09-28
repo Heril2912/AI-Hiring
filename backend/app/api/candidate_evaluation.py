@@ -3,10 +3,10 @@
 Enforces strict role authorization (Recruiter for evaluation, Candidate for published feedback),
 CSRF / origin verification, and immutable finalization semantics.
 """
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.auth import AuthenticatedContext, require_recruiter
@@ -16,6 +16,7 @@ from app.api.candidate_auth import (
 )
 from app.database import get_db
 from app.schemas.candidate_evaluation import (
+    CandidateEvaluationExportDto,
     CandidateInterviewEvaluationDetailResponse,
     CandidateSafeFeedbackReportResponse,
     EvaluationCandidateSessionSummaryDto,
@@ -27,6 +28,7 @@ from app.schemas.candidate_evaluation import (
     SaveQuestionReviewResponse,
 )
 from app.services.candidate_evaluation_service import (
+    export_candidate_interview_evaluation,
     finalize_candidate_interview_evaluation,
     get_candidate_interview_evaluation_detail,
     get_candidate_safe_feedback,
@@ -66,11 +68,12 @@ async def list_evaluation_jobs_endpoint(
     response_model=List[EvaluationCandidateSessionSummaryDto],
     status_code=status.HTTP_200_OK,
     summary="List Candidate Sessions for Job Revision",
-    description="Lists candidate interview sessions for an exact Job revision with separate resume match references.",
+    description="Lists candidate interview sessions for an exact Job revision with separate resume match references and mode filtering.",
 )
 async def list_job_candidates_endpoint(
     job_id: UUID,
     job_revision: int,
+    mode: Optional[str] = Query(None, description="Filter candidate sessions by interview mode ('TEXT' or 'AUDIO')"),
     auth_ctx: AuthenticatedContext = Depends(require_recruiter),
     db: Session = Depends(get_db),
 ) -> List[EvaluationCandidateSessionSummaryDto]:
@@ -79,11 +82,12 @@ async def list_job_candidates_endpoint(
         job_revision=job_revision,
         actor=auth_ctx.user,
         db=db,
+        mode=mode,
     )
 
 
 # =============================================================================
-# Level 3: Candidate Evaluation Workspace Detail
+# Level 3: Candidate Evaluation Workspace Detail & JSON Export
 # =============================================================================
 
 @router.get(
@@ -103,6 +107,26 @@ async def get_candidate_evaluation_detail_endpoint(
         actor=auth_ctx.user,
         db=db,
     )
+
+
+@router.get(
+    "/recruiter/evaluations/sessions/{session_id}/export",
+    response_model=CandidateEvaluationExportDto,
+    status_code=status.HTTP_200_OK,
+    summary="Export Candidate Interview Evaluation JSON",
+    description="Exports candidate interview evaluation with mode-aware data and zero audio binaries/paths.",
+)
+async def export_candidate_evaluation_endpoint(
+    session_id: UUID,
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter),
+    db: Session = Depends(get_db),
+) -> CandidateEvaluationExportDto:
+    return export_candidate_interview_evaluation(
+        session_id=session_id,
+        actor=auth_ctx.user,
+        db=db,
+    )
+
 
 
 # =============================================================================

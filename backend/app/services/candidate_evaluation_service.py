@@ -34,6 +34,7 @@ from app.models.job import JobRequisition, JobVersion
 from app.models.matching import MatchResultRecord
 from app.schemas.candidate_evaluation import (
     AIProvisionalAnalysisDto,
+    CandidateEvaluationExportDto,
     CandidateInterviewEvaluationDetailResponse,
     CandidateSafeFeedbackReportResponse,
     CandidateSafeQuestionFeedbackDto,
@@ -193,13 +194,27 @@ def list_evaluation_jobs(actor: UserRecord, db: Session) -> List[EvaluationJobSu
 # Level 2: Job Candidates List
 # =============================================================================
 
+def _get_snapshot_items(sess: CandidateInterviewSessionRecord) -> List[Dict[str, Any]]:
+    snapshot_raw = sess.questions_snapshot
+    if not snapshot_raw:
+        return []
+    if isinstance(snapshot_raw, list):
+        return [item for item in snapshot_raw if isinstance(item, dict)]
+    if isinstance(snapshot_raw, dict):
+        items = snapshot_raw.get("questions") or snapshot_raw.get("items") or []
+        if isinstance(items, list):
+            return [item for item in items if isinstance(item, dict)]
+    return []
+
+
 def list_job_candidates_for_evaluation(
     job_id: UUID,
     job_revision: int,
     actor: UserRecord,
     db: Session,
+    mode: Optional[str] = None,
 ) -> List[EvaluationCandidateSessionSummaryDto]:
-    """Lists candidate sessions for a specific Job and exact Job revision."""
+    """Lists candidate sessions for a specific Job and exact Job revision, with optional interview_mode filter."""
     _require_recruiter_actor(actor)
 
     stmt_job = select(JobRequisition).where(JobRequisition.job_id == job_id)
@@ -257,6 +272,13 @@ def list_job_candidates_for_evaluation(
 
     for rel in releases:
         sess = session_by_release.get(rel.release_id)
+        sess_mode = (sess.interview_mode if sess and sess.interview_mode else rel.interview_mode) or "TEXT"
+
+        # Apply mode filtering if specified
+        if mode and mode.strip().upper() not in ("ALL", ""):
+            if sess_mode.upper() != mode.strip().upper():
+                continue
+
         cand = rel.candidate
         cand_name = (cand.full_name or cand.primary_email or "Candidate") if cand else "Candidate"
         cand_email = cand.primary_email if cand else None
@@ -328,6 +350,7 @@ def list_job_candidates_for_evaluation(
                     total_questions_count=len(rel.ai_set.items) if rel.ai_set and rel.ai_set.items else 0,
                     ai_analysis_status="PENDING",
                     evaluation_status="AWAITING_SUBMISSION",
+                    interview_mode=sess_mode,
                     resume_match_score=match_score,
                     required_skills_coverage=skills_coverage,
                 )
@@ -335,7 +358,7 @@ def list_job_candidates_for_evaluation(
             continue
 
         # Calculate answers count
-        total_q = len(sess.questions_snapshot) if sess.questions_snapshot else 0
+        total_q = len(_get_snapshot_items(sess))
         answers_count = len(sess.answers) if sess.answers else 0
 
         # Determine evaluation status
@@ -368,6 +391,7 @@ def list_job_candidates_for_evaluation(
                 total_questions_count=total_q,
                 ai_analysis_status=ai_status,
                 evaluation_status=eval_status,
+                interview_mode=sess_mode,
                 resume_match_score=match_score,
                 required_skills_coverage=skills_coverage,
             )
@@ -637,7 +661,7 @@ async def run_ai_analysis_for_session(
     answers_map = {ans.slot_id: ans for ans in sess.answers}
 
     # Evaluate each conversational question using assess_single_answer
-    snapshot_items = sess.questions_snapshot or []
+    snapshot_items = _get_snapshot_items(sess)
     for item in snapshot_items:
         raw_fmt = (item.get("question_format") or "").upper()
         is_mcq = raw_fmt in ("MCQ", "MCQ_SINGLE_ANSWER") or bool(item.get("options"))
@@ -717,6 +741,19 @@ async def run_ai_analysis_for_session(
 
 
 
+def _get_snapshot_items(sess: CandidateInterviewSessionRecord) -> List[Dict[str, Any]]:
+    snapshot_raw = sess.questions_snapshot
+    if not snapshot_raw:
+        return []
+    if isinstance(snapshot_raw, list):
+        return [item for item in snapshot_raw if isinstance(item, dict)]
+    if isinstance(snapshot_raw, dict):
+        items = snapshot_raw.get("questions") or snapshot_raw.get("items") or []
+        if isinstance(items, list):
+            return [item for item in items if isinstance(item, dict)]
+    return []
+
+
 def get_candidate_interview_evaluation_detail(
     session_id: UUID,
     actor: UserRecord,
@@ -775,7 +812,7 @@ def get_candidate_interview_evaluation_detail(
             reviews_map[qe.slot_id] = qe
 
     # Order snapshot items: conversational first, MCQs after
-    snapshot_items = sess.questions_snapshot or []
+    snapshot_items = _get_snapshot_items(sess)
     conv_items = []
     mcq_items = []
     for item in snapshot_items:
@@ -1106,6 +1143,7 @@ def get_candidate_interview_evaluation_detail(
         job_title=job_title,
         job_revision=sess.job_revision,
         question_set_version=sess.set_version,
+        interview_mode=sess.interview_mode or "TEXT",
         submitted_at=sess.submitted_at,
         status=eval_status,
         candidate_feedback_status=eval_record.candidate_feedback_status if eval_record else "UNPUBLISHED",
@@ -1426,6 +1464,7 @@ def publish_candidate_feedback(
         "session_id": str(session_id),
         "job_title": detail.job_title,
         "job_revision": detail.job_revision,
+        "interview_mode": detail.interview_mode,
         "submitted_at": detail.submitted_at.isoformat() if detail.submitted_at else now.isoformat(),
         "published_at": now.isoformat(),
         "reviewed_strengths": detail.overview.key_strengths,
@@ -1489,6 +1528,7 @@ def get_candidate_safe_feedback(
         session_id=sess.session_id,
         job_title=payload.get("job_title") or "Interview",
         job_revision=payload.get("job_revision", 1),
+        interview_mode=payload.get("interview_mode") or sess.interview_mode or "TEXT",
         submitted_at=datetime.fromisoformat(payload["submitted_at"]) if payload.get("submitted_at") else sess.started_at,
         published_at=datetime.fromisoformat(payload["published_at"]) if payload.get("published_at") else datetime.now(timezone.utc),
         reviewed_strengths=payload.get("reviewed_strengths", []),
@@ -1498,4 +1538,43 @@ def get_candidate_safe_feedback(
             CandidateSafeQuestionFeedbackDto(**qf) for qf in payload.get("questions_feedback", [])
         ],
         message="Candidate interview feedback report.",
+    )
+
+
+# =============================================================================
+# Level 3: Evaluation JSON Export (Zero Audio Retention)
+# =============================================================================
+
+def export_candidate_interview_evaluation(
+    session_id: UUID,
+    actor: UserRecord,
+    db: Session,
+) -> CandidateEvaluationExportDto:
+    """Exports structured candidate interview evaluation with interview_mode and zero audio references."""
+    detail = get_candidate_interview_evaluation_detail(session_id=session_id, actor=actor, db=db)
+    now = datetime.now(timezone.utc)
+
+    return CandidateEvaluationExportDto(
+        session_id=detail.session_id,
+        evaluation_id=detail.evaluation_id,
+        release_id=detail.release_id,
+        candidate_id=detail.candidate_id,
+        candidate_name=detail.candidate_name,
+        candidate_email=detail.candidate_email,
+        job_id=detail.job_id,
+        job_title=detail.job_title,
+        job_revision=detail.job_revision,
+        question_set_version=detail.question_set_version,
+        interview_mode=detail.interview_mode,
+        submitted_at=detail.submitted_at,
+        status=detail.status,
+        candidate_feedback_status=detail.candidate_feedback_status,
+        candidate_feedback_published_at=detail.candidate_feedback_published_at,
+        finalized_by_name=detail.finalized_by_name,
+        finalized_at=detail.finalized_at,
+        resume_match_reference=detail.resume_match_reference,
+        overview=detail.overview,
+        questions=detail.questions,
+        activity_log=detail.activity_log,
+        exported_at=now,
     )

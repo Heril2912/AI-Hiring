@@ -4,6 +4,7 @@ import {
   EvaluationCandidateSummary,
   EvaluationJobSummary,
   EvaluationQuestionDetail,
+  exportCandidateEvaluationJson,
   finalizeInterviewEvaluation,
   getCandidateEvaluationDetail,
   listEvaluationJobs,
@@ -39,6 +40,12 @@ const CANDIDATE_STATUS_FILTERS = [
   { id: "UNAVAILABLE", label: "Analysis unavailable" },
 ] as const;
 
+const CANDIDATE_MODE_FILTERS = [
+  { id: "ALL", label: "All modes" },
+  { id: "TEXT", label: "Text-based" },
+  { id: "AUDIO", label: "Audio-based" },
+] as const;
+
 // =============================================================================
 // Main Evaluation Workspace
 // =============================================================================
@@ -60,6 +67,7 @@ export const EvaluationWorkspace: React.FC = () => {
   const [candidatesLoading, setCandidatesLoading] = useState<boolean>(false);
   const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<string>("ALL");
+  const [candidateModeFilter, setCandidateModeFilter] = useState<string>("ALL");
 
   // Level 3: Candidate Evaluation Detail
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -240,14 +248,24 @@ export const EvaluationWorkspace: React.FC = () => {
   // ---------------------------------------------------------------------------
   // Download JSON Handler
   // ---------------------------------------------------------------------------
-  const handleDownloadJson = () => {
+  const handleDownloadJson = async () => {
     if (!detail) return;
     try {
       const sanitizedName = (detail.candidate_name || "candidate")
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_");
-      const filename = `evaluation_${sanitizedName}_${detail.session_id.slice(0, 8)}.json`;
-      const jsonStr = JSON.stringify(detail, null, 2);
+      const modeSuffix = (detail.interview_mode || "text").toLowerCase();
+      const filename = `evaluation_${sanitizedName}_${modeSuffix}_${detail.session_id.slice(0, 8)}.json`;
+
+      let exportData: any;
+      try {
+        exportData = await exportCandidateEvaluationJson(detail.session_id);
+      } catch {
+        // Fallback to detail snapshot
+        exportData = detail;
+      }
+
+      const jsonStr = JSON.stringify(exportData, null, 2);
       const blob = new Blob([jsonStr], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -319,17 +337,20 @@ export const EvaluationWorkspace: React.FC = () => {
 
   // Filtered Candidates
   const filteredCandidates = useMemo(() => {
-    if (candidateFilter === "ALL") return candidates;
+    let list = candidates;
+    if (candidateModeFilter !== "ALL") {
+      list = list.filter((c) => (c.interview_mode || "TEXT") === candidateModeFilter);
+    }
     if (candidateFilter === "READY")
-      return candidates.filter((c) => c.recruiter_evaluation_status === "Ready for review");
+      return list.filter((c) => c.recruiter_evaluation_status === "Ready for review");
     if (candidateFilter === "IN_REVIEW")
-      return candidates.filter((c) => c.recruiter_evaluation_status === "In review");
+      return list.filter((c) => c.recruiter_evaluation_status === "In review");
     if (candidateFilter === "FINALIZED")
-      return candidates.filter((c) => c.recruiter_evaluation_status === "Finalized");
+      return list.filter((c) => c.recruiter_evaluation_status === "Finalized");
     if (candidateFilter === "UNAVAILABLE")
-      return candidates.filter((c) => c.ai_analysis_status === "Analysis unavailable");
-    return candidates;
-  }, [candidates, candidateFilter]);
+      return list.filter((c) => c.ai_analysis_status === "Analysis unavailable");
+    return list;
+  }, [candidates, candidateFilter, candidateModeFilter]);
 
   // ===========================================================================
   // Question Card Renderer
@@ -392,7 +413,9 @@ export const EvaluationWorkspace: React.FC = () => {
 
             {/* Candidate Answer Box */}
             <div className="eval-answer-box">
-              <span className="eval-metric-label">Candidate submitted response</span>
+              <span className="eval-metric-label">
+                {detail?.interview_mode === "AUDIO" ? "Candidate confirmed transcript" : "Candidate submitted response"}
+              </span>
               {q.question_format === "MCQ" ? (
                 <div className="eval-mcq-answer">
                   <span>
@@ -895,17 +918,31 @@ export const EvaluationWorkspace: React.FC = () => {
         </div>
 
         {/* Filter Pills */}
-        <div className="eval-filter-pills">
-          {CANDIDATE_STATUS_FILTERS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setCandidateFilter(f.id)}
-              className={`eval-filter-pill ${candidateFilter === f.id ? "active" : ""}`}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="eval-toolbar" style={{ marginTop: "12px", marginBottom: "16px" }}>
+          <div className="eval-filter-pills" style={{ marginBottom: 0 }}>
+            {CANDIDATE_MODE_FILTERS.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setCandidateModeFilter(m.id)}
+                className={`eval-filter-pill ${candidateModeFilter === m.id ? "active" : ""}`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="eval-filter-pills" style={{ marginBottom: 0 }}>
+            {CANDIDATE_STATUS_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setCandidateFilter(f.id)}
+                className={`eval-filter-pill ${candidateFilter === f.id ? "active" : ""}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Error Alert */}
@@ -937,6 +974,9 @@ export const EvaluationWorkspace: React.FC = () => {
                   </div>
                   <div className="eval-candidate-details">
                     <div className="eval-candidate-badges">
+                      <span className={`eval-status-badge ${cand.interview_mode === "AUDIO" ? "eval-badge-mode-audio" : "eval-badge-mode-text"}`}>
+                        {cand.interview_mode === "AUDIO" ? "Audio-based" : "Text-based"}
+                      </span>
                       <span className="eval-status-badge eval-status-source">
                         {cand.application_source}
                       </span>
@@ -1102,6 +1142,9 @@ export const EvaluationWorkspace: React.FC = () => {
           <div className="eval-detail-header-row">
             <div className="eval-detail-header-left">
               <div className="eval-candidate-badges">
+                <span className={`eval-status-badge ${detail.interview_mode === "AUDIO" ? "eval-badge-mode-audio" : "eval-badge-mode-text"}`}>
+                  {detail.interview_mode === "AUDIO" ? "Audio-based" : "Text-based"}
+                </span>
                 <span className="eval-status-badge ready">Official interview evaluation</span>
                 <span className={`eval-status-badge ${isFinalized ? "finalized" : "in-review"}`}>
                   {detail.status === "IN_REVIEW" ? "In review" : detail.status === "FINALIZED" ? "Finalized" : detail.status}
@@ -1346,12 +1389,23 @@ export const EvaluationWorkspace: React.FC = () => {
 
         {/* ===== RESPONSES SECTION ===== */}
         <div className="eval-section">
+          {detail.interview_mode === "AUDIO" && (
+            <div className="eval-audio-transcript-notice">
+              <Icon name="mic" size={16} />
+              <span>
+                <strong>Audio interview:</strong> Evaluation is conducted strictly on candidate-confirmed transcripts against the question rubric. Raw audio is not retained, and vocal delivery traits (pitch, tone, accent, pronunciation, speed) are not analyzed.
+              </span>
+            </div>
+          )}
+
           <div className="eval-section-header">
             <h2 className="eval-section-title">
               Submitted responses ({detail.questions.length})
             </h2>
             <span className="eval-section-subtitle">
-              Order: Conversational core → MCQs
+              {detail.interview_mode === "AUDIO"
+                ? "Conversational audio questions (evaluated on confirmed transcript)"
+                : "Order: Conversational core → MCQs"}
             </span>
           </div>
 

@@ -1508,3 +1508,48 @@
     padding: 14px;
   }
 }
+
+/* ========================================================================
+   Phase 4D.4: Mode-Aware Badges & Audio Transcript Notices
+   ======================================================================== */
+
+.eval-badge-mode-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e40af;
+  background-color: #dbeafe;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid #bfdbfe;
+}
+
+.eval-badge-mode-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #6b21a8;
+  background-color: #f3e8ff;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid #e9d5ff;
+}
+
+.eval-audio-transcript-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background-color: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #5b21b6;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+

@@ -52,7 +52,19 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 600
     llm_max_response_bytes: int = 262144
     llm_max_concurrency: int = 1
-    llm_retry_limit: int = 0
+    llm_retry_limit: int = 1
+    # Local Speech Processing Configuration (Phase 4D.3)
+    audio_mock_mode: bool = True
+    whisper_cpp_bin: str = ""
+    whisper_cpp_model: str = ""
+    piper_bin: str = ""
+    piper_model: str = ""
+    ffmpeg_bin: str = ""
+    audio_max_seconds: int = 120
+    audio_max_upload_bytes: int = 10485760
+    audio_processing_timeout_seconds: float = 30.0
+    audio_tts_cache_dir: str = "backend/runtime/audio_tts_cache"
+    audio_ephemeral_temp_dir: str = "backend/runtime/audio_temp"
 
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
@@ -162,6 +174,24 @@ class Settings(BaseSettings):
             resolved = raw_path.resolve()
         else:
             resolved = (REPO_ROOT / raw_path).resolve()
+        return resolved
+
+    def get_audio_tts_cache_path(self) -> Path:
+        raw_path = Path(self.audio_tts_cache_dir)
+        if raw_path.is_absolute():
+            resolved = raw_path.resolve()
+        else:
+            resolved = (REPO_ROOT / raw_path).resolve()
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved
+
+    def get_audio_temp_path(self) -> Path:
+        raw_path = Path(self.audio_ephemeral_temp_dir)
+        if raw_path.is_absolute():
+            resolved = raw_path.resolve()
+        else:
+            resolved = (REPO_ROOT / raw_path).resolve()
+        resolved.mkdir(parents=True, exist_ok=True)
         return resolved
 
 

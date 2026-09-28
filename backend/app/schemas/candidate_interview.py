@@ -94,3 +94,27 @@ class CandidateSubmitInterviewResponse(StrictSchema):
     answered_questions: int
     unanswered_questions: int
     message: str = "Official interview submitted successfully. Your responses have been recorded."
+
+
+class CandidateInterviewCapabilityResponse(StrictSchema):
+    """Sanitized candidate-safe audio interview runtime capabilities."""
+    speech_to_text_available: bool
+    text_to_speech_available: bool
+    microphone_required: bool = True
+    secure_context_required: bool = True
+    max_recording_seconds: int = 120
+    max_upload_bytes: int = 10485760
+    configured_model_label: Optional[str] = None
+    model_recommendation_warning: Optional[str] = None
+    unavailable_reason: Optional[str] = None
+    safe_unavailable_reason: Optional[str] = None
+
+
+class CandidateTranscriptionResponse(StrictSchema):
+    """Result of ephemeral candidate voice recording transcription."""
+    session_id: uuid.UUID
+    slot_id: uuid.UUID
+    transcript: str
+    is_empty: bool = False
+    duration_seconds: Optional[float] = None
+    message: str = "Voice response transcribed successfully."

@@ -22,8 +22,13 @@ from app.api.resumes import router as resumes_router
 from app.api.taxonomy import router as taxonomy_router
 from app.config import get_settings
 from app.database import check_database_connection
+from app.services.speech_service import cleanup_abandoned_audio_temp_files
 
 app = FastAPI(title="AI-Driven Smart Hiring Platform")
+
+@app.on_event("startup")
+def on_startup_cleanup():
+    cleanup_abandoned_audio_temp_files()
 
 settings = get_settings()
 app.add_middleware(

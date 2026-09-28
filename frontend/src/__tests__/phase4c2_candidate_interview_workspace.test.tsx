@@ -166,8 +166,7 @@ describe("Phase 4C.2: Candidate Interview Workspace & Persistence", () => {
     fireEvent.click(reviewBtn);
 
     expect(await screen.findByText("Review Interview Answers")).toBeInTheDocument();
-    expect(screen.getByText("1 / 2")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument(); // 1 unanswered
+    expect(screen.getByText(/1 of 2 questions remain unanswered/i)).toBeInTheDocument();
   });
 
   // 6. Review screen and edit navigation
