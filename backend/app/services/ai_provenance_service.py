@@ -101,6 +101,8 @@ def validate_conversational_question_text(
     job_version: Optional[JobVersion] = None,
     source_requirement_ids: Optional[List[str]] = None,
     existing_question_texts: Optional[List[str]] = None,
+    interview_mode: Optional[str] = None,
+    cross_mode_existing_texts: Optional[List[str]] = None,
 ) -> ItemValidationOutcome:
     """Performs 20 strict server-side validation checks on a candidate-visible conversational question."""
     raw = (question_text or "").strip()
@@ -124,6 +126,20 @@ def validate_conversational_question_text(
         return ItemValidationOutcome(False, "PROHIBITED_MARKDOWN", "Question contains prohibited Markdown headers or code blocks.")
     if re.search(r"<tool_call>|<function_call>|eval\(|exec\(", raw, re.IGNORECASE):
         return ItemValidationOutcome(False, "PROHIBITED_TOOL_TOKENS", "Question contains prohibited tool execution directives.")
+
+    # Audio-specific restrictions: No visual/code/table/diagram instructions
+    if (interview_mode or "").upper() == "AUDIO":
+        audio_visual_terms = [
+            r"\bwrite a (function|class|method|script|query|code)\b",
+            r"\blook at the (code|table|diagram|chart|graph|image|snippet)\b",
+            r"\bread the (following|above) (table|text|code|snippet)\b",
+            r"\bcalculate (on paper|the exact formula)\b",
+            r"\bfill in the (blank|table)\b",
+            r"\bsee below\b",
+        ]
+        for pat in audio_visual_terms:
+            if re.search(pat, raw, re.IGNORECASE):
+                return ItemValidationOutcome(False, "AUDIO_VISUAL_QUESTION_NOT_ALLOWED", "Audio interview questions cannot require written code, tables, or diagrams.")
 
     # 3. Prohibited & protected topics
     violation = check_prohibited_topics(raw)
@@ -163,6 +179,14 @@ def validate_conversational_question_text(
             ex_norm = re.sub(r"[^\w\s]", "", (ex or "").lower().strip())
             if norm and ex_norm and (norm == ex_norm or norm in ex_norm or ex_norm in norm) and len(norm) > 25:
                 return ItemValidationOutcome(False, "DUPLICATE_QUESTION", "Near-duplicate question detected in the same question set.")
+
+    # 7b. Check for cross-mode duplicates against the other interview mode set
+    if cross_mode_existing_texts:
+        norm = re.sub(r"[^\w\s]", "", lower)
+        for ex in cross_mode_existing_texts:
+            ex_norm = re.sub(r"[^\w\s]", "", (ex or "").lower().strip())
+            if norm and ex_norm and (norm == ex_norm or norm in ex_norm or ex_norm in norm) and len(norm) > 25:
+                return ItemValidationOutcome(False, "CROSS_MODE_QUESTION_DUPLICATE", "Exact or near-duplicate question exists in another interview mode for this job revision.")
 
     # 8. Source requirement ID validation against job version
     if job_version and source_requirement_ids:

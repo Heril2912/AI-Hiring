@@ -6,6 +6,7 @@ import {
   AiQuestionSetDetail,
   EligibleJobItem,
   EligibleJobsResponse,
+  InterviewMode,
 } from "../../types/ai_question_set";
 import "./ai-interviews.css";
 
@@ -13,36 +14,39 @@ interface AiInterviewsDirectoryProps {
   onSelectTemplate: (templateId: string) => void;
   onNavigateToJobs?: () => void;
   initialSelectedJobId?: string | null;
+  initialMode?: InterviewMode | null;
 }
 
 export function AiInterviewsDirectory({
   onSelectTemplate,
   onNavigateToJobs,
   initialSelectedJobId = null,
+  initialMode = null,
 }: AiInterviewsDirectoryProps) {
+  const [selectedMode, setSelectedMode] = useState<InterviewMode | null>(initialMode);
   const [eligibleJobs, setEligibleJobs] = useState<EligibleJobItem[]>([]);
   const [recentDirectory, setRecentDirectory] = useState<AiQuestionSetDirectory | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(initialSelectedJobId);
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [isLoadingJobs, setIsLoadingJobs] = useState<boolean>(true);
+  const [isLoadingJobs, setIsLoadingJobs] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [isLocalAiError, setIsLocalAiError] = useState<boolean>(false);
 
-  const loadData = async () => {
+  const loadData = async (mode: InterviewMode) => {
     setIsLoadingJobs(true);
     setGenerationError(null);
     try {
       const [jobsRes, recentRes] = await Promise.allSettled([
-        apiFetch<EligibleJobsResponse>("/api/v1/ai-interviews/eligible-jobs"),
-        apiFetch<AiQuestionSetDirectory>("/api/v1/ai-interviews"),
+        apiFetch<EligibleJobsResponse>(`/api/v1/ai-interviews/eligible-jobs?mode=${mode}`),
+        apiFetch<AiQuestionSetDirectory>(`/api/v1/ai-interviews?mode=${mode}`),
       ]);
 
       if (jobsRes.status === "fulfilled" && jobsRes.value?.items) {
         setEligibleJobs(jobsRes.value.items);
       } else if (jobsRes.status === "rejected") {
         try {
-          const altRes = await apiFetch<EligibleJobsResponse>("/api/v1/ai-question-sets/eligible-jobs");
+          const altRes = await apiFetch<EligibleJobsResponse>(`/api/v1/ai-question-sets/eligible-jobs?mode=${mode}`);
           setEligibleJobs(altRes.items || []);
         } catch {
           setEligibleJobs([]);
@@ -60,10 +64,12 @@ export function AiInterviewsDirectory({
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (selectedMode) {
+      loadData(selectedMode);
+    }
+  }, [selectedMode]);
 
-  // Phase 3E.2 deduplication: Exclude jobs that already have an AI question set in existing work
+  // Exclude jobs that already have an AI question set in the selected mode
   const existingJobIds = new Set(
     recentDirectory?.sets
       ?.filter((s) => (s.generated_question_count ?? 0) > 0)
@@ -83,7 +89,7 @@ export function AiInterviewsDirectory({
   const selectedJob = selectableJobs.find((j) => j.job_id === selectedJobId);
 
   const handleAction = async () => {
-    if (!selectedJob || isGenerating) return;
+    if (!selectedJob || isGenerating || !selectedMode) return;
 
     setIsGenerating(true);
     setGenerationError(null);
@@ -92,12 +98,14 @@ export function AiInterviewsDirectory({
     try {
       const res = await apiFetch<AiQuestionSetDetail>("/api/v1/ai-interviews/generate", {
         method: "POST",
-        body: JSON.stringify({ job_id: selectedJob.job_id }),
+        body: JSON.stringify({
+          job_id: selectedJob.job_id,
+          interview_mode: selectedMode,
+        }),
       });
 
       if (res && (res.ai_set_id || res.template_id)) {
-        // Refresh local data so state remains perfectly in sync
-        loadData();
+        loadData(selectedMode);
         onSelectTemplate(res.ai_set_id || res.template_id || "");
       }
     } catch (err: any) {
@@ -162,18 +170,135 @@ export function AiInterviewsDirectory({
 
   const actionButtonLabel = () => {
     if (isGenerating) return "Generating questions…";
-    return "Generate AI questions";
+    return selectedMode === "AUDIO" ? "Generate audio questions" : "Generate AI questions";
   };
 
   const hasRecentSets = Boolean(recentDirectory?.sets && recentDirectory.sets.length > 0);
 
+  // If no mode is selected, render the interview-type landing view
+  if (!selectedMode) {
+    return (
+      <div className="aiq-page">
+        <header className="aiq-header">
+          <h1 className="aiq-title">AI Interviews</h1>
+          <p className="aiq-subtitle">
+            Select an interview format to generate requirement-grounded question sets and manage practice sessions.
+          </p>
+        </header>
+
+        <div className="aiq-mode-cards-grid">
+          {/* Card 1: Text-based interview */}
+          <div className="aiq-mode-card" data-testid="mode-card-text">
+            <div>
+              <div className="aiq-mode-card-header">
+                <div className="aiq-mode-icon-box">
+                  <Icon name="message-square" size={24} />
+                </div>
+                <h2 className="aiq-mode-card-title">Text-based interview</h2>
+              </div>
+              <div className="aiq-mode-card-body">
+                <p className="aiq-mode-card-desc">
+                  Written interview experience with conversational and multiple-choice questions.
+                </p>
+                <ul className="aiq-mode-features-list">
+                  <li className="aiq-mode-feature-item">
+                    <Icon name="check" size={14} />
+                    <span>Conversational and MCQ questions</span>
+                  </li>
+                  <li className="aiq-mode-feature-item">
+                    <Icon name="check" size={14} />
+                    <span>In-depth written answers & automated rubrics</span>
+                  </li>
+                  <li className="aiq-mode-feature-item">
+                    <Icon name="check" size={14} />
+                    <span>Candidate self-paced practice simulation</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: "100%", justifyContent: "center" }}
+              onClick={() => setSelectedMode("TEXT")}
+            >
+              Open text interviews
+            </button>
+          </div>
+
+          {/* Card 2: Audio-based interview */}
+          <div className="aiq-mode-card" data-testid="mode-card-audio">
+            <div>
+              <div className="aiq-mode-card-header">
+                <div className="aiq-mode-icon-box" style={{ backgroundColor: "#eef2ff", color: "#4338ca" }}>
+                  <Icon name="mic" size={24} />
+                </div>
+                <h2 className="aiq-mode-card-title">Audio-based interview</h2>
+              </div>
+              <div className="aiq-mode-card-body">
+                <p className="aiq-mode-card-desc">
+                  Separate spoken-response question sets structured for natural conversational evaluation.
+                </p>
+                <ul className="aiq-mode-features-list">
+                  <li className="aiq-mode-feature-item">
+                    <Icon name="check" size={14} />
+                    <span>Conversational questions only (0 MCQs)</span>
+                  </li>
+                  <li className="aiq-mode-feature-item">
+                    <Icon name="check" size={14} />
+                    <span>Natural spoken phrasing & verbal rubrics</span>
+                  </li>
+                  <li className="aiq-mode-feature-item">
+                    <Icon name="check" size={14} />
+                    <span>Independent lifecycle and question sets</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: "100%", justifyContent: "center" }}
+              onClick={() => setSelectedMode("AUDIO")}
+            >
+              Open audio interviews
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render Directory View for the Selected Mode
   return (
     <div className="aiq-page">
-      {/* Page Header */}
+      {/* Back to Interview Types */}
+      <button
+        type="button"
+        className="aiq-back-to-types-btn"
+        onClick={() => {
+          setSelectedMode(null);
+          setSelectedJobId(null);
+          setEligibleJobs([]);
+          setRecentDirectory(null);
+        }}
+      >
+        <Icon name="arrow-left" size={14} />
+        <span>Back to interview types</span>
+      </button>
+
+      {/* Page Header with Mode Context */}
       <header className="aiq-header">
-        <h1 className="aiq-title">AI Interviews</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
+          <h1 className="aiq-title" style={{ margin: 0 }}>AI Interviews</h1>
+          <span className={`aiq-mode-badge ${selectedMode === "TEXT" ? "text-mode" : "audio-mode"}`}>
+            {selectedMode === "TEXT" ? "Text-based" : "Audio-based"}
+          </span>
+        </div>
         <p className="aiq-subtitle">
-          Choose a job, generate interview question sets, and manage candidate interview practice.
+          {selectedMode === "TEXT"
+            ? "Choose a job, generate written interview question sets, and manage candidate practice."
+            : "Choose a job, generate spoken conversational question sets, and manage audio interview readiness."}
         </p>
       </header>
 
@@ -182,14 +307,16 @@ export function AiInterviewsDirectory({
         {isGenerating ? "Generating questions for selected job..." : ""}
       </div>
 
-      {/* Global Empty State when no jobs and no existing sets exist */}
+      {/* Global Empty State when no jobs and no existing sets exist for this mode */}
       {!isLoadingJobs && selectableJobs.length === 0 && !hasRecentSets && (
         <div className="aiq-panel" style={{ textAlign: "center", padding: "48px 24px" }}>
           <h2 className="aiq-panel-title" style={{ marginBottom: "8px" }}>
             No jobs are ready yet
           </h2>
           <p className="aiq-panel-desc" style={{ marginBottom: "20px" }}>
-            Complete a job and add approved requirements before generating interview questions.
+            {selectedMode === "TEXT"
+              ? "Complete a job and add approved requirements before generating text interview questions."
+              : "Complete a job and add approved requirements before generating audio interview questions."}
           </p>
           {onNavigateToJobs && (
             <button
@@ -211,7 +338,7 @@ export function AiInterviewsDirectory({
         </div>
       )}
 
-      {/* Compact Notice when all ready jobs already have question sets */}
+      {/* Compact Notice when all ready jobs already have question sets in this mode */}
       {!isLoadingJobs && selectableJobs.length === 0 && hasRecentSets && (
         <div
           className="aiq-panel"
@@ -227,7 +354,7 @@ export function AiInterviewsDirectory({
         >
           <div>
             <h2 className="aiq-panel-title" style={{ fontSize: "17px", marginBottom: "4px" }}>
-              All ready jobs have AI question sets
+              All ready jobs have {selectedMode === "TEXT" ? "text" : "audio"} question sets
             </h2>
             <p className="aiq-panel-desc" style={{ fontSize: "14px", margin: 0 }}>
               To generate questions for another role, create a job requisition and approve its requirements.
@@ -248,48 +375,43 @@ export function AiInterviewsDirectory({
       {/* Two-Column Creation Workspace */}
       {!isLoadingJobs && selectableJobs.length > 0 && (
         <div className="aiq-create-layout">
-          {/* Left Column: Job Panel */}
-          <section className="aiq-job-panel aiq-panel" aria-labelledby="choose-job-heading">
+          {/* Left Column: Job Selection List */}
+          <section className="aiq-job-selection-panel aiq-panel" aria-labelledby="choose-job-heading">
             <div className="aiq-panel-header">
               <div className="aiq-panel-title-row">
                 <h2 id="choose-job-heading" className="aiq-panel-title">
                   Choose a job
                 </h2>
                 <span className="aiq-panel-count">
-                  {selectableJobs.length} {selectableJobs.length === 1 ? "job" : "jobs"} available
+                  {filteredJobs.length} {filteredJobs.length === 1 ? "job ready" : "jobs ready"}
                 </span>
               </div>
               <p className="aiq-panel-desc">
-                Select the role you want to prepare.
+                Select a job with approved requirements to generate grounded interview questions.
               </p>
             </div>
 
-            {/* Filter Input if > 8 jobs */}
-            {selectableJobs.length > 8 && (
+            {selectableJobs.length > 5 && (
               <div className="aiq-search-box">
                 <label htmlFor="aiq-job-search" className="aiq-search-label">
-                  Search jobs
+                  Filter jobs
                 </label>
                 <input
                   id="aiq-job-search"
-                  type="text"
+                  type="search"
                   className="aiq-search-input"
-                  placeholder="Filter by job title..."
+                  placeholder="Search by job title…"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
             )}
 
-            {/* Accessible Radio Group */}
             <fieldset className="aiq-job-fieldset">
-              <legend className="aiq-job-legend">Choose a job</legend>
-
-              <div className="aiq-job-list" role="radiogroup">
+              <legend className="sr-only">Available jobs for AI interview generation</legend>
+              <div className="aiq-job-list" role="radiogroup" aria-label="Available jobs">
                 {filteredJobs.length === 0 ? (
-                  <p className="aiq-panel-desc" style={{ padding: "16px 0" }}>
-                    No jobs matching &ldquo;{searchQuery}&rdquo;.
-                  </p>
+                  <div className="aiq-no-results">No jobs match your search.</div>
                 ) : (
                   filteredJobs.map((job) => {
                     const isSelected = selectedJobId === job.job_id;
@@ -334,10 +456,12 @@ export function AiInterviewsDirectory({
           <aside className="aiq-generation-panel aiq-panel" aria-labelledby="generate-panel-heading">
             <div className="aiq-panel-header">
               <h2 id="generate-panel-heading" className="aiq-panel-title">
-                Generate AI questions
+                {selectedMode === "AUDIO" ? "Generate audio questions" : "Generate AI questions"}
               </h2>
               <p className="aiq-panel-desc">
-                The approved requirements will guide the local AI.
+                {selectedMode === "AUDIO"
+                  ? "Approved requirements will generate spoken conversational questions."
+                  : "The approved requirements will guide the local AI."}
               </p>
             </div>
 

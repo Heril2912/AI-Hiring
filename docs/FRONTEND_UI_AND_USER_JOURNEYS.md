@@ -1,8 +1,8 @@
 # AI-Hiring Platform: Frontend UI Components, Design System & User Journeys
 
-**Document Version:** 2.0.0 (Phase 1 through Phase 4B.5)  
+**Document Version:** 2.1.0 (Comprehensive Reference)  
 **Framework:** React 19 | TypeScript 5.5+ | Vite 6.0+ | Modern Vanilla CSS Glassmorphic Design System  
-**Scope:** Complete Frontend Directory Inventory, 10 Typed API Clients, 2 Auth Context Providers, 40+ UI Components, Complete End-to-End User Journeys, and 34 Vitest Component Test Suites
+**Scope:** Complete Frontend Directory Inventory, 12 Strongly-Typed API Clients, 2 Auth Context Providers, 62 UI Components across 9 Specialized Subsystems, 38 Vitest Test Suites, Complete End-to-End User Journeys, and Comprehensive Inter-File Architecture
 
 ---
 
@@ -21,12 +21,23 @@ frontend/
     ├── main.tsx                             # Application bootstrapping and React DOM rendering
     ├── index.css                            # Master Vanilla CSS Design System (Glassmorphic dark-mode)
     ├── setupTests.ts                        # Vitest test setup, DOM extensions, cleanup hooks
-    ├── api/                                 # 10 Strongly-Typed API Client Modules
-    ├── components/                          # 40+ Reusable UI and Domain View Components
+    ├── api/                                 # 12 Strongly-Typed API Client Modules
+    ├── components/                          # 62 Reusable UI and Domain View Components
+    │   ├── admin/                           # 2 Administrator Workspace Components
+    │   ├── ai_interviews/                   # 7 AI Interview Studio Components & CSS
+    │   ├── ats/                             # 2 ATS Modal Dialogs
+    │   ├── auth/                            # 2 Authentication Views
+    │   ├── candidate/                       # 16 Candidate Portal Views & Components
+    │   ├── common/                          # 8 Reusable UI Primitives
+    │   ├── evaluation/                      # 2 Evaluation Workspace Components & CSS
+    │   ├── interviews/                      # 5 Requisition Interview Builder & Simulation Views
+    │   ├── jobs/                            # 10 Job Requisition & Applicant Workflow Components
+    │   ├── reviewer/                        # 1 Reviewer Benchmark Workspace Component
+    │   └── [root components]                # 7 Top-Level Layout & Profile Review Drawers
     ├── context/                             # 2 Auth & Session State Context Providers
-    ├── types/                               # TypeScript Domain Type Interfaces & Unions
-    ├── utils/                               # Client Routing and Portal DOM Utilities
-    └── __tests__/                           # 34 Vitest & React Testing Library Test Suites
+    ├── types/                               # 3 TypeScript Domain Type Modules
+    ├── utils/                               # 2 Client Routing and Portal DOM Utilities
+    └── __tests__/                           # 38 Vitest & React Testing Library Test Suites
 ```
 
 ---
@@ -36,7 +47,7 @@ frontend/
 ### 2.1 `src/App.tsx`
 - **Purpose**: Root application component managing global tab-based navigation, role detection (`ADMIN`, `RECRUITER`, `CANDIDATE`), session hydration, and view mounting.
 - **Key Capabilities**:
-  - Tab Switcher: Reads and synchronizes URL search parameters (`?tab=jobs`, `?tab=candidates`, `?tab=ai_interviews`, `?tab=admin`).
+  - Tab Switcher: Reads and synchronizes URL search parameters (`?tab=jobs`, `?tab=candidates`, `?tab=ai_interviews`, `?tab=admin`, `?tab=evaluation`).
   - Dual Portal Partitioning: Seamlessly toggles between the Recruiter/Admin Portal (`AuthenticatedShell`) and the Candidate Portal (`CandidateShell`).
   - Context Provider Wrapping: Wraps tree with `AuthProvider` and `CandidateAuthProvider`.
 
@@ -55,26 +66,28 @@ frontend/
   - `.btn-primary`, `.btn-secondary`, `.btn-danger`: Styled buttons with hover/active transitions.
 
 ### 2.4 `src/setupTests.ts`
-- **Purpose**: Test runner initialization importing `@testing-library/jest-dom` matchers and configuring global DOM mocks (e.g. `window.matchMedia`, `ResizeObserver`, `scrollIntoView`).
+- **Purpose**: Test runner initialization importing `@testing-library/jest-dom` matchers and configuring global DOM mocks (`window.matchMedia`, `ResizeObserver`, `scrollIntoView`).
 
 ---
 
 ## 3. Typed API Client Modules (`src/api/`)
 
-The API client layer wraps `fetch` to automatically inject CSRF tokens, serialize JSON, handle credentials, and raise structured API errors:
+The 12 API client modules wrap `fetch` to automatically inject CSRF tokens, serialize JSON, handle credentials, and raise structured API errors:
 
 | API Client File | Target Backend Endpoints | Key Exported Functions |
 |---|---|---|
 | `client.ts` | Base HTTP Fetch Wrapper | `apiFetch<T>(endpoint, options)`: Injects `X-CSRF-Token` from cookie, sets `credentials: 'include'`, converts errors to `ApiError`. |
-| `jobs.ts` | `/api/v1/jobs` | `fetchJobs()`, `fetchJobDetail(id)`, `createJob(data)`, `createJobVersion(id, data)`, `saveRequirements(id, verId, reqs)`, `markJobReady(id, verId)`, `publishJob(id)`, `archiveJob(id)`. |
+| `ats.ts` | `/api/v1/ats` | `fetchAtsConnections()`, `testAtsConnection(id)`, `syncAtsJobs(id)`, `importAtsCandidates(id)`, `exportCandidateToAts(candidateId, connId)`. |
 | `candidateApplications.ts` | `/api/v1/candidate/applications` | `createDraftApplication(jobId)`, `uploadApplicationResume(appId, file)`, `fetchResumeStatus(appId)`, `submitApplication(appId)`, `fetchMyApplications()`, `fetchApplicationDetail(appId)`, `withdrawApplication(appId)`. |
 | `candidateAuth.ts` | `/api/v1/candidate/auth` | `activateCandidate(token, password)`, `loginCandidate(email, password)`, `fetchCandidateMe()`, `logoutCandidate()`. |
+| `candidateEvaluations.ts` | `/api/v1/candidate/evaluation` | `fetchCandidateEvaluations()`, `fetchEvaluationDetail(id)`, `submitEvaluationScore(id, payload)`. |
+| `candidateInterviews.ts` | `/api/v1/ai-interviews` & `/api/v1/candidate/interviews` | `fetchAiQuestionSets()`, `generateAiQuestionSet(jobId, verId)`, `approveAiQuestionSet(id)`, `fetchCandidateInterviewSession(sessionId)`. |
 | `candidateJobs.ts` | `/api/v1/candidate/jobs` | `fetchCandidateOpenJobs()`, `fetchCandidateJobDetail(jobId)`. |
 | `candidatePractice.ts` | `/api/v1/candidate/practice` | `fetchCandidatePracticeCatalog()`, `requestPracticeRelease(jobId)`, `fetchRecruiterEligibleJobs(candidateId)`, `releasePracticeSet(candidateId, payload)`, `revokePracticeRelease(releaseId)`. |
 | `candidatePracticeSession.ts` | `/api/v1/candidate/practice/sessions` | `startPracticeSession(releaseId)`, `fetchPracticeSession(sessionId)`, `submitPracticeAnswer(sessionId, payload)`, `fetchPracticeReport(sessionId)`. |
+| `jobs.ts` | `/api/v1/jobs` & `/api/v1/matches` | `fetchJobs()`, `fetchJobDetail(id)`, `createJob(data)`, `createJobVersion(id, data)`, `saveRequirements(id, verId, reqs)`, `markJobReady(id, verId)`, `publishJob(id)`, `archiveJob(id)`. |
 | `recruiterApplications.ts` | `/api/v1/recruiter/applications` | `fetchJobApplicants(jobId)`, `fetchJobApplicantDetail(jobId, appId)`, `updateApplicantReviewState(jobId, appId, state)`, `releaseApplicantInterview(jobId, appId, questionSetId)`. |
 | `taxonomy.ts` | `/api/v1/taxonomy` | `searchSkills(query)`, `searchOccupations(query)`, `resolveConcept(conceptId)`. |
-| `ats.ts` | `/api/v1/ats` | `fetchAtsConnections()`, `testAtsConnection(id)`, `syncAtsJobs(id)`, `importAtsCandidates(id)`, `exportCandidateToAts(candidateId, connId)`. |
 
 ---
 
@@ -96,13 +109,20 @@ The API client layer wraps `fetch` to automatically inject CSRF tokens, serializ
 
 ---
 
-## 5. UI Components Catalog (`src/components/`)
+## 5. UI Components Catalog (`src/components/` - 62 Components)
 
-### 5.1 Root & Layout Shells
-- **`AuthenticatedShell.tsx`**: Top navigation header for recruiters/admins featuring platform logo, active workspace pill (`Recruiter workspace` / `Admin workspace`), navigation tabs (*Jobs*, *Candidates*, *Upload Resume*, *AI Interviews*, *ATS*), database connectivity indicator, and user profile dropdown.
-- **`Icon.tsx`**: Vector SVG icon system supporting 50+ icons (`user`, `users`, `user-check`, `spinner`, `briefcase`, `sparkles`, `file-text`, `plus`, `edit`, `trash`, `shield-check`, etc.).
+### 5.1 Root Layout, Profile Inspection & Audit Drawers (7 Components)
+- **`AuthenticatedShell.tsx`**: Top navigation header for recruiters/admins featuring platform logo, active workspace pill (`Recruiter workspace` / `Admin workspace`), navigation tabs (*Jobs*, *Candidates*, *Upload Resume*, *AI Interviews*, *ATS*, *Evaluation*), database connectivity indicator, and user profile dropdown.
+- **`CandidatesDirectory.tsx`**: Master table of all candidates in the organization with search, status filters, and one-click access to profile reviews, evidence drawers, and practice releases.
+- **`CandidateProfileReview.tsx`**: Structured candidate profile viewer showing extracted contact details, employment history, education, skills, and projects.
+- **`EvidenceDrawer.tsx`**: Slide-out drawer displaying original resume text with highlighted bounding-box evidence spans corresponding to extracted skills and job titles.
+- **`ExtractionReview.tsx`**: Audit interface comparing raw parsed text against structured entities.
+- **`Icon.tsx`**: Lightweight SVG icon system supporting 50+ icons (`user`, `users`, `user-check`, `spinner`, `briefcase`, `sparkles`, `file-text`, `plus`, `edit`, `trash`, `shield-check`, etc.).
+- **`ResumeUpload.tsx`**: Drag-and-drop file uploader supporting PDF and Word DOCX documents with upload progress indicators.
+- **`ReviewDrawer.tsx`**: Recruiter manual profile correction drawer allowing granular edits (`REPLACE`, `DELETE`, `ADD`).
+- **`VersionHistoryDrawer.tsx`**: Audit drawer showing point-in-time revision history of candidate profiles.
 
-### 5.2 Job Requisitions & Applicant Review (`src/components/jobs/`)
+### 5.2 Job Requisitions & Applicant Review (`src/components/jobs/` - 10 Components)
 - **`JobsDirectory.tsx`**: Searchable, filterable list of all job requisitions showing title, department, location, version number, lifecycle badge (`DRAFT`, `READY`, `PUBLISHED`), opening counts, and applicant counters.
 - **`JobEditor.tsx`**: Comprehensive split-pane requisition editor allowing recruiters to edit metadata, author grounded requirements with taxonomy autocomplete, validate readiness rules, create new revisions, and publish/archive jobs.
 - **`RequirementCard.tsx`**: Visual card representing an individual job requirement with necessity tag (`MUST_HAVE` / `PREFERRED`), category badge (`SKILL`, `EXPERIENCE`, `EDUCATION`), weight slider, and delete/edit controls.
@@ -114,23 +134,16 @@ The API client layer wraps `fetch` to automatically inject CSRF tokens, serializ
 - **`RequirementGapReportView.tsx`**: Categorical gap report inspector showing missing mandatory vs. preferred skills.
 - **`VisualAnalyticsCharts.tsx`**: Visual SVG charts displaying skill coverage distributions and candidate score bars.
 
-### 5.3 Candidate Directory & Resumé Ingestion
-- **`CandidatesDirectory.tsx`**: Master table of all candidates in the organization with search, status filters, and one-click access to profile reviews, evidence drawers, and practice releases.
-- **`ResumeUpload.tsx`**: Drag-and-drop file uploader supporting PDF and Word DOCX documents with progress indicators.
-- **`CandidateProfileReview.tsx`**: Structured candidate profile viewer showing extracted contact details, employment history, education, skills, and projects.
-- **`EvidenceDrawer.tsx`**: Slide-out drawer displaying original resume text with highlighted bounding-box evidence spans corresponding to extracted skills and job titles.
-- **`ExtractionReview.tsx`**: Audit interface comparing raw parsed text against structured entities.
-- **`ReviewDrawer.tsx`**: Recruiter manual profile correction drawer allowing granular edits (`REPLACE`, `DELETE`, `ADD`).
-- **`VersionHistoryDrawer.tsx`**: Audit drawer showing point-in-time revision history of candidate profiles.
-
-### 5.4 AI Interview Studio (`src/components/ai_interviews/`)
+### 5.3 AI Interview Studio (`src/components/ai_interviews/` - 7 Items)
 - **`AiInterviewsDirectory.tsx`**: Table of all job requisitions displaying AI interview generation status, question count, and 20-point validation pass state.
 - **`AiQuestionSetWorkspace.tsx`**: Main question studio workspace displaying conversational and MCQ question cards, validation status badges (`PASSED`, `FAILED`), wording assistance triggers, and the single-click *Approve Question Set* button.
 - **`CandidateSafePreviewModal.tsx`**: Zero-leakage modal demonstrating exactly what the candidate will see in their practice sandbox (with all recruiter rubrics stripped).
 - **`McqAuthoringModal.tsx`**: Modal for creating and editing Multiple-Choice Questions (options, correct answer key, educational explanation).
+- **`ReleaseInterviewSetModal.tsx`**: Modal allowing recruiters to release approved AI interview sets to applicants.
 - **`SafeRubricModal.tsx`**: Recruiter-only modal displaying internal evaluation rubrics, 1/3/5 rating anchors, and permitted follow-up probes.
+- **`ai-interviews.css`**: Studio-specific CSS styling, grid layouts, and validation badge animations.
 
-### 5.5 Candidate Portal Views (`src/components/candidate/`)
+### 5.4 Candidate Portal Views (`src/components/candidate/` - 16 Components)
 - **`CandidateShell.tsx`**: Candidate portal layout featuring branded header, candidate name, navigation tabs (*Open Jobs*, *My Applications*, *Practice Interviews*), and logout button.
 - **`CandidateOpenJobs.tsx`**: Public job board displaying published requisitions with search, department filters, and *Apply* action buttons.
 - **`CandidateJobDetail.tsx`**: Detailed candidate view of a published requisition with full description and requirements.
@@ -140,17 +153,32 @@ The API client layer wraps `fetch` to automatically inject CSRF tokens, serializ
 - **`CandidatePracticeDirectory.tsx`**: Candidate practice catalog displaying all practice sets released by recruiters or requested by the candidate.
 - **`CandidatePracticeRoom.tsx`**: Interactive practice simulation sandbox supporting conversational voice/text answers, real-time AI feedback, 1-turn adaptive follow-up questions, and interactive MCQ choices.
 - **`CandidatePracticeReport.tsx`**: Multi-dimensional radar coaching report displaying competency scores (0–100), key strengths, prioritized areas for improvement, and interview coaching playbooks.
+- **`CandidateInterviewWorkspace.tsx`**: Formal candidate interview execution workspace for scheduled evaluations.
+- **`CandidateFeedbackModal.tsx`**: Candidate post-session feedback modal.
 - **`CandidateActivationPage.tsx`**: Account activation page where invited candidates enter their magic token and establish their password.
-- **`CandidateLoginPage.tsx` & `CandidateRegisterPage.tsx`**: Candidate authentication pages.
+- **`CandidateLoginPage.tsx`**: Candidate portal login page.
+- **`CandidateRegisterPage.tsx`**: Candidate self-registration page.
 - **`CandidatePracticeReleaseModal.tsx`**: Recruiter modal to inspect release diagnostics against the 20 criteria and release a question set to a candidate.
 - **`CandidateInvitationModal.tsx`**: Recruiter modal to issue single-use magic invitations to candidate emails.
 
-### 5.6 Admin & ATS Workspaces
+### 5.5 Candidate Evaluation Workspace (`src/components/evaluation/` - 2 Items)
+- **`EvaluationWorkspace.tsx`**: Comprehensive recruiter workspace for evaluating completed candidate interviews, displaying radar analytics, per-question scorecards, evidence snippets, and recruiter feedback notes.
+- **`evaluation.css`**: Evaluation workspace specific layout and radar chart styling.
+
+### 5.6 Admin & ATS Workspaces (`src/components/admin/` & `src/components/ats/` - 4 Components)
 - **`AdminWorkspace.tsx`**: System admin console with tabs for User Management, Security Audit Events, AI Model Provider Adapters, and ATS Connections.
 - **`AtsConnectionsAdmin.tsx`**: Configuration panel for external ATS connectors (Greenhouse, Lever, Local Folder ATS).
-- **`AtsImportModal.tsx` & `AtsExportModal.tsx`**: Modals for importing requisitions/resumes from ATS and exporting scored candidates.
+- **`AtsImportModal.tsx`**: Modal for importing requisitions and candidate resumes from connected ATS systems.
+- **`AtsExportModal.tsx`**: Modal for exporting scored candidates and match rankings back to ATS.
 
-### 5.7 Common UI Primitives (`src/components/common/`)
+### 5.7 Requisition Interview Builder & Simulation (`src/components/interviews/` - 5 Components)
+- **`InterviewWorkspace.tsx`**: Deterministic interview template authoring workspace.
+- **`InterviewReviewWorkspace.tsx`**: Human evaluation and calibration review workspace.
+- **`SimulationWorkspace.tsx`**: Pre-release interview simulation tool for testing question sets against candidate profiles.
+- **`AnchoredRubricModal.tsx`**: Modal displaying anchored 1/3/5 rating criteria.
+- **`WordingComparisonModal.tsx`**: Side-by-side comparison modal for AI question wording variants.
+
+### 5.8 Common UI Primitives (`src/components/common/` - 8 Components)
 - **`Button.tsx`**: Accessible button with variants (`primary`, `secondary`, `danger`, `ghost`, `link`) and loading spinner states.
 - **`Dialog.tsx`**: Accessible modal dialog with backdrop blur, focus trapping, and ESC key dismissal.
 - **`FormField.tsx`**: Standardized form control container with label, helper text, and error validation messages.
@@ -158,6 +186,10 @@ The API client layer wraps `fetch` to automatically inject CSRF tokens, serializ
 - **`InlineNotice.tsx`**: Alert banner with icons supporting `info`, `success`, `warning`, and `error` styles.
 - **`PageHeader.tsx`**: Unified page title, breadcrumb, and action bar component.
 - **`EmptyState.tsx`**: Standardized empty state card with vector icon, title, description, and primary action button.
+- **`InterviewDimensionRadar.tsx`**: Reusable SVG radar chart component visualizing multi-dimensional competency scores.
+
+### 5.9 Reviewer Workspace (`src/components/reviewer/` - 1 Component)
+- **`ReviewerWorkspace.tsx`**: Internal reviewer workspace for benchmark evaluations against ground-truth datasets.
 
 ---
 
@@ -178,18 +210,18 @@ sequenceDiagram
     UI->>API: POST /api/v1/candidates/resumes
     API-->>UI: Extract Evidence Spans & Assemble Profiles
     R->>UI: Trigger Match Run (CandidateComparisonView.tsx)
-    UI->>API: POST /api/v1/match-runs
+    UI->>API: POST /api/v1/matches
     API-->>UI: Return Ranked Deterministic Scores & Gaps
     R->>UI: Open AI Question Studio & Click "Generate Questions"
-    UI->>API: POST /api/v1/ai-question-sets/generate
+    UI->>API: POST /api/v1/ai-interviews/generate
     API->>LLM: Stream Requirements & Generate Grounded Slots
     LLM-->>API: Return Conversational & MCQ Items + Rubrics
     API->>API: Run 20-Point Server-Side Validation Matrix
     API-->>UI: Display Validated Question Set (AiQuestionSetWorkspace.tsx)
     R->>UI: Click "Approve Question Set"
-    UI->>API: POST /api/v1/ai-question-sets/{id}/approve
+    UI->>API: POST /api/v1/ai-interviews/{id}/approve
     R->>UI: Open Release Modal & Grant Access to Candidate
-    UI->>API: POST /api/v1/recruiter/candidate-practice/candidates/{id}/release
+    UI->>API: POST /api/v1/candidate/practice/release
     API-->>UI: Practice Set Released Successfully
 ```
 
@@ -229,9 +261,9 @@ sequenceDiagram
 
 ---
 
-## 7. Vitest Component Testing Directory (`src/__tests__/`)
+## 7. Vitest Component Testing Directory (`src/__tests__/` - 38 Test Files)
 
-The frontend test suite contains 34 test files verifying all UI components, user interactions, and integration workflows:
+The frontend test suite contains 38 test files verifying all UI components, user interactions, and integration workflows:
 
 ```
 frontend/src/__tests__/
@@ -248,7 +280,7 @@ frontend/src/__tests__/
 ├── dashboard_rendering.test.tsx             # Tests AuthenticatedShell header, workspace labels, and tabs
 ├── evidence_drawer.test.tsx                 # Tests resume evidence span highlighting and text offsets
 ├── extraction_review.test.tsx               # Tests raw text vs. structured entity extraction comparisons
-├── interview_lifecycle_workflow.test.tsx    # Tests legacy interview template lifecycle state changes
+├── interview_lifecycle_workflow.test.tsx    # Tests deterministic interview template lifecycle state changes
 ├── isolated_portals.test.tsx                # Tests strict separation between Recruiter and Candidate views
 ├── jobs_workspace.test.tsx                  # Tests job directory, JobEditor, versioning, and requirement builder
 ├── mcq_and_practice_release.test.tsx        # Tests MCQ authoring modal and candidate practice release modal
@@ -262,6 +294,10 @@ frontend/src/__tests__/
 ├── phase4b3_candidate_job_discovery.test.tsx# Tests CandidateOpenJobs board and job detail rendering
 ├── phase4b4_candidate_applications.test.tsx # Tests resume application form, my applications, and withdrawal
 ├── phase4b5_recruiter_applicant_workflow.test.tsx # Tests JobApplicantsView and JobApplicationDetailView stages
+├── phase4c1_interview_release.test.tsx      # Tests interview set release modals and candidate eligibility
+├── phase4c2_candidate_interview_workspace.test.tsx # Tests candidate formal interview workspace
+├── phase4c3_corrective_ui.test.tsx          # Tests corrective feedback and review drawer operations
+├── phase4c4_evaluation_workspace.test.tsx   # Tests recruiter evaluation workspace and scoring
 ├── provider_admin_and_interview_shell.test.tsx # Tests AI Model Provider configuration and test connections
 ├── recruiter_wording_assistance.test.tsx    # Tests AI wording assistant modal and rewrite suggestions
 ├── requirement_gap_report_view.test.tsx     # Tests RequirementGapReportView categorical skill tables
@@ -270,3 +306,69 @@ frontend/src/__tests__/
 ├── version_history.test.tsx                 # Tests VersionHistoryDrawer point-in-time profile restoration
 └── visual_analytics_navigation.test.tsx     # Tests visual analytics charts and score breakdown tab navigation
 ```
+
+---
+
+## 8. Comprehensive Inter-File Relationships & Architectural Coupling
+
+The frontend components connect directly to typed API clients, state context providers, and backend REST endpoints:
+
+```mermaid
+graph TD
+    subgraph UIComponentLayer ["UI Component Layer"]
+        C_Shell["AuthenticatedShell.tsx / CandidateShell.tsx"]
+        C_Jobs["jobs/JobEditor.tsx & JobsDirectory.tsx"]
+        C_Cand["CandidatesDirectory.tsx & CandidateProfileReview.tsx"]
+        C_AIStudio["ai_interviews/AiQuestionSetWorkspace.tsx"]
+        C_Practice["candidate/CandidatePracticeRoom.tsx"]
+        C_Eval["evaluation/EvaluationWorkspace.tsx"]
+        C_Apps["candidate/CandidateMyApplications.tsx & jobs/JobApplicantsView.tsx"]
+    end
+
+    subgraph StateAndContext ["State & Context Providers"]
+        Ctx_Auth["context/AuthContext.tsx"]
+        Ctx_CandAuth["context/CandidateAuthContext.tsx"]
+    end
+
+    subgraph ApiClientLayer ["Typed API Client Layer (src/api/)"]
+        A_Client["client.ts (Base Fetch + CSRF)"]
+        A_Jobs["jobs.ts"]
+        A_CandApps["candidateApplications.ts & recruiterApplications.ts"]
+        A_CandInterviews["candidateInterviews.ts"]
+        A_Practice["candidatePractice.ts & candidatePracticeSession.ts"]
+        A_Eval["candidateEvaluations.ts"]
+        A_Tax["taxonomy.ts"]
+        A_Ats["ats.ts"]
+    end
+
+    subgraph BackendEndpoints ["Backend REST Endpoints"]
+        BE_Jobs["/api/v1/jobs"]
+        BE_Resumes["/api/v1/resumes"]
+        BE_Matches["/api/v1/matches"]
+        BE_AI["/api/v1/ai-interviews"]
+        BE_Practice["/api/v1/candidate/practice"]
+        BE_Eval["/api/v1/candidate/evaluation"]
+    end
+
+    C_Shell --> Ctx_Auth & Ctx_CandAuth
+    C_Jobs --> A_Jobs & A_Tax
+    C_Cand --> A_Client
+    C_AIStudio --> A_CandInterviews
+    C_Practice --> A_Practice
+    C_Eval --> A_Eval
+    C_Apps --> A_CandApps
+
+    A_Jobs & A_CandApps & A_CandInterviews & A_Practice & A_Eval & A_Tax & A_Ats --> A_Client
+    A_Jobs --> BE_Jobs
+    A_Client --> BE_Resumes & BE_Matches
+    A_CandInterviews --> BE_AI
+    A_Practice --> BE_Practice
+    A_Eval --> BE_Eval
+```
+
+### Detailed Component-to-API Interaction Summary:
+1. **Requisition Authoring & Taxonomy Search**: `components/jobs/JobEditor.tsx` calls `api/jobs.ts` and `api/taxonomy.ts` to fetch concept IDs and persist grounded requirements.
+2. **Resumé Upload & Evidence Inspection**: `components/ResumeUpload.tsx` dispatches uploads via `api/client.ts` to `/api/v1/resumes`, while `components/EvidenceDrawer.tsx` queries bounding-box character offsets from candidate profiles.
+3. **AI Interview Studio Authoring**: `components/ai_interviews/AiQuestionSetWorkspace.tsx` interacts with `api/candidateInterviews.ts` to trigger LLM question generation, inspect 20-point validation badges, and approve question sets.
+4. **Candidate Practice Sandbox & Adaptive Probes**: `components/candidate/CandidatePracticeRoom.tsx` communicates with `api/candidatePracticeSession.ts` to step through turns, submit responses, receive immediate per-answer feedback, and transition to `components/candidate/CandidatePracticeReport.tsx` upon session completion.
+5. **Interview Evaluation & Radar Scorecards**: `components/evaluation/EvaluationWorkspace.tsx` queries `api/candidateEvaluations.ts` to render `components/common/InterviewDimensionRadar.tsx`, review answer transcripts, and assign final competency ratings.

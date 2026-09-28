@@ -46,6 +46,9 @@ router = APIRouter(
 )
 
 
+from app.schemas.phase3_enums import InterviewMode
+
+
 @router.get(
     "/ai-interviews/eligible-jobs",
     response_model=EligibleJobsResponse,
@@ -60,12 +63,14 @@ router = APIRouter(
     include_in_schema=False,
 )
 async def get_eligible_jobs_endpoint(
+    mode: InterviewMode = Query(default=InterviewMode.TEXT),
     auth_ctx: AuthenticatedContext = Depends(require_recruiter),
     db: Session = Depends(get_db),
 ) -> EligibleJobsResponse:
     return get_eligible_jobs_for_ai_questions(
         actor=auth_ctx.user,
         db=db,
+        mode=mode,
     )
 
 
@@ -93,6 +98,7 @@ async def generate_ai_questions_by_job_endpoint(
         job_id=payload.job_id,
         force_regenerate=force_regenerate,
         db=db,
+        interview_mode=payload.interview_mode,
     )
 
 
@@ -113,16 +119,20 @@ async def list_ai_interviews_endpoint(
     search: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
     status_filter: Optional[str] = Query(default=None),
+    mode: Optional[InterviewMode] = Query(default=None),
+    mode_filter: Optional[InterviewMode] = Query(default=None),
     sort: str = Query(default="updated_at"),
     auth_ctx: AuthenticatedContext = Depends(require_recruiter),
     db: Session = Depends(get_db),
 ) -> AiQuestionSetDirectoryResponse:
     effective_status = status_filter or status
+    effective_mode = mode_filter or mode
     return list_ai_question_sets(
         actor=auth_ctx.user,
         db=db,
         search=search,
         status_filter=effective_status,
+        mode_filter=effective_mode,
         sort_by=sort,
     )
 

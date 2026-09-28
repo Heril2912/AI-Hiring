@@ -1,4 +1,11 @@
 import enum
+from typing import Any
+
+
+class InterviewMode(str, enum.Enum):
+    """Execution and delivery mode for an AI question set and interview."""
+    TEXT = "TEXT"
+    AUDIO = "AUDIO"
 
 
 class InterviewLayer(str, enum.Enum):

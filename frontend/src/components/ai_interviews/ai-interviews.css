@@ -1049,6 +1049,137 @@
 }
 
 /* ==========================================================================
+   Phase 4D.1 Dual-Mode Interview Selection Styles
+   ========================================================================== */
+
+.aiq-mode-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+  margin-top: 24px;
+  margin-bottom: 32px;
+}
+
+.aiq-mode-card {
+  background-color: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  padding: 32px 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: var(--shadow-card, 0 1px 3px rgba(16, 24, 40, 0.05));
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.aiq-mode-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-primary, #4f5bd5);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(16, 24, 40, 0.08));
+}
+
+.aiq-mode-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.aiq-mode-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--accent-subtle, #eef1fc);
+  color: var(--accent-primary, #4f5bd5);
+}
+
+.aiq-mode-card-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+  margin: 0;
+}
+
+.aiq-mode-card-body {
+  margin-bottom: 24px;
+  flex-grow: 1;
+}
+
+.aiq-mode-card-desc {
+  font-size: 15px;
+  color: var(--text-secondary, #475569);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.aiq-mode-features-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aiq-mode-feature-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-secondary, #334155);
+}
+
+.aiq-mode-feature-item .icon {
+  color: var(--accent-primary, #4f5bd5);
+}
+
+.aiq-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.aiq-mode-badge.text-mode {
+  background-color: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.aiq-mode-badge.audio-mode {
+  background-color: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+}
+
+.aiq-back-to-types-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary, #475569);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  margin-bottom: 16px;
+  transition: color 0.15s ease;
+}
+
+.aiq-back-to-types-btn:hover {
+  color: var(--accent-primary, #4f5bd5);
+}
+
+/* ==========================================================================
    Reduced Motion
    ========================================================================== */
 

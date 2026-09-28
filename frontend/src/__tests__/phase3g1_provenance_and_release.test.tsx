@@ -13,6 +13,7 @@ vi.mock("../api/client", () => ({
 const mockAiProvenanceDetail: AiQuestionSetDetail = {
   ai_set_id: "set-prov-1",
   set_version: 1,
+  interview_mode: "TEXT",
   job_id: "job-101",
   job_title: "Senior Backend Engineer",
   job_revision: 3,

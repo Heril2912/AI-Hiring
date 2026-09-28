@@ -1,3 +1,5 @@
+export type InterviewMode = "TEXT" | "AUDIO";
+
 export type AiSetLifecycle = "DRAFT" | "VALIDATED" | "APPROVED" | "STALE";
 
 export type SlotReviewState = "UNREVIEWED" | "KEPT" | "EDITED" | "REVISED" | "RECRUITER_AUTHORED";
@@ -82,6 +84,7 @@ export interface AiQuestionSlotItem {
 export interface AiQuestionSetDetail {
   ai_set_id: string;
   set_version: number;
+  interview_mode: InterviewMode;
   template_id?: string | null;
   source_template_version?: number | null;
   source_mode?: string;
@@ -119,6 +122,7 @@ export interface AiQuestionSetDetail {
 export interface AiQuestionSetSummary {
   ai_set_id: string;
   set_version: number;
+  interview_mode: InterviewMode;
   template_id?: string | null;
   source_mode?: string;
   job_id: string;

@@ -26,6 +26,7 @@ from app.models.base import Base
 from app.schemas.phase3_enums import (
     AuthoringOrigin,
     InterviewLayer,
+    InterviewMode,
     PlanLifecycle,
     PrivacyReviewStatus,
     ProviderCompatibilityStatus,
@@ -1722,6 +1723,7 @@ class AiInterviewQuestionSetRecord(Base):
         Index("ix_ai_question_sets_job_id", "job_id"),
         Index("ix_ai_question_sets_job_version_id", "job_version_id"),
         Index("ix_ai_question_sets_source_mode", "source_mode"),
+        Index("ix_ai_question_sets_interview_mode", "interview_mode"),
         Index("ix_ai_question_sets_organization_id", "organization_id"),
         Index("ix_ai_question_sets_lifecycle_status", "lifecycle_status"),
     )
@@ -1730,6 +1732,17 @@ class AiInterviewQuestionSetRecord(Base):
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
+    )
+    interview_mode: Mapped[InterviewMode] = mapped_column(
+        Enum(
+            InterviewMode,
+            native_enum=False,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ck_ai_question_sets_interview_mode_enum",
+        ),
+        nullable=False,
+        default=InterviewMode.TEXT,
+        server_default=text("'TEXT'"),
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

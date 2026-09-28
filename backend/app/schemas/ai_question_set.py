@@ -12,6 +12,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+from app.schemas.phase3_enums import InterviewMode
+
+
 class FrozenSchema(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -37,6 +40,7 @@ class AiQuestionSetGenerateRequest(BaseModel):
     """Server-authoritative generation command payload."""
     model_config = ConfigDict(extra="forbid")
     job_id: UUID
+    interview_mode: InterviewMode = InterviewMode.TEXT
     force_regenerate: bool = False
 
 
@@ -119,6 +123,7 @@ class AiQuestionSetDetailResponse(FrozenSchema):
     """Full detail view for the master-detail workspace /ai-interviews/:templateId or /ai-interviews/:aiSetId."""
     ai_set_id: UUID
     set_version: int
+    interview_mode: InterviewMode = InterviewMode.TEXT
     template_id: Optional[UUID] = None
     source_template_version: Optional[int] = None
     source_mode: str = "BLUEPRINT_GROUNDED"  # BLUEPRINT_GROUNDED or REQUIREMENT_GROUNDED
@@ -164,6 +169,7 @@ class AiQuestionSetSummaryResponse(FrozenSchema):
     """Card/row item for the /ai-interviews directory listing."""
     ai_set_id: UUID
     set_version: int
+    interview_mode: InterviewMode = InterviewMode.TEXT
     template_id: Optional[UUID] = None
     source_mode: str = "BLUEPRINT_GROUNDED"
     job_id: UUID

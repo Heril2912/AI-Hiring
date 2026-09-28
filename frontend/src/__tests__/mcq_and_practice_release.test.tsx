@@ -31,6 +31,7 @@ vi.mock("../api/candidatePractice", () => ({
 const mockQuestionSetDetail: AiQuestionSetDetail = {
   ai_set_id: "set-101",
   set_version: 1,
+  interview_mode: "TEXT",
   template_id: "tpl-101",
   source_template_version: 1,
   source_mode: "JOB_REQUIREMENTS",

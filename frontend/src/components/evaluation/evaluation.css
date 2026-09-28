@@ -33,17 +33,19 @@
 }
 
 .eval-header-title {
-  font-size: 24px;
+  font-size: 30px;
   font-weight: 800;
   color: var(--text-primary, #0f172a);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
   margin: 0;
 }
 
 .eval-header-subtitle {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-secondary, #475569);
-  margin-top: 4px;
+  margin-top: 6px;
+  line-height: 1.5;
 }
 
 /* Breadcrumbs */
@@ -305,10 +307,11 @@
 }
 
 .eval-job-title {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 800;
   color: var(--text-primary, #0f172a);
   margin: 0;
+  line-height: 1.3;
 }
 
 .eval-job-meta {
@@ -345,12 +348,12 @@
 }
 
 .eval-metric-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--text-muted, #475569);
   display: block;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
 }
 
 .eval-metric-box.ready .eval-metric-label {
@@ -633,11 +636,11 @@
 }
 
 .eval-evidence-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 800;
   color: var(--text-primary, #0f172a);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   margin: 0;
 }
 
@@ -646,6 +649,7 @@
   color: var(--text-muted, #475569);
   font-weight: 500;
   display: block;
+  margin-top: 2px;
 }
 
 /* Progress Indicator */
@@ -772,6 +776,14 @@
   color: var(--accent-primary-hover, #3730a3);
 }
 
+.eval-overview-strengths .eval-ai-list {
+  color: #064e3b;
+}
+
+.eval-overview-growth .eval-ai-list {
+  color: #3730a3;
+}
+
 .eval-overview-score {
   font-size: 26px;
   font-weight: 800;
@@ -804,10 +816,11 @@
 }
 
 .eval-section-title {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 800;
   color: var(--text-primary, #0f172a);
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .eval-section-subtitle {
@@ -1214,6 +1227,46 @@
   flex-direction: column;
   gap: 8px;
   font-size: 14px;
+}
+
+.eval-review-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+}
+
+.eval-override-reason {
+  font-size: 14px;
+  color: var(--text-secondary, #334155);
+  line-height: 1.5;
+}
+
+.eval-recruiter-note {
+  font-size: 14px;
+  color: var(--text-secondary, #475569);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.eval-override-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.eval-override-summary-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* Activity Log */
 .eval-activity-list {
   display: flex;

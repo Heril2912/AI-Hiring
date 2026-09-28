@@ -583,6 +583,11 @@ export function AiQuestionSetWorkspace({
           <div className="aiq-workspace-title-row">
             <h1 className="aiq-workspace-title">{detail.job_title}</h1>
             <span
+              className={`aiq-mode-badge ${detail.interview_mode === "AUDIO" ? "audio-mode" : "text-mode"}`}
+            >
+              {detail.interview_mode === "AUDIO" ? "Audio-based" : "Text-based"}
+            </span>
+            <span
               className={`aiq-status-badge ${
                 isLegacy
                   ? "legacy"
@@ -686,15 +691,28 @@ export function AiQuestionSetWorkspace({
           )}
 
           {isApproved && !isLegacy && !isStale && Boolean(detail.job_id) && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setIsReleaseModalOpen(true)}
-              title="Release this sealed interview set to eligible applicants"
-            >
-              <Icon name="user-check" size={15} />
-              <span>Release Interview Set</span>
-            </button>
+            detail.interview_mode === "AUDIO" ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled
+                title="Audio delivery is completed in Phase 4D.2"
+                style={{ opacity: 0.85, cursor: "not-allowed" }}
+              >
+                <Icon name="mic" size={15} />
+                <span>Audio delivery completed in Phase 4D.2</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setIsReleaseModalOpen(true)}
+                title="Release this sealed interview set to eligible applicants"
+              >
+                <Icon name="user-check" size={15} />
+                <span>Release Interview Set</span>
+              </button>
+            )
           )}
 
           {isLegacy && (
@@ -911,40 +929,42 @@ export function AiQuestionSetWorkspace({
         </div>
       )}
 
-      {/* Segmented Workspace Tabs */}
-      <div
-        style={{
-          display: "flex",
-          gap: "8px",
-          marginBottom: "20px",
-          borderBottom: "1px solid var(--border-subtle, #e2e8f0)",
-          paddingBottom: "12px",
-        }}
-        role="tablist"
-        aria-label="Interview Question Formats"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "CONVERSATIONAL"}
-          className={`btn ${activeTab === "CONVERSATIONAL" ? "btn-primary" : "btn-secondary"} btn-sm`}
-          onClick={() => setActiveTab("CONVERSATIONAL")}
+      {/* Segmented Workspace Tabs (Only shown if mode is TEXT or MCQ tab is relevant) */}
+      {detail.interview_mode !== "AUDIO" && (
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            marginBottom: "20px",
+            borderBottom: "1px solid var(--border-subtle, #e2e8f0)",
+            paddingBottom: "12px",
+          }}
+          role="tablist"
+          aria-label="Interview Question Formats"
         >
-          <Icon name="message-square" size={15} />
-          <span>Conversational Questions ({conversationalSlots.length}/5)</span>
-        </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "CONVERSATIONAL"}
+            className={`btn ${activeTab === "CONVERSATIONAL" ? "btn-primary" : "btn-secondary"} btn-sm`}
+            onClick={() => setActiveTab("CONVERSATIONAL")}
+          >
+            <Icon name="message-square" size={15} />
+            <span>Conversational Questions ({conversationalSlots.length}/5)</span>
+          </button>
 
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "MCQ"}
-          className={`btn ${activeTab === "MCQ" ? "btn-primary" : "btn-secondary"} btn-sm`}
-          onClick={() => setActiveTab("MCQ")}
-        >
-          <Icon name="badge-check" size={15} />
-          <span>Multiple Choice Questions ({mcqSlots.length}/5)</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "MCQ"}
+            className={`btn ${activeTab === "MCQ" ? "btn-primary" : "btn-secondary"} btn-sm`}
+            onClick={() => setActiveTab("MCQ")}
+          >
+            <Icon name="badge-check" size={15} />
+            <span>Multiple Choice Questions ({mcqSlots.length}/5)</span>
+          </button>
+        </div>
+      )}
 
       {/* Tab 1: Conversational Questions (2-Column Layout) */}
       {activeTab === "CONVERSATIONAL" && (
