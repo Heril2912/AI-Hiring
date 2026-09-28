@@ -161,11 +161,26 @@ export const EvaluationWorkspace: React.FC = () => {
     try {
       setAnalyzingAi(true);
       setAiAnalysisError(null);
-      const updated = await triggerAiInterviewAnalysis(selectedSessionId);
+      const updated = await triggerAiInterviewAnalysis(selectedSessionId, false);
       setDetail(updated);
       setExpandedSlots(new Set(updated.questions.map((q) => q.slot_id)));
     } catch (err: any) {
       setAiAnalysisError(err?.message || "Failed to complete AI interview analysis.");
+    } finally {
+      setAnalyzingAi(false);
+    }
+  };
+
+  const handleRerunFailedAiAnalysis = async () => {
+    if (!selectedSessionId) return;
+    try {
+      setAnalyzingAi(true);
+      setAiAnalysisError(null);
+      const updated = await triggerAiInterviewAnalysis(selectedSessionId, true);
+      setDetail(updated);
+      setExpandedSlots(new Set(updated.questions.map((q) => q.slot_id)));
+    } catch (err: any) {
+      setAiAnalysisError(err?.message || "Failed to re-run failed AI interview analyses.");
     } finally {
       setAnalyzingAi(false);
     }
@@ -219,6 +234,31 @@ export const EvaluationWorkspace: React.FC = () => {
       setFinalizeError(err?.message || "Failed to finalize evaluation.");
     } finally {
       setFinalizing(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Download JSON Handler
+  // ---------------------------------------------------------------------------
+  const handleDownloadJson = () => {
+    if (!detail) return;
+    try {
+      const sanitizedName = (detail.candidate_name || "candidate")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_");
+      const filename = `evaluation_${sanitizedName}_${detail.session_id.slice(0, 8)}.json`;
+      const jsonStr = JSON.stringify(detail, null, 2);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert("Failed to export evaluation JSON: " + (err?.message || String(err)));
     }
   };
 
@@ -304,6 +344,7 @@ export const EvaluationWorkspace: React.FC = () => {
     const candidateSelectedText = q.selected_option_text ?? q.candidate_selected_option_text;
     const competencyLabel = q.competency ?? q.competency_name;
     const explanationText = q.stored_explanation ?? q.explanation;
+    const hasOverride = review && review.review_state === "OVERRIDDEN" && review.reviewed_rating != null;
 
     return (
       <div
@@ -328,22 +369,17 @@ export const EvaluationWorkspace: React.FC = () => {
           </div>
 
           <div className="eval-question-header-right">
-            {/* Review State Badge */}
-            {review && review.review_state !== "UNREVIEWED" ? (
-              <span
-                className={`eval-status-badge ${
-                  review.review_state === "OVERRIDDEN"
-                    ? "unavailable"
-                    : review.review_state === "INSUFFICIENT"
-                    ? "in-review"
-                    : "finalized"
-                }`}
-              >
-                {review.review_state}
-                {review.reviewed_rating ? `: ${review.reviewed_rating}/5` : ""}
+            {/* Status Badge: Authoritative AI or Optional Override */}
+            {hasOverride ? (
+              <span className="eval-status-badge unavailable">
+                Override · {review.reviewed_rating!.toFixed(1)} / 5.0
               </span>
+            ) : aiAnalysis && (aiAnalysis.analysis_status === "UNAVAILABLE" || aiAnalysis.status === "UNAVAILABLE") ? (
+              <span className="eval-status-badge unavailable">AI analysis unavailable</span>
+            ) : aiAnalysis && aiAnalysis.provisional_rating != null ? (
+              <span className="eval-status-badge ready">AI evaluated · {aiAnalysis.provisional_rating.toFixed(1)} / 5.0</span>
             ) : (
-              <span className="eval-status-badge">Unreviewed</span>
+              <span className="eval-status-badge">AI evaluation pending</span>
             )}
             <Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={16} />
           </div>
@@ -380,250 +416,260 @@ export const EvaluationWorkspace: React.FC = () => {
               )}
             </div>
 
-            {/* AI Provisional Analysis */}
+            {/* AI Analysis Box */}
             {aiAnalysis && (
               <div className="eval-ai-provisional-box">
                 <div className="eval-ai-header">
                   <span className="eval-ai-tag">
-                    <Icon name="sparkles" size={12} />
-                    AI provisional analysis
+                    <Icon name="sparkles" size={14} />
+                    AI analysis
                   </span>
-                  <span className="eval-ai-disclaimer">
-                    Provisional assistance — subject to recruiter confirmation
-                  </span>
-                </div>
-
-                <div className="eval-ai-content-grid">
-                  {(aiAnalysis.addressed_well?.length ?? 0) > 0 && (
-                    <div className="eval-ai-section eval-ai-strengths">
-                      <span className="eval-metric-label">What was addressed well</span>
-                      <ul className="eval-ai-list">
-                        {aiAnalysis.addressed_well!.map((s, i) => (
-                          <li key={i}>{s}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {(aiAnalysis.missing_or_unclear?.length ?? 0) > 0 && (
-                    <div className="eval-ai-section eval-ai-gaps">
-                      <span className="eval-metric-label">Missing or unclear elements</span>
-                      <ul className="eval-ai-list">
-                        {aiAnalysis.missing_or_unclear!.map((m, i) => (
-                          <li key={i}>{m}</li>
-                        ))}
-                      </ul>
-                    </div>
+                  {aiAnalysis.provisional_rating != null && (
+                    <span className="eval-ai-score-badge">
+                      AI rating: <strong>{aiAnalysis.provisional_rating.toFixed(1)} / 5.0</strong>
+                    </span>
                   )}
                 </div>
 
-                {/* Suggested Improvement */}
-                {(aiAnalysis.suggested_improvement || (aiAnalysis.suggested_improvements?.length ?? 0) > 0) && (
-                  <div className="eval-ai-section eval-ai-growth" style={{ marginTop: "8px" }}>
-                    <span className="eval-metric-label">Suggested growth area</span>
-                    <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-secondary)" }}>
-                      {aiAnalysis.suggested_improvement || aiAnalysis.suggested_improvements?.join("; ")}
+                {aiAnalysis.analysis_status === "UNAVAILABLE" || aiAnalysis.status === "UNAVAILABLE" ? (
+                  <div className="eval-ai-unavailable-notice" style={{ padding: "14px", background: "#f8fafc", borderRadius: "8px", margin: "8px 0", border: "1px solid #e2e8f0" }}>
+                    <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <Icon name="alert-triangle" size={16} />
+                      AI analysis is unavailable for this response. Retry the analysis or optionally add a recruiter assessment.
                     </p>
                   </div>
-                )}
+                ) : (
+                  <>
+                    <div className="eval-ai-content-grid">
+                      {(aiAnalysis.addressed_well?.length ?? 0) > 0 && (
+                        <div className="eval-ai-section eval-ai-strengths">
+                          <span className="eval-metric-label">What was addressed well</span>
+                          <ul className="eval-ai-list">
+                            {aiAnalysis.addressed_well!.map((s, i) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
 
-                {/* Dimension scores for this question */}
-                {aiAnalysis.dimension_scores &&
-                  Object.keys(aiAnalysis.dimension_scores).length > 0 && (
-                    <div className="eval-ai-dimensions">
-                      <span className="eval-metric-label">Rubric dimension observations</span>
-                      <div className="eval-ai-dimension-pills">
-                        {Object.entries(aiAnalysis.dimension_scores).map(([dim, score]) => (
-                          <span key={dim} className="eval-ai-dimension-pill">
-                            {dim}: <strong>{typeof score === "number" ? score.toFixed(1) : score}/5</strong>
-                          </span>
-                        ))}
+                      {(aiAnalysis.missing_or_unclear?.length ?? 0) > 0 && (
+                        <div className="eval-ai-section eval-ai-gaps">
+                          <span className="eval-metric-label">Missing or unclear elements</span>
+                          <ul className="eval-ai-list">
+                            {aiAnalysis.missing_or_unclear!.map((m, i) => (
+                              <li key={i}>{m}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Suggested Improvement */}
+                    {(aiAnalysis.suggested_improvement || (aiAnalysis.suggested_improvements?.length ?? 0) > 0) && (
+                      <div className="eval-ai-section eval-ai-growth" style={{ marginTop: "8px" }}>
+                        <span className="eval-metric-label">Suggested growth area</span>
+                        <p style={{ margin: "4px 0 0 0", fontSize: "14px", color: "var(--text-secondary)" }}>
+                          {aiAnalysis.suggested_improvement || aiAnalysis.suggested_improvements?.join("; ")}
+                        </p>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                {/* Provisional Rating */}
-                {aiAnalysis.provisional_rating != null && (
-                  <div className="eval-ai-rating">
-                    Provisional rating: <strong>{aiAnalysis.provisional_rating}/5</strong>
-                  </div>
-                )}
+                    {/* Dimension scores for this question */}
+                    {aiAnalysis.dimension_scores &&
+                      Object.keys(aiAnalysis.dimension_scores).length > 0 && (
+                        <div className="eval-ai-dimensions">
+                          <span className="eval-metric-label">Rubric dimension observations</span>
+                          <div className="eval-ai-dimension-pills">
+                            {Object.entries(aiAnalysis.dimension_scores).map(([dim, score]) => (
+                              <span key={dim} className="eval-ai-dimension-pill">
+                                {dim}: <strong>{typeof score === "number" ? score.toFixed(1) : score}/5</strong>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
-                {/* Uncertainty */}
-                {aiAnalysis.uncertainty_notes && (
-                  <div className="eval-ai-uncertainty">
-                    <Icon name="alert-triangle" size={12} />
-                    {aiAnalysis.uncertainty_notes}
-                  </div>
-                )}
+                    {/* Uncertainty */}
+                    {aiAnalysis.uncertainty_notes && (
+                      <div className="eval-ai-uncertainty">
+                        <Icon name="alert-triangle" size={14} />
+                        {aiAnalysis.uncertainty_notes}
+                      </div>
+                    )}
 
-                {/* Evidence Citations */}
-                {aiAnalysis.evidence_citations && aiAnalysis.evidence_citations.length > 0 && (
-                  <div className="eval-ai-citations">
-                    <span className="eval-metric-label">Evidence citations</span>
-                    <div className="eval-citation-list">
-                      {aiAnalysis.evidence_citations.map((cit, idx) => {
-                        const citId = cit.segment_id || cit.citation_id || `cit-${idx}`;
-                        const snippet = cit.text || cit.snippet_text || "";
-                        return (
-                          <button
-                            key={citId}
-                            type="button"
-                            onClick={() =>
-                              setHighlightCitation(
-                                highlightCitation === citId ? null : citId
-                              )
-                            }
-                            className={`eval-citation-btn ${
-                              highlightCitation === citId ? "active" : ""
-                            }`}
-                          >
-                            &ldquo;{snippet.slice(0, 70)}…&rdquo;
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                    {/* Evidence Citations */}
+                    {aiAnalysis.evidence_citations && aiAnalysis.evidence_citations.length > 0 && (
+                      <div className="eval-ai-citations">
+                        <span className="eval-metric-label">Evidence citations</span>
+                        <div className="eval-citation-list">
+                          {aiAnalysis.evidence_citations.map((cit, idx) => {
+                            const citId = cit.segment_id || cit.citation_id || `cit-${idx}`;
+                            const snippet = cit.text || cit.snippet_text || "";
+                            return (
+                              <button
+                                key={citId}
+                                type="button"
+                                onClick={() =>
+                                  setHighlightCitation(
+                                    highlightCitation === citId ? null : citId
+                                  )
+                                }
+                                className={`eval-citation-btn ${
+                                  highlightCitation === citId ? "active" : ""
+                                }`}
+                              >
+                                &ldquo;{snippet.slice(0, 70)}…&rdquo;
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
 
-            {/* Recruiter Review Controls */}
+            {/* Optional Recruiter Override Section (Collapsed by Default) */}
             <div className="eval-review-section">
-              <div className="eval-review-header">
-                <span className="eval-metric-label">Recruiter review</span>
+              <div className="eval-override-header-bar">
+                <div className="eval-override-summary-left">
+                  <span className="eval-metric-label">Optional recruiter override</span>
+                  <span className="eval-override-helper">
+                    Optional: add an internal note or override this AI assessment.
+                  </span>
+                </div>
                 {!isFinalized && !isEditing && (
                   <Button
                     variant="secondary"
                     size="xs"
                     onClick={() => {
                       setEditingSlotId(q.slot_id);
-                      setEditRating(review?.reviewed_rating || aiAnalysis?.provisional_rating || 3);
-                      setEditState(review?.review_state || "ACCEPTED");
+                      setEditRating(review?.reviewed_rating || 3);
+                      setEditState(review?.review_state && review.review_state !== "UNREVIEWED" ? review.review_state : "OVERRIDDEN");
                       setOverrideReason(review?.override_reason || "");
                       setRecruiterNote(review?.recruiter_note || "");
                       setSaveError(null);
                     }}
                   >
-                    {review && review.review_state !== "UNREVIEWED" ? "Edit review" : "Perform review"}
+                    {review && review.review_state === "OVERRIDDEN" ? "Edit override" : "Add note / override"}
                   </Button>
                 )}
               </div>
 
-              {isEditing ? (
-                <div className="eval-review-form">
-                  {saveError && (
-                    <InlineNotice variant="warning">{saveError}</InlineNotice>
-                  )}
+                {isEditing ? (
+                  <div className="eval-review-form" style={{ marginTop: "12px" }}>
+                    {saveError && (
+                      <InlineNotice variant="warning">{saveError}</InlineNotice>
+                    )}
 
-                  <div className="eval-review-form-grid">
-                    <div className="eval-form-field">
-                      <label htmlFor={`review-decision-${q.slot_id}`} className="eval-form-label">
-                        Review decision
-                      </label>
-                      <select
-                        id={`review-decision-${q.slot_id}`}
-                        value={editState}
-                        onChange={(e) => setEditState(e.target.value)}
-                        className="eval-form-select"
-                      >
-                        <option value="ACCEPTED">Accept provisional analysis</option>
-                        <option value="OVERRIDDEN">Override rating / observation</option>
-                        <option value="INSUFFICIENT">Mark insufficient evidence</option>
-                      </select>
-                    </div>
-
-                    {editState !== "INSUFFICIENT" && (
+                    <div className="eval-review-form-grid">
                       <div className="eval-form-field">
-                        <label htmlFor={`human-rating-${q.slot_id}`} className="eval-form-label">
-                          Human rating (1 to 5)
+                        <label htmlFor={`review-decision-${q.slot_id}`} className="eval-form-label">
+                          Override action
                         </label>
                         <select
-                          id={`human-rating-${q.slot_id}`}
-                          value={editRating}
-                          onChange={(e) => setEditRating(Number(e.target.value))}
+                          id={`review-decision-${q.slot_id}`}
+                          value={editState}
+                          onChange={(e) => setEditState(e.target.value)}
                           className="eval-form-select"
                         >
-                          <option value={1}>1 — Deficient / missing</option>
-                          <option value={2}>2 — Marginal / incomplete</option>
-                          <option value={3}>3 — Acceptable / satisfactory</option>
-                          <option value={4}>4 — Strong / exceeds baseline</option>
-                          <option value={5}>5 — Exceptional / comprehensive</option>
+                          <option value="OVERRIDDEN">Override score / evaluation</option>
+                          <option value="ACCEPTED">Add note only (preserve AI score)</option>
+                          <option value="INSUFFICIENT">Mark insufficient evidence</option>
                         </select>
                       </div>
-                    )}
-                  </div>
 
-                  {editState === "OVERRIDDEN" && (
+                      {editState === "OVERRIDDEN" && (
+                        <div className="eval-form-field">
+                          <label htmlFor={`human-rating-${q.slot_id}`} className="eval-form-label">
+                            Recruiter rating (1 to 5)
+                          </label>
+                          <select
+                            id={`human-rating-${q.slot_id}`}
+                            value={editRating}
+                            onChange={(e) => setEditRating(Number(e.target.value))}
+                            className="eval-form-select"
+                          >
+                            <option value={1}>1 — Deficient / missing</option>
+                            <option value={2}>2 — Marginal / incomplete</option>
+                            <option value={3}>3 — Acceptable / satisfactory</option>
+                            <option value={4}>4 — Strong / exceeds baseline</option>
+                            <option value={5}>5 — Exceptional / comprehensive</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    {editState === "OVERRIDDEN" && (
+                      <div className="eval-form-field">
+                        <label htmlFor={`override-reason-${q.slot_id}`} className="eval-form-label eval-form-label-required">
+                          Override reason (required)
+                        </label>
+                        <input
+                          id={`override-reason-${q.slot_id}`}
+                          type="text"
+                          placeholder="Explain why the AI assessment was overridden…"
+                          value={overrideReason}
+                          onChange={(e) => setOverrideReason(e.target.value)}
+                          className="eval-form-input"
+                        />
+                      </div>
+                    )}
+
                     <div className="eval-form-field">
-                      <label htmlFor={`override-reason-${q.slot_id}`} className="eval-form-label eval-form-label-required">
-                        Override reason (required)
+                      <label htmlFor={`recruiter-notes-${q.slot_id}`} className="eval-form-label">
+                        Internal recruiter note (private to staff)
                       </label>
-                      <input
-                        id={`override-reason-${q.slot_id}`}
-                        type="text"
-                        placeholder="Explain why the provisional rating/observation was overridden…"
-                        value={overrideReason}
-                        onChange={(e) => setOverrideReason(e.target.value)}
-                        className="eval-form-input"
+                      <textarea
+                        id={`recruiter-notes-${q.slot_id}`}
+                        rows={2}
+                        placeholder="Add internal recruiter notes (strictly omitted from candidate feedback)…"
+                        value={recruiterNote}
+                        onChange={(e) => setRecruiterNote(e.target.value)}
+                        className="eval-form-textarea"
                       />
                     </div>
-                  )}
 
-                  <div className="eval-form-field">
-                    <label htmlFor={`recruiter-notes-${q.slot_id}`} className="eval-form-label">
-                      Recruiter internal note (private to staff)
-                    </label>
-                    <textarea
-                      id={`recruiter-notes-${q.slot_id}`}
-                      rows={2}
-                      placeholder="Add internal recruiter notes (strictly omitted from candidate feedback)…"
-                      value={recruiterNote}
-                      onChange={(e) => setRecruiterNote(e.target.value)}
-                      className="eval-form-textarea"
-                    />
+                    <div className="eval-review-actions">
+                      <Button variant="secondary" size="xs" onClick={() => setEditingSlotId(null)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="xs"
+                        icon="save"
+                        isLoading={savingSlot}
+                        onClick={() => handleSaveQuestion(q.slot_id)}
+                      >
+                        Save optional override
+                      </Button>
+                    </div>
                   </div>
-
-                  <div className="eval-review-actions">
-                    <Button variant="secondary" size="xs" onClick={() => setEditingSlotId(null)}>
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="primary"
-                      size="xs"
-                      icon="save"
-                      isLoading={savingSlot}
-                      onClick={() => handleSaveQuestion(q.slot_id)}
-                    >
-                      Save review
-                    </Button>
-                  </div>
-                </div>
-              ) : review && review.review_state !== "UNREVIEWED" ? (
-                <div className="eval-review-summary">
-                  <div className="eval-review-summary-header">
-                    <strong>Reviewed by {review.reviewer_name || "Recruiter"}:</strong>
-                    <span>{review.review_state}</span>
-                    {review.reviewed_rating && (
-                      <strong>({review.reviewed_rating}/5.0)</strong>
+                ) : review && (review.review_state === "OVERRIDDEN" || review.recruiter_note) ? (
+                  <div className="eval-review-summary" style={{ marginTop: "12px" }}>
+                    <div className="eval-review-summary-header">
+                      <strong>Recruiter note / override:</strong>
+                      {review.reviewed_rating != null && (
+                        <span className="eval-override-tag">Score: {review.reviewed_rating}/5.0</span>
+                      )}
+                    </div>
+                    {review.override_reason && (
+                      <div className="eval-override-reason">
+                        <strong>Override reason:</strong> {review.override_reason}
+                      </div>
+                    )}
+                    {review.recruiter_note && (
+                      <p className="eval-recruiter-note">
+                        <strong>Note:</strong> {review.recruiter_note}
+                      </p>
                     )}
                   </div>
-                  {review.override_reason && (
-                    <div className="eval-override-reason">
-                      <strong>Override reason:</strong> {review.override_reason}
-                    </div>
-                  )}
-                  {review.recruiter_note && (
-                    <p className="eval-recruiter-note">
-                      <strong>Note:</strong> {review.recruiter_note}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p className="eval-empty-text">
-                  No recruiter review saved yet for this response.
-                </p>
-              )}
+                ) : (
+                  <p className="eval-empty-text" style={{ marginTop: "8px" }}>
+                    No recruiter notes or overrides recorded for this response.
+                  </p>
+                )}
             </div>
           </>
         )}
@@ -1058,7 +1104,7 @@ export const EvaluationWorkspace: React.FC = () => {
           <div className="eval-detail-header-row">
             <div className="eval-detail-header-left">
               <div className="eval-candidate-badges">
-                <span className="eval-status-badge ready">Official interview review</span>
+                <span className="eval-status-badge ready">Official interview evaluation</span>
                 <span className={`eval-status-badge ${isFinalized ? "finalized" : "in-review"}`}>
                   {detail.status === "IN_REVIEW" ? "In review" : detail.status === "FINALIZED" ? "Finalized" : detail.status}
                 </span>
@@ -1073,8 +1119,30 @@ export const EvaluationWorkspace: React.FC = () => {
             </div>
 
             <div className="eval-detail-header-actions">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="download"
+                onClick={handleDownloadJson}
+                title="Download candidate evaluation and analysis as JSON"
+              >
+                Download JSON
+              </Button>
               {!isFinalized ? (
                 <>
+                  {detail.questions.some((q) => (q.ai_provisional_analysis || q.ai_provisional)?.analysis_status === "UNAVAILABLE" || (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating == null) && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon="refresh"
+                      isLoading={analyzingAi}
+                      loadingText="Re-running failed…"
+                      onClick={handleRerunFailedAiAnalysis}
+                      title="Re-run AI analysis only for failed or unanalyzed questions"
+                    >
+                      Retry AI analysis
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
                     size="sm"
@@ -1095,7 +1163,7 @@ export const EvaluationWorkspace: React.FC = () => {
                     title={
                       isReadyToFinalize
                         ? "Finalize official evaluation"
-                        : "Complete reviews for all core questions to finalize"
+                        : "Complete AI evaluation or optional overrides for all core questions to finalize"
                     }
                   >
                     Finalize evaluation
@@ -1104,7 +1172,7 @@ export const EvaluationWorkspace: React.FC = () => {
               ) : (
                 <>
                   <span className="eval-status-badge finalized">
-                    <Icon name="lock" size={12} />
+                    <Icon name="lock" size={14} />
                     Evaluation locked
                   </span>
                   {detail.candidate_feedback_status !== "PUBLISHED" ? (
@@ -1143,7 +1211,7 @@ export const EvaluationWorkspace: React.FC = () => {
           {/* Channel 1: Resume Match Reference (Read-Only) */}
           <div className="eval-evidence-card">
             <div className="eval-evidence-header">
-              <Icon name="file-text" size={14} />
+              <Icon name="file-text" size={16} />
               <div>
                 <h3 className="eval-evidence-title">Resume match</h3>
                 <span className="eval-evidence-subtitle">Read-only deterministic baseline</span>
@@ -1200,20 +1268,20 @@ export const EvaluationWorkspace: React.FC = () => {
           {/* Channel 2: Interview Response Assessment & Overview */}
           <div className="eval-evidence-card">
             <div className="eval-evidence-header">
-              <Icon name="message-square" size={14} />
+              <Icon name="message-square" size={16} />
               <div>
                 <h3 className="eval-evidence-title">Interview response assessment</h3>
-                <span className="eval-evidence-subtitle">Human-reviewed deterministic evaluation</span>
+                <span className="eval-evidence-subtitle">AI-generated interview evaluation</span>
               </div>
               <div className="eval-progress-indicator">
                 <span className="eval-progress-text">
-                  {detail.overview.questions_reviewed} of {detail.overview.total_questions} reviewed
+                  {detail.questions.filter((q) => (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating != null || q.recruiter_review?.reviewed_rating != null).length} of {detail.overview.total_questions} AI analyses complete
                 </span>
                 <div className="eval-progress-bar">
                   <div
                     className="eval-progress-fill"
                     style={{
-                      width: `${(detail.overview.questions_reviewed / (detail.overview.total_questions || 1)) * 100}%`,
+                      width: `${(detail.questions.filter((q) => (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating != null || q.recruiter_review?.reviewed_rating != null).length / (detail.overview.total_questions || 1)) * 100}%`,
                     }}
                   />
                 </div>
@@ -1235,9 +1303,9 @@ export const EvaluationWorkspace: React.FC = () => {
                           .filter((r): r is number => typeof r === "number" && !isNaN(r));
                         if (ratedCore.length > 0) {
                           const avg = (ratedCore.reduce((a, b) => a + b, 0) / ratedCore.length).toFixed(1);
-                          return `${avg} / 5.0 (Provisional)`;
+                          return `${avg} / 5.0`;
                         }
-                        return "Pending review";
+                        return "AI evaluation pending";
                       })()}
                 </span>
                 <span className="eval-overview-detail">
@@ -1351,7 +1419,7 @@ export const EvaluationWorkspace: React.FC = () => {
               <strong>{detail.job_title} (Rev {detail.job_revision})</strong>
             </div>
             <div className="eval-resume-detail-row">
-              <span>Core questions reviewed:</span>
+              <span>Core questions evaluated:</span>
               <strong>{detail.overview.core_questions_count} of {detail.overview.core_questions_count}</strong>
             </div>
             <div className="eval-resume-detail-row">

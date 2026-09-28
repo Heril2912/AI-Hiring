@@ -52,7 +52,12 @@ export function InterviewDimensionRadar({
       {showRadar ? (
         <RadarSVG entries={entries} maxScore={maxScore} />
       ) : (
-        <DimensionBars entries={entries} maxScore={maxScore} />
+        <>
+          <div className="eval-incomplete-dimension-notice" style={{ padding: "8px 12px", background: "#f8fafc", borderRadius: "6px", marginBottom: "12px", fontSize: "12px", color: "var(--text-secondary)" }}>
+            Fewer than 3 response dimensions validated. Showing available dimension breakdown.
+          </div>
+          <DimensionBars entries={entries} maxScore={maxScore} />
+        </>
       )}
 
       {/* Accessible text summary table */}

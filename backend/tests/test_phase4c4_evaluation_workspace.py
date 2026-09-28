@@ -483,8 +483,8 @@ def test_phase4c4_evaluation_workspace_flow(client: TestClient, test_db):
     q1 = next(q for q in detail["questions"] if q["slot_id"] == slot_1)
     assert q1["question_format"] == "CONVERSATIONAL"
     assert "WAL" in q1["submitted_answer_text"]
-    assert q1["ai_provisional_analysis"]["provisional_rating"] >= 1
-    assert len(q1["ai_provisional_analysis"]["evidence_citations"]) >= 1
+    assert q1["ai_provisional_analysis"]["provisional_rating"] is None
+    assert q1["ai_provisional_analysis"]["analysis_status"] == "UNAVAILABLE"
 
     # Check question 2 (MCQ - Correct)
     q2 = next(q for q in detail["questions"] if q["slot_id"] == slot_2)
@@ -498,7 +498,17 @@ def test_phase4c4_evaluation_workspace_flow(client: TestClient, test_db):
     assert q3["is_supplemental"] is True
 
     # -------------------------------------------------------------
-    # 6. Override Validation: Override requires an explanation
+    # 6. Incomplete Evaluation Cannot be Finalized (Q1 has no AI rating and no override)
+    # -------------------------------------------------------------
+    res_premature_finalize = client.post(
+        f"/api/v1/recruiter/evaluations/sessions/{session_id}/finalize",
+        headers=rec_a_headers,
+    )
+    assert res_premature_finalize.status_code == status.HTTP_400_BAD_REQUEST
+    assert res_premature_finalize.json()["detail"]["code"] == "INCOMPLETE_EVALUATION"
+
+    # -------------------------------------------------------------
+    # 7. Override Validation: Override requires an explanation
     # -------------------------------------------------------------
     res_bad_override = client.put(
         f"/api/v1/recruiter/evaluations/sessions/{session_id}/questions/{slot_1}/review",
@@ -524,17 +534,6 @@ def test_phase4c4_evaluation_workspace_flow(client: TestClient, test_db):
     )
     assert res_valid_review_1.status_code == status.HTTP_200_OK
     assert res_valid_review_1.json()["overview"]["questions_reviewed"] == 1
-
-    # -------------------------------------------------------------
-    # 7. Incomplete Review Cannot be Finalized
-    # -------------------------------------------------------------
-    # Question 2 (core) is not yet reviewed
-    res_premature_finalize = client.post(
-        f"/api/v1/recruiter/evaluations/sessions/{session_id}/finalize",
-        headers=rec_a_headers,
-    )
-    assert res_premature_finalize.status_code == status.HTTP_400_BAD_REQUEST
-    assert res_premature_finalize.json()["detail"]["code"] == "INCOMPLETE_EVALUATION"
 
     # Review question 2 (MCQ) - Rating 5
     res_review_2 = client.put(
