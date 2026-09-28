@@ -514,9 +514,8 @@ export const EvaluationWorkspace: React.FC = () => {
                                     highlightCitation === citId ? null : citId
                                   )
                                 }
-                                className={`eval-citation-btn ${
-                                  highlightCitation === citId ? "active" : ""
-                                }`}
+                                className={`eval-citation-btn ${highlightCitation === citId ? "active" : ""
+                                  }`}
                               >
                                 &ldquo;{snippet.slice(0, 70)}…&rdquo;
                               </button>
@@ -557,119 +556,119 @@ export const EvaluationWorkspace: React.FC = () => {
                 )}
               </div>
 
-                {isEditing ? (
-                  <div className="eval-review-form" style={{ marginTop: "12px" }}>
-                    {saveError && (
-                      <InlineNotice variant="warning">{saveError}</InlineNotice>
-                    )}
+              {isEditing ? (
+                <div className="eval-review-form" style={{ marginTop: "12px" }}>
+                  {saveError && (
+                    <InlineNotice variant="warning">{saveError}</InlineNotice>
+                  )}
 
-                    <div className="eval-review-form-grid">
-                      <div className="eval-form-field">
-                        <label htmlFor={`review-decision-${q.slot_id}`} className="eval-form-label">
-                          Override action
-                        </label>
-                        <select
-                          id={`review-decision-${q.slot_id}`}
-                          value={editState}
-                          onChange={(e) => setEditState(e.target.value)}
-                          className="eval-form-select"
-                        >
-                          <option value="OVERRIDDEN">Override score / evaluation</option>
-                          <option value="ACCEPTED">Add note only (preserve AI score)</option>
-                          <option value="INSUFFICIENT">Mark insufficient evidence</option>
-                        </select>
-                      </div>
-
-                      {editState === "OVERRIDDEN" && (
-                        <div className="eval-form-field">
-                          <label htmlFor={`human-rating-${q.slot_id}`} className="eval-form-label">
-                            Recruiter rating (1 to 5)
-                          </label>
-                          <select
-                            id={`human-rating-${q.slot_id}`}
-                            value={editRating}
-                            onChange={(e) => setEditRating(Number(e.target.value))}
-                            className="eval-form-select"
-                          >
-                            <option value={1}>1 — Deficient / missing</option>
-                            <option value={2}>2 — Marginal / incomplete</option>
-                            <option value={3}>3 — Acceptable / satisfactory</option>
-                            <option value={4}>4 — Strong / exceeds baseline</option>
-                            <option value={5}>5 — Exceptional / comprehensive</option>
-                          </select>
-                        </div>
-                      )}
+                  <div className="eval-review-form-grid">
+                    <div className="eval-form-field">
+                      <label htmlFor={`review-decision-${q.slot_id}`} className="eval-form-label">
+                        Override action
+                      </label>
+                      <select
+                        id={`review-decision-${q.slot_id}`}
+                        value={editState}
+                        onChange={(e) => setEditState(e.target.value)}
+                        className="eval-form-select"
+                      >
+                        <option value="OVERRIDDEN">Override score / evaluation</option>
+                        <option value="ACCEPTED">Add note only (preserve AI score)</option>
+                        <option value="INSUFFICIENT">Mark insufficient evidence</option>
+                      </select>
                     </div>
 
                     {editState === "OVERRIDDEN" && (
                       <div className="eval-form-field">
-                        <label htmlFor={`override-reason-${q.slot_id}`} className="eval-form-label eval-form-label-required">
-                          Override reason (required)
+                        <label htmlFor={`human-rating-${q.slot_id}`} className="eval-form-label">
+                          Recruiter rating (1 to 5)
                         </label>
-                        <input
-                          id={`override-reason-${q.slot_id}`}
-                          type="text"
-                          placeholder="Explain why the AI assessment was overridden…"
-                          value={overrideReason}
-                          onChange={(e) => setOverrideReason(e.target.value)}
-                          className="eval-form-input"
-                        />
+                        <select
+                          id={`human-rating-${q.slot_id}`}
+                          value={editRating}
+                          onChange={(e) => setEditRating(Number(e.target.value))}
+                          className="eval-form-select"
+                        >
+                          <option value={1}>1 — Deficient / missing</option>
+                          <option value={2}>2 — Marginal / incomplete</option>
+                          <option value={3}>3 — Acceptable / satisfactory</option>
+                          <option value={4}>4 — Strong / exceeds baseline</option>
+                          <option value={5}>5 — Exceptional / comprehensive</option>
+                        </select>
                       </div>
                     )}
+                  </div>
 
+                  {editState === "OVERRIDDEN" && (
                     <div className="eval-form-field">
-                      <label htmlFor={`recruiter-notes-${q.slot_id}`} className="eval-form-label">
-                        Internal recruiter note (private to staff)
+                      <label htmlFor={`override-reason-${q.slot_id}`} className="eval-form-label eval-form-label-required">
+                        Override reason (required)
                       </label>
-                      <textarea
-                        id={`recruiter-notes-${q.slot_id}`}
-                        rows={2}
-                        placeholder="Add internal recruiter notes (strictly omitted from candidate feedback)…"
-                        value={recruiterNote}
-                        onChange={(e) => setRecruiterNote(e.target.value)}
-                        className="eval-form-textarea"
+                      <input
+                        id={`override-reason-${q.slot_id}`}
+                        type="text"
+                        placeholder="Explain why the AI assessment was overridden…"
+                        value={overrideReason}
+                        onChange={(e) => setOverrideReason(e.target.value)}
+                        className="eval-form-input"
                       />
                     </div>
+                  )}
 
-                    <div className="eval-review-actions">
-                      <Button variant="secondary" size="xs" onClick={() => setEditingSlotId(null)}>
-                        Cancel
-                      </Button>
-                      <Button
-                        variant="primary"
-                        size="xs"
-                        icon="save"
-                        isLoading={savingSlot}
-                        onClick={() => handleSaveQuestion(q.slot_id)}
-                      >
-                        Save optional override
-                      </Button>
-                    </div>
+                  <div className="eval-form-field">
+                    <label htmlFor={`recruiter-notes-${q.slot_id}`} className="eval-form-label">
+                      Internal recruiter note (private to staff)
+                    </label>
+                    <textarea
+                      id={`recruiter-notes-${q.slot_id}`}
+                      rows={2}
+                      placeholder="Add internal recruiter notes (strictly omitted from candidate feedback)…"
+                      value={recruiterNote}
+                      onChange={(e) => setRecruiterNote(e.target.value)}
+                      className="eval-form-textarea"
+                    />
                   </div>
-                ) : review && (review.review_state === "OVERRIDDEN" || review.recruiter_note) ? (
-                  <div className="eval-review-summary" style={{ marginTop: "12px" }}>
-                    <div className="eval-review-summary-header">
-                      <strong>Recruiter note / override:</strong>
-                      {review.reviewed_rating != null && (
-                        <span className="eval-override-tag">Score: {review.reviewed_rating}/5.0</span>
-                      )}
-                    </div>
-                    {review.override_reason && (
-                      <div className="eval-override-reason">
-                        <strong>Override reason:</strong> {review.override_reason}
-                      </div>
-                    )}
-                    {review.recruiter_note && (
-                      <p className="eval-recruiter-note">
-                        <strong>Note:</strong> {review.recruiter_note}
-                      </p>
+
+                  <div className="eval-review-actions">
+                    <Button variant="secondary" size="xs" onClick={() => setEditingSlotId(null)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="xs"
+                      icon="save"
+                      isLoading={savingSlot}
+                      onClick={() => handleSaveQuestion(q.slot_id)}
+                    >
+                      Save optional override
+                    </Button>
+                  </div>
+                </div>
+              ) : review && (review.review_state === "OVERRIDDEN" || review.recruiter_note) ? (
+                <div className="eval-review-summary" style={{ marginTop: "12px" }}>
+                  <div className="eval-review-summary-header">
+                    <strong>Recruiter note / override:</strong>
+                    {review.reviewed_rating != null && (
+                      <span className="eval-override-tag">Score: {review.reviewed_rating}/5.0</span>
                     )}
                   </div>
-                ) : (
-                  <p className="eval-empty-text" style={{ marginTop: "8px" }}>
-                    No recruiter notes or overrides recorded for this response.
-                  </p>
-                )}
+                  {review.override_reason && (
+                    <div className="eval-override-reason">
+                      <strong>Override reason:</strong> {review.override_reason}
+                    </div>
+                  )}
+                  {review.recruiter_note && (
+                    <p className="eval-recruiter-note">
+                      <strong>Note:</strong> {review.recruiter_note}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="eval-empty-text" style={{ marginTop: "8px" }}>
+                  No recruiter notes or overrides recorded for this response.
+                </p>
+              )}
             </div>
           </>
         )}
@@ -942,15 +941,14 @@ export const EvaluationWorkspace: React.FC = () => {
                         {cand.application_source}
                       </span>
                       <span
-                        className={`eval-status-badge ${
-                          cand.recruiter_evaluation_status === "Finalized"
-                            ? "finalized"
-                            : cand.recruiter_evaluation_status === "In review"
+                        className={`eval-status-badge ${cand.recruiter_evaluation_status === "Finalized"
+                          ? "finalized"
+                          : cand.recruiter_evaluation_status === "In review"
                             ? "in-review"
                             : cand.recruiter_evaluation_status === "Ready for review"
-                            ? "ready"
-                            : "unavailable"
-                        }`}
+                              ? "ready"
+                              : "unavailable"
+                          }`}
                       >
                         {cand.recruiter_evaluation_status}
                       </span>
@@ -996,8 +994,8 @@ export const EvaluationWorkspace: React.FC = () => {
                       {cand.recruiter_evaluation_status === "Finalized"
                         ? "View evaluation"
                         : cand.recruiter_evaluation_status === "In review"
-                        ? "Continue evaluation"
-                        : "Evaluate interview"}
+                          ? "Continue evaluation"
+                          : "Evaluate interview"}
                     </Button>
                   ) : (
                     <span className="eval-awaiting-label">
@@ -1052,14 +1050,14 @@ export const EvaluationWorkspace: React.FC = () => {
     const radarTitle = isFinalized
       ? "Reviewed response profile"
       : hasReviewedDimensions
-      ? "AI provisional response profile (review in progress)"
-      : "AI provisional response profile";
+        ? "AI provisional response profile (review in progress)"
+        : "AI provisional response profile";
 
     const hasMatchRef = Boolean(
       detail.resume_match_reference &&
       (detail.resume_match_reference.has_match_reference ||
-       detail.resume_match_reference.overall_score !== null ||
-       detail.resume_match_reference.overall_compatibility_score !== null)
+        detail.resume_match_reference.overall_score !== null ||
+        detail.resume_match_reference.overall_compatibility_score !== null)
     );
 
     const matchOverallScore =
@@ -1294,19 +1292,19 @@ export const EvaluationWorkspace: React.FC = () => {
                 <span className="eval-metric-label">Deterministic core aggregate</span>
                 <span className="eval-overview-score">
                   {detail.overview.aggregate_score !== null &&
-                  detail.overview.aggregate_score !== undefined
+                    detail.overview.aggregate_score !== undefined
                     ? `${detail.overview.aggregate_score.toFixed(1)} / 5.0`
                     : (() => {
-                        const ratedCore = detail.questions
-                          .filter((q) => !q.is_supplemental)
-                          .map((q) => q.recruiter_review?.reviewed_rating ?? (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating)
-                          .filter((r): r is number => typeof r === "number" && !isNaN(r));
-                        if (ratedCore.length > 0) {
-                          const avg = (ratedCore.reduce((a, b) => a + b, 0) / ratedCore.length).toFixed(1);
-                          return `${avg} / 5.0`;
-                        }
-                        return "AI evaluation pending";
-                      })()}
+                      const ratedCore = detail.questions
+                        .filter((q) => !q.is_supplemental)
+                        .map((q) => q.recruiter_review?.reviewed_rating ?? (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating)
+                        .filter((r): r is number => typeof r === "number" && !isNaN(r));
+                      if (ratedCore.length > 0) {
+                        const avg = (ratedCore.reduce((a, b) => a + b, 0) / ratedCore.length).toFixed(1);
+                        return `${avg} / 5.0`;
+                      }
+                      return "AI evaluation pending";
+                    })()}
                 </span>
                 <span className="eval-overview-detail">
                   Includes {detail.overview.core_questions_count} core questions (excludes{" "}

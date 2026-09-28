@@ -17,6 +17,7 @@ vi.mock("../api/jobs");
 describe("Phase 4C.3 Corrective UI Additions", () => {
   const mockSealedSetDetail: AiQuestionSetDetail = {
     ai_set_id: "qset-100",
+    interview_mode: "TEXT",
     template_id: "tpl-100",
     job_id: "job-100",
     job_title: "Principal Infrastructure Architect",

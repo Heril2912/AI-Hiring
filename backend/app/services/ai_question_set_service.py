@@ -43,6 +43,7 @@ from app.schemas.ai_question_set import (
 from app.schemas.phase3_enums import (
     AuthoringOrigin,
     InterviewLayer,
+    InterviewMode,
     PlanLifecycle,
     QuestionDifficulty,
     QuestionFormat,
@@ -370,6 +371,8 @@ async def _generate_requirement_grounded_slots(
     db: Session,
     provider_registry: Optional[ProviderRegistry] = None,
     custom_provider: Optional[BaseWordingProvider] = None,
+    interview_mode: InterviewMode = InterviewMode.TEXT,
+    existing_text_stems: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Generates AI wording for all planned slots using the job-grounded batch generation provider."""
     reg = provider_registry or get_provider_registry()
@@ -413,13 +416,16 @@ async def _generate_requirement_grounded_slots(
             "question_objective": s.question_objective,
             "question_type": s.question_type.value,
             "difficulty": s.difficulty,
-            "delivery_mode": s.delivery_mode.value,
+            "delivery_mode": "VOICE" if interview_mode == InterviewMode.AUDIO else s.delivery_mode.value,
         })
 
+    mode_str = interview_mode.value if hasattr(interview_mode, "value") else str(interview_mode)
     try:
         batch_resp: StrictJobGroundedGenerationBatchResponse = await provider.request_job_grounded_generation(
             job_context=job_context,
             slots_context=slots_context,
+            interview_mode=mode_str,
+            existing_text_stems=existing_text_stems,
         )
     except Exception as e:
         logger.warning("Batch job-grounded generation provider error: %s", e)
@@ -440,7 +446,7 @@ async def _generate_requirement_grounded_slots(
             "source_requirement_ids": slot["source_requirement_ids"],
             "competency_name": slot["competency_name"],
             "question_type": slot["question_type"],
-            "estimated_time_minutes": slot["estimated_time_minutes"],
+            "estimated_time_minutes": 3 if interview_mode == InterviewMode.AUDIO else slot["estimated_time_minutes"],
             "permitted_probes": slot["permitted_probes"],
             "rubric": slot.get("rubric"),
             "ai_wording": None,
@@ -468,8 +474,14 @@ async def _generate_requirement_grounded_slots(
                 item["safe_failure_code"] = "MISMATCHED_REQUIREMENT_ID"
             else:
                 wording = generated_q.question_text.strip()
-                is_valid, fail_code = _validate_ai_wording_safety(wording)
-                if is_valid:
+                from app.services.ai_provenance_service import validate_conversational_question_text
+                val_outcome = validate_conversational_question_text(
+                    question_text=wording,
+                    competency_name=slot["competency_name"],
+                    interview_mode=mode_str,
+                    cross_mode_existing_texts=existing_text_stems,
+                )
+                if val_outcome.is_valid:
                     item["ai_wording"] = wording
                     item["question_text"] = wording
                     item["validation_status"] = "PASSED"
@@ -478,7 +490,7 @@ async def _generate_requirement_grounded_slots(
                         item["permitted_probes"] = generated_q.permitted_probes
                 else:
                     item["validation_status"] = "FAILED"
-                    item["safe_failure_code"] = fail_code or "SAFETY_CHECK_FAILED"
+                    item["safe_failure_code"] = val_outcome.error_code or "SAFETY_CHECK_FAILED"
 
         items.append(item)
 
@@ -711,6 +723,7 @@ def _map_record_to_detail_dto(
     return AiQuestionSetDetailResponse(
         ai_set_id=ai_set.ai_set_id,
         set_version=ai_set.set_version,
+        interview_mode=getattr(ai_set, "interview_mode", InterviewMode.TEXT) or InterviewMode.TEXT,
         template_id=ai_set.template_id,
         source_template_version=ai_set.source_template_version,
         source_mode=ai_set.source_mode,
@@ -751,9 +764,10 @@ def list_ai_question_sets(
     db: Session,
     search: Optional[str] = None,
     status_filter: Optional[str] = None,
+    mode_filter: Optional[InterviewMode] = None,
     sort_by: str = "updated_at",
 ) -> AiQuestionSetDirectoryResponse:
-    """Lists organization-scoped AI question sets with search, filter, and metrics."""
+    """Lists organization-scoped AI question sets with search, filter, mode, and metrics."""
     stmt = (
         select(AiInterviewQuestionSetRecord)
         .options(
@@ -766,7 +780,7 @@ def list_ai_question_sets(
     )
     records = db.execute(stmt).scalars().all()
 
-    # Deduplicate to latest version per job_id or template_id
+    # Deduplicate to latest version per (job_id, job_revision, interview_mode) or (template_id, interview_mode)
     latest_by_key: Dict[str, AiInterviewQuestionSetRecord] = {}
     for r in records:
         # Organization check
@@ -782,7 +796,11 @@ def list_ai_question_sets(
             if actor.role == UserRole.RECRUITER and job_rec.created_by_user_id != actor.user_id:
                 continue
 
-        key = str(r.template_id) if r.template_id else f"job_{r.job_id}_{r.job_revision}"
+        r_mode = getattr(r, "interview_mode", InterviewMode.TEXT) or InterviewMode.TEXT
+        if mode_filter is not None and r_mode != mode_filter:
+            continue
+
+        key = f"{r.template_id}_{r_mode.value}" if r.template_id else f"job_{r.job_id}_{r.job_revision}_{r_mode.value}"
         if key not in latest_by_key or r.set_version > latest_by_key[key].set_version:
             latest_by_key[key] = r
 
@@ -843,6 +861,7 @@ def list_ai_question_sets(
             AiQuestionSetSummaryResponse(
                 ai_set_id=ai_set.ai_set_id,
                 set_version=ai_set.set_version,
+                interview_mode=getattr(ai_set, "interview_mode", InterviewMode.TEXT) or InterviewMode.TEXT,
                 template_id=ai_set.template_id,
                 source_mode=ai_set.source_mode,
                 job_id=ai_set.job_id,
@@ -873,9 +892,11 @@ def list_ai_question_sets(
 def get_eligible_jobs_for_ai_questions(
     actor: UserRecord,
     db: Session,
+    mode: InterviewMode = InterviewMode.TEXT,
 ) -> EligibleJobsResponse:
     """Retrieves organization-scoped jobs available to the recruiter for AI interview generation.
     
+    Calculates readiness independently by mode.
     Returns job_id, job_title, requirement_count, current_ai_set_id, current_ai_set_status.
     """
     stmt = (
@@ -909,11 +930,12 @@ def get_eligible_jobs_for_ai_questions(
             
         job_title = latest_ver.title or f"Job #{str(job.job_id)[:8]}"
 
-        # Look up current AI question set for this job revision
+        # Look up current AI question set for this job revision and mode
         stmt_ai = (
             select(AiInterviewQuestionSetRecord)
             .where(
                 AiInterviewQuestionSetRecord.job_id == job.job_id,
+                AiInterviewQuestionSetRecord.interview_mode == mode,
                 (AiInterviewQuestionSetRecord.job_version_id == latest_ver.job_version_id)
                 | (AiInterviewQuestionSetRecord.job_revision == latest_ver.version_number),
             )
@@ -921,9 +943,9 @@ def get_eligible_jobs_for_ai_questions(
         )
         latest_ai = db.execute(stmt_ai).scalars().first()
 
-        # Phase 3E.2 binding directory rule:
-        # If the current revision of a job already has an AI question set with valid generated questions, exclude it from
-        # "Choose a job". It appears solely under "Continue reviewing" / existing sets.
+        # Phase 3E.2 / 4D.1 binding directory rule:
+        # If the current revision of a job already has an AI question set in the selected mode with valid generated questions,
+        # exclude it from "Choose a job". It appears solely under "Continue reviewing" for that mode.
         has_valid_ai_set = (
             latest_ai is not None
             and bool(latest_ai.items)
@@ -1000,13 +1022,14 @@ async def generate_ai_questions_by_job_id(
     db: Session,
     provider_registry: Optional[ProviderRegistry] = None,
     custom_provider: Optional[BaseWordingProvider] = None,
+    interview_mode: InterviewMode = InterviewMode.TEXT,
 ) -> AiQuestionSetDetailResponse:
     """Server-authoritative generation command given a selected job_id.
     
     Resolution hierarchy:
     1. Load requested job under organization / recruiter assignment scope.
     2. Load current approved / ready revision.
-    3. If active AI set exists for current fingerprint and not force_regenerate: return it (OPENED_EXISTING).
+    3. If active AI set exists for current fingerprint, mode, and not force_regenerate: return it (OPENED_EXISTING).
     4. Check for usable deterministic blueprint. If usable slots exist -> BLUEPRINT_GROUNDED.
     5. If no usable blueprint -> REQUIREMENT_GROUNDED fallback.
     6. Validate, store as DRAFT, return (GENERATED).
@@ -1031,7 +1054,7 @@ async def generate_ai_questions_by_job_id(
             detail={"code": "NO_APPROVED_REQUIREMENTS", "message": "This job needs approved requirements before questions can be generated."},
         )
 
-    # Check for existing active AI question set for this job revision
+    # Check for existing active AI question set for this job revision AND interview mode
     stmt_existing = (
         select(AiInterviewQuestionSetRecord)
         .options(
@@ -1042,6 +1065,7 @@ async def generate_ai_questions_by_job_id(
         )
         .where(
             AiInterviewQuestionSetRecord.job_id == job.job_id,
+            AiInterviewQuestionSetRecord.interview_mode == interview_mode,
             (AiInterviewQuestionSetRecord.job_version_id == latest_version.job_version_id)
             | (AiInterviewQuestionSetRecord.job_revision == latest_version.version_number),
         )
@@ -1050,7 +1074,8 @@ async def generate_ai_questions_by_job_id(
     existing_set = db.execute(stmt_existing).scalars().first()
 
     # Step 3: Check if fresh active AI set exists for this exact job revision and canonical source fingerprint
-    packet, internal_plan = _build_canonical_generation_packet(job, latest_version, actor=actor)
+    deliv_mode = GenerationDeliveryMode.VOICE if interview_mode == InterviewMode.AUDIO else GenerationDeliveryMode.CHAT
+    packet, internal_plan = _build_canonical_generation_packet(job, latest_version, delivery_mode=deliv_mode, actor=actor)
     canonical_fp = internal_plan["fingerprint"]
 
     if existing_set and not force_regenerate:
@@ -1072,6 +1097,26 @@ async def generate_ai_questions_by_job_id(
         if is_fresh:
             return _map_record_to_detail_dto(existing_set, db, action="OPENED_EXISTING")
 
+    # If generating AUDIO set, fetch stems from TEXT set if it exists to avoid duplicate question text
+    cross_mode_stems: List[str] = []
+    other_mode = InterviewMode.TEXT if interview_mode == InterviewMode.AUDIO else InterviewMode.AUDIO
+    stmt_other = (
+        select(AiInterviewQuestionSetRecord)
+        .where(
+            AiInterviewQuestionSetRecord.job_id == job.job_id,
+            AiInterviewQuestionSetRecord.interview_mode == other_mode,
+            (AiInterviewQuestionSetRecord.job_version_id == latest_version.job_version_id)
+            | (AiInterviewQuestionSetRecord.job_revision == latest_version.version_number),
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+    )
+    other_set = db.execute(stmt_other).scalars().first()
+    if other_set and other_set.items:
+        for it in other_set.items:
+            w = it.get("ai_wording") or it.get("question_text")
+            if w and w.strip():
+                cross_mode_stems.append(w.strip())
+
     # Step 4: Requirement-grounded batch generation (Job-Grounded Generation Pipeline)
     items = await _generate_requirement_grounded_slots(
         packet=packet,
@@ -1080,6 +1125,8 @@ async def generate_ai_questions_by_job_id(
         db=db,
         provider_registry=provider_registry,
         custom_provider=custom_provider,
+        interview_mode=interview_mode,
+        existing_text_stems=cross_mode_stems,
     )
 
     if not items or len(items) == 0 or all(not it.get("ai_wording") for it in items):
@@ -1101,6 +1148,7 @@ async def generate_ai_questions_by_job_id(
     effective_rev = getattr(latest_version, "revision", None) or getattr(latest_version, "version_number", None) or 1
     new_set = AiInterviewQuestionSetRecord(
         ai_set_id=uuid.uuid4(),
+        interview_mode=interview_mode,
         organization_id=org_id,
         template_id=None,
         job_id=job.job_id,
@@ -1544,6 +1592,7 @@ def _ensure_editable_set(
     new_set = AiInterviewQuestionSetRecord(
         ai_set_id=uuid.uuid4(),
         organization_id=ai_set.organization_id,
+        interview_mode=getattr(ai_set, "interview_mode", InterviewMode.TEXT) or InterviewMode.TEXT,
         template_id=ai_set.template_id,
         job_id=ai_set.job_id,
         job_version_id=job_ver_id,
@@ -1597,6 +1646,15 @@ async def generate_mcq_slots_for_template(
         _check_recruiter_access(actor, job)
 
     editable_set = _ensure_editable_set(ai_set, actor, db)
+    if getattr(editable_set, "interview_mode", InterviewMode.TEXT) == InterviewMode.AUDIO:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "AUDIO_MCQ_NOT_ALLOWED",
+                "message": "Multiple choice questions are not permitted in AUDIO interview mode.",
+            },
+        )
+
     items = list(editable_set.items or [])
     current_mcqs = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
 
@@ -1778,6 +1836,15 @@ def add_manual_mcq_slot(
         _check_recruiter_access(actor, job)
 
     editable_set = _ensure_editable_set(ai_set, actor, db)
+    if getattr(editable_set, "interview_mode", InterviewMode.TEXT) == InterviewMode.AUDIO:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "AUDIO_MCQ_NOT_ALLOWED",
+                "message": "Multiple choice questions are not permitted in AUDIO interview mode.",
+            },
+        )
+
     items = list(editable_set.items or [])
     current_mcqs = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
 
@@ -1867,6 +1934,14 @@ def update_mcq_slot(
         _check_recruiter_access(actor, job)
 
     editable_set = _ensure_editable_set(ai_set, actor, db)
+    if getattr(editable_set, "interview_mode", InterviewMode.TEXT) == InterviewMode.AUDIO:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "AUDIO_MCQ_NOT_ALLOWED",
+                "message": "Multiple choice questions are not permitted in AUDIO interview mode.",
+            },
+        )
     items = list(editable_set.items or [])
     str_slot_id = str(slot_id)
 
@@ -2089,7 +2164,8 @@ def validate_ai_question_set(
             if ai_set.job_revision and ai_set.job_revision != target_v_rev:
                 errors.append(f"AI question set is stale: job revision changed from #{ai_set.job_revision} to #{target_v_rev}. Please regenerate.")
             else:
-                p, i_plan = _build_canonical_generation_packet(job_rec, latest_v)
+                deliv_mode = GenerationDeliveryMode.VOICE if getattr(ai_set, "interview_mode", None) == InterviewMode.AUDIO or str(getattr(ai_set, "interview_mode", "")) == "AUDIO" else GenerationDeliveryMode.CHAT
+                p, i_plan = _build_canonical_generation_packet(job_rec, latest_v, delivery_mode=deliv_mode, actor=actor)
                 canon_fp = i_plan["fingerprint"]
                 eligible_reqs = [r for r in (latest_v.requirements or []) if _is_requirement_eligible(r)] or list(latest_v.requirements or [])
                 def _sk(r):
@@ -2140,6 +2216,15 @@ def validate_ai_question_set(
     conv_items = [it for it in items if it.get("question_format") != "MCQ_SINGLE_ANSWER"]
     mcq_items = [it for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER"]
 
+    # Phase 4D.1 AUDIO mode restrictions
+    raw_mode = getattr(ai_set, "interview_mode", InterviewMode.TEXT) or InterviewMode.TEXT
+    mode_str = raw_mode.value if hasattr(raw_mode, "value") else str(raw_mode)
+    set_mode = InterviewMode.AUDIO if mode_str == "AUDIO" else InterviewMode.TEXT
+
+    if set_mode == InterviewMode.AUDIO:
+        if len(mcq_items) > 0:
+            errors.append("Multiple choice questions are not permitted in AUDIO interview mode (AUDIO_MCQ_NOT_ALLOWED).")
+
     # 2. Composition Bounds (Max 5 conversational, Max 5 MCQs, Min 1 total)
     if len(items) == 0:
         errors.append("Question set is empty. Add at least one conversational or multiple-choice question.")
@@ -2147,6 +2232,29 @@ def validate_ai_question_set(
         errors.append(f"Maximum 5 conversational questions allowed (currently {len(conv_items)}).")
     if len(mcq_items) > 5:
         errors.append(f"Maximum 5 multiple-choice questions allowed (currently {len(mcq_items)}).")
+
+    # Cross-mode duplicate stem check
+    other_mode = InterviewMode.TEXT if set_mode == InterviewMode.AUDIO else InterviewMode.AUDIO
+    other_mode_val = other_mode.value if hasattr(other_mode, "value") else str(other_mode)
+    stmt_other = (
+        select(AiInterviewQuestionSetRecord)
+        .where(
+            AiInterviewQuestionSetRecord.job_id == ai_set.job_id,
+            (AiInterviewQuestionSetRecord.interview_mode == other_mode)
+            | (AiInterviewQuestionSetRecord.interview_mode == other_mode_val),
+        )
+        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+    )
+    other_sets = db.execute(stmt_other).scalars().all()
+    other_stems = set()
+    import re
+    for os in other_sets:
+        if os.items:
+            for it in os.items:
+                t = (it.get("ai_wording") or it.get("question_text") or "").strip().lower()
+                t_norm = re.sub(r"[^\w\s]", "", t)
+                if t_norm:
+                    other_stems.add(t_norm)
 
     # 3. Conversational slot resolution check
     seen_conv_texts = set()
@@ -2159,10 +2267,14 @@ def validate_ai_question_set(
             errors.append(f"Conversational Question #{slot_num} failed safety validation ({it.get('safe_failure_code')}).")
         
         w_norm = (wording or "").strip().lower()
+        w_clean = re.sub(r"[^\w\s]", "", w_norm)
         if w_norm:
             if w_norm in seen_conv_texts:
                 errors.append(f"Duplicate conversational question detected (#{slot_num}).")
             seen_conv_texts.add(w_norm)
+
+            if other_stems and w_clean in other_stems:
+                errors.append(f"Question #{slot_num} is an exact duplicate of a {other_mode.value} question for this job (CROSS_MODE_QUESTION_DUPLICATE).")
 
     # 4. MCQ item validation check
     seen_mcq_texts = set()

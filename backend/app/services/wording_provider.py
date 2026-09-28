@@ -118,6 +118,8 @@ class BaseWordingProvider(ABC):
         self,
         job_context: Dict[str, Any],
         slots_context: List[Dict[str, Any]],
+        interview_mode: str = "TEXT",
+        existing_text_stems: Optional[List[str]] = None,
     ) -> Any:
         """Executes batch job-grounded question generation for planned slots."""
         raise NotImplementedError("Provider does not support job-grounded question generation.")
@@ -137,6 +139,8 @@ class DisabledWordingProvider(BaseWordingProvider):
         self,
         job_context: Dict[str, Any],
         slots_context: List[Dict[str, Any]],
+        interview_mode: str = "TEXT",
+        existing_text_stems: Optional[List[str]] = None,
     ) -> Any:
         raise ProviderTransportError(
             error_code=ProviderErrorCode.PROVIDER_DISABLED,
@@ -516,6 +520,8 @@ class FakeWordingProvider(BaseWordingProvider):
         self,
         job_context: Dict[str, Any],
         slots_context: List[Dict[str, Any]],
+        interview_mode: str = "TEXT",
+        existing_text_stems: Optional[List[str]] = None,
     ) -> Any:
         if self.simulated_mode == "SUCCESS":
             if self.simulated_raw_json_override is not None:
@@ -535,7 +541,10 @@ class FakeWordingProvider(BaseWordingProvider):
                 obj = slot.get("question_objective", "Assess practical engineering problem-solving")
                 q_type = slot.get("question_type", "TECHNICAL")
                 diff = slot.get("difficulty", "INTERMEDIATE")
-                q_text = f"Can you describe how you architect and validate {comp} in high-scale production systems?"
+                if interview_mode == "AUDIO":
+                    q_text = f"Can you walk me through how you verbally communicate and solve {comp} challenges?"
+                else:
+                    q_text = f"Can you describe how you architect and validate {comp} in high-scale production systems?"
                 items.append(
                     StrictGeneratedQuestionItem(
                         slot_id=str(sid),
@@ -546,7 +555,7 @@ class FakeWordingProvider(BaseWordingProvider):
                         question_objective=str(obj),
                         question_type=str(q_type),
                         difficulty=str(diff),
-                        estimated_answer_minutes=5,
+                        estimated_answer_minutes=3 if interview_mode == "AUDIO" else 5,
                         permitted_probes=[
                             f"How do you monitor and measure latency in {comp}?",
                             "What failure modes or edge cases did you encounter?",
@@ -1079,6 +1088,8 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
         self,
         job_context: Dict[str, Any],
         slots_context: List[Dict[str, Any]],
+        interview_mode: str = "TEXT",
+        existing_text_stems: Optional[List[str]] = None,
     ) -> Any:
         """Executes structured batch job-grounded question generation for planned slots."""
         if not self.profile.enabled:
@@ -1096,7 +1107,12 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
         )
         from app.schemas.question_generation_contract import StrictJobGroundedGenerationBatchResponse
 
-        messages = assemble_job_grounded_generation_messages(job_context, slots_context)
+        messages = assemble_job_grounded_generation_messages(
+            job_context,
+            slots_context,
+            interview_mode=interview_mode,
+            existing_text_stems=existing_text_stems,
+        )
 
         payload = {
             "model": self.profile.model_identifier or "default",
