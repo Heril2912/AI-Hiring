@@ -53,6 +53,10 @@ class RecruiterApplicationSummaryResponse(StrictSchema):
         description="NOT_RELEASED, RELEASED, or NO_APPROVED_SET"
     )
     release_id: Optional[uuid.UUID] = None
+    interview_mode: Optional[str] = Field(
+        default="TEXT",
+        description="TEXT or AUDIO interview mode for release status.",
+    )
 
 
 class RecruiterApplicationListResponse(StrictSchema):
@@ -84,6 +88,10 @@ class RecruiterInterviewReleaseEligibilityDto(StrictSchema):
     is_eligible: bool
     reason_code: Optional[str] = None
     message: str
+    interview_mode: Optional[str] = Field(
+        default="TEXT",
+        description="TEXT or AUDIO mode for this question set / release.",
+    )
     question_set_id: Optional[uuid.UUID] = None
     set_version: Optional[int] = None
     question_count: int = 0
@@ -139,6 +147,10 @@ class RecruiterReleaseInterviewResponse(StrictSchema):
     job_id: uuid.UUID
     job_title: str
     job_revision: int
+    interview_mode: str = Field(
+        default="TEXT",
+        description="TEXT or AUDIO mode of the released interview.",
+    )
     ai_set_id: uuid.UUID
     set_version: int
     status: str

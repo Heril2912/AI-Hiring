@@ -24,6 +24,7 @@ export interface RecruiterApplicationSummary {
   confidenceTier?: string | null;
   interviewStatus: string;
   releaseId?: string | null;
+  interviewMode?: string | null;
 }
 
 export interface RecruiterApplicationListResponse {
@@ -52,6 +53,7 @@ export interface RecruiterInterviewReleaseEligibility {
   isEligible: boolean;
   reasonCode?: string | null;
   message: string;
+  interviewMode?: string | null;
   questionSetId?: string | null;
   setVersion?: number | null;
   questionCount: number;
@@ -89,6 +91,7 @@ export interface RecruiterReleaseInterviewResponse {
   jobId: string;
   jobTitle: string;
   jobRevision: number;
+  interviewMode?: string;
   aiSetId: string;
   setVersion: number;
   status: string;
@@ -101,6 +104,7 @@ export async function fetchJobApplicants(
   params?: {
     status?: string;
     reviewState?: string;
+    mode?: string;
     page?: number;
     limit?: number;
   }
@@ -108,6 +112,7 @@ export async function fetchJobApplicants(
   const query = new URLSearchParams();
   if (params?.status) query.set("status", params.status);
   if (params?.reviewState) query.set("review_state", params.reviewState);
+  if (params?.mode) query.set("mode", params.mode);
   if (params?.page) query.set("page", String(params.page));
   if (params?.limit) query.set("limit", String(params.limit));
 
@@ -117,9 +122,11 @@ export async function fetchJobApplicants(
 
 export async function fetchJobApplicantDetail(
   jobId: string,
-  applicationId: string
+  applicationId: string,
+  mode?: string
 ): Promise<RecruiterApplicationDetail> {
-  return apiFetch<RecruiterApplicationDetail>(`/api/v1/jobs/${jobId}/applications/${applicationId}`);
+  const query = mode ? `?mode=${encodeURIComponent(mode)}` : "";
+  return apiFetch<RecruiterApplicationDetail>(`/api/v1/jobs/${jobId}/applications/${applicationId}${query}`);
 }
 
 export async function updateApplicantReviewState(

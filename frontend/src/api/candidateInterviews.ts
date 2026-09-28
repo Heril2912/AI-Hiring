@@ -28,6 +28,7 @@ export interface CandidateInterviewSessionResponse {
   job_id: string;
   job_title: string;
   job_revision: number;
+  interview_mode?: "TEXT" | "AUDIO";
   status: "IN_PROGRESS" | "SUBMITTED";
   started_at: string;
   last_saved_at?: string | null;

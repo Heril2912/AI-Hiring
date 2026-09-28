@@ -500,6 +500,7 @@ def release_practice_to_candidate(
         template_id=ai_set.template_id,
         ai_set_id=ai_set.ai_set_id,
         set_version=ai_set.set_version,
+        interview_mode=ai_set.interview_mode or "TEXT",
         status=PracticeReleaseStatus.RELEASED.value,
         released_by_user_id=actor.user_id,
         released_at=now,
@@ -1103,6 +1104,7 @@ def get_candidate_practice_discovery(
                 mcq_count=mcq_count,
                 total_question_count=conv_count + mcq_count,
                 released_at=rel.released_at,
+                interview_mode=rel.interview_mode or (ai_set.interview_mode if ai_set else "TEXT") or "TEXT",
                 status_label="Practice content ready",
             )
         )

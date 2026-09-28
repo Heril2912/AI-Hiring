@@ -21,9 +21,9 @@ export function AiInterviewsDirectory({
   onSelectTemplate,
   onNavigateToJobs,
   initialSelectedJobId = null,
-  initialMode = null,
+  initialMode = "TEXT",
 }: AiInterviewsDirectoryProps) {
-  const [selectedMode, setSelectedMode] = useState<InterviewMode | null>(initialMode);
+  const [selectedMode, setSelectedMode] = useState<InterviewMode>(initialMode || "TEXT");
   const [eligibleJobs, setEligibleJobs] = useState<EligibleJobItem[]>([]);
   const [recentDirectory, setRecentDirectory] = useState<AiQuestionSetDirectory | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(initialSelectedJobId);
@@ -64,9 +64,7 @@ export function AiInterviewsDirectory({
   };
 
   useEffect(() => {
-    if (selectedMode) {
-      loadData(selectedMode);
-    }
+    loadData(selectedMode);
   }, [selectedMode]);
 
   // Exclude jobs that already have an AI question set in the selected mode
@@ -175,131 +173,85 @@ export function AiInterviewsDirectory({
 
   const hasRecentSets = Boolean(recentDirectory?.sets && recentDirectory.sets.length > 0);
 
-  // If no mode is selected, render the interview-type landing view
-  if (!selectedMode) {
-    return (
-      <div className="aiq-page">
-        <header className="aiq-header">
-          <h1 className="aiq-title">AI Interviews</h1>
-          <p className="aiq-subtitle">
-            Select an interview format to generate requirement-grounded question sets and manage practice sessions.
-          </p>
-        </header>
-
-        <div className="aiq-mode-cards-grid">
-          {/* Card 1: Text-based interview */}
-          <div className="aiq-mode-card" data-testid="mode-card-text">
-            <div>
-              <div className="aiq-mode-card-header">
-                <div className="aiq-mode-icon-box">
-                  <Icon name="message-square" size={24} />
-                </div>
-                <h2 className="aiq-mode-card-title">Text-based interview</h2>
-              </div>
-              <div className="aiq-mode-card-body">
-                <p className="aiq-mode-card-desc">
-                  Written interview experience with conversational and multiple-choice questions.
-                </p>
-                <ul className="aiq-mode-features-list">
-                  <li className="aiq-mode-feature-item">
-                    <Icon name="check" size={14} />
-                    <span>Conversational and MCQ questions</span>
-                  </li>
-                  <li className="aiq-mode-feature-item">
-                    <Icon name="check" size={14} />
-                    <span>In-depth written answers & automated rubrics</span>
-                  </li>
-                  <li className="aiq-mode-feature-item">
-                    <Icon name="check" size={14} />
-                    <span>Candidate self-paced practice simulation</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ width: "100%", justifyContent: "center" }}
-              onClick={() => setSelectedMode("TEXT")}
-            >
-              Open text interviews
-            </button>
-          </div>
-
-          {/* Card 2: Audio-based interview */}
-          <div className="aiq-mode-card" data-testid="mode-card-audio">
-            <div>
-              <div className="aiq-mode-card-header">
-                <div className="aiq-mode-icon-box" style={{ backgroundColor: "#eef2ff", color: "#4338ca" }}>
-                  <Icon name="mic" size={24} />
-                </div>
-                <h2 className="aiq-mode-card-title">Audio-based interview</h2>
-              </div>
-              <div className="aiq-mode-card-body">
-                <p className="aiq-mode-card-desc">
-                  Separate spoken-response question sets structured for natural conversational evaluation.
-                </p>
-                <ul className="aiq-mode-features-list">
-                  <li className="aiq-mode-feature-item">
-                    <Icon name="check" size={14} />
-                    <span>Conversational questions only (0 MCQs)</span>
-                  </li>
-                  <li className="aiq-mode-feature-item">
-                    <Icon name="check" size={14} />
-                    <span>Natural spoken phrasing & verbal rubrics</span>
-                  </li>
-                  <li className="aiq-mode-feature-item">
-                    <Icon name="check" size={14} />
-                    <span>Independent lifecycle and question sets</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ width: "100%", justifyContent: "center" }}
-              onClick={() => setSelectedMode("AUDIO")}
-            >
-              Open audio interviews
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Render Directory View for the Selected Mode
   return (
     <div className="aiq-page">
-      {/* Back to Interview Types */}
-      <button
-        type="button"
-        className="aiq-back-to-types-btn"
-        onClick={() => {
-          setSelectedMode(null);
-          setSelectedJobId(null);
-          setEligibleJobs([]);
-          setRecentDirectory(null);
-        }}
-      >
-        <Icon name="arrow-left" size={14} />
-        <span>Back to interview types</span>
-      </button>
-
-      {/* Page Header with Mode Context */}
-      <header className="aiq-header">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
-          <h1 className="aiq-title" style={{ margin: 0 }}>AI Interviews</h1>
-          <span className={`aiq-mode-badge ${selectedMode === "TEXT" ? "text-mode" : "audio-mode"}`}>
-            {selectedMode === "TEXT" ? "Text-based" : "Audio-based"}
-          </span>
+      {/* Page Header with Mode Selector Tabs */}
+      <header className="aiq-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+        <div>
+          <h1 className="aiq-title">AI Interviews</h1>
+          <p className="aiq-subtitle">
+            Choose a job, generate interview question sets, and manage candidate interview practice.
+          </p>
         </div>
-        <p className="aiq-subtitle">
-          {selectedMode === "TEXT"
-            ? "Choose a job, generate written interview question sets, and manage candidate practice."
-            : "Choose a job, generate spoken conversational question sets, and manage audio interview readiness."}
-        </p>
+
+        {/* Mode Switcher Tabs */}
+        <div
+          role="tablist"
+          aria-label="Interview Mode"
+          style={{
+            display: "inline-flex",
+            padding: "3px",
+            backgroundColor: "var(--bg-surface-subtle, #f1f5f9)",
+            borderRadius: "8px",
+            border: "1px solid var(--border-subtle, #e2e8f0)",
+          }}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedMode === "TEXT"}
+            data-testid="mode-tab-text"
+            className="btn btn-sm"
+            onClick={() => {
+              if (selectedMode !== "TEXT") {
+                setSelectedMode("TEXT");
+                setSelectedJobId(null);
+              }
+            }}
+            style={{
+              padding: "6px 14px",
+              fontSize: "13px",
+              fontWeight: 600,
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: selectedMode === "TEXT" ? "#ffffff" : "transparent",
+              color: selectedMode === "TEXT" ? "var(--text-primary, #0f172a)" : "var(--text-secondary, #64748b)",
+              boxShadow: selectedMode === "TEXT" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            Text-based
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={selectedMode === "AUDIO"}
+            data-testid="mode-tab-audio"
+            className="btn btn-sm"
+            onClick={() => {
+              if (selectedMode !== "AUDIO") {
+                setSelectedMode("AUDIO");
+                setSelectedJobId(null);
+              }
+            }}
+            style={{
+              padding: "6px 14px",
+              fontSize: "13px",
+              fontWeight: 600,
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: selectedMode === "AUDIO" ? "#ffffff" : "transparent",
+              color: selectedMode === "AUDIO" ? "#4338ca" : "var(--text-secondary, #64748b)",
+              boxShadow: selectedMode === "AUDIO" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            Audio-based
+          </button>
+        </div>
       </header>
 
       {/* Screen Reader Progress Announcement */}
@@ -556,12 +508,12 @@ export function AiInterviewsDirectory({
                 isLegacy
                   ? "legacy"
                   : status === "Approved"
-                  ? "approved"
-                  : status === "Ready for Review"
-                  ? "validated"
-                  : status === "Stale"
-                  ? "stale"
-                  : "draft";
+                    ? "approved"
+                    : status === "Ready for Review"
+                      ? "validated"
+                      : status === "Stale"
+                        ? "stale"
+                        : "draft";
 
               return (
                 <div key={set.ai_set_id} className="aiq-recent-row">

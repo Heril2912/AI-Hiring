@@ -133,6 +133,7 @@ class CandidatePracticeJobSummary(FrozenSchema):
     mcq_count: int
     total_question_count: Optional[int] = None
     released_at: datetime
+    interview_mode: str = "TEXT"
     status_label: str = "Practice content ready"
 
 

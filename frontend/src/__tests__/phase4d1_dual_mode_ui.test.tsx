@@ -95,22 +95,42 @@ describe("Phase 4D.1 Frontend: Dual-Mode Interview Foundation and Recruiter Stud
     ],
   };
 
-  it("renders the landing selector with Text and Audio mode cards when no mode is selected", () => {
+  it("renders the directory with Text and Audio mode switcher tabs, defaulting to Text-based", async () => {
+    (clientModule.apiFetch as any).mockImplementation((path: string) => {
+      if (path.includes("/api/v1/ai-interviews/eligible-jobs")) {
+        return Promise.resolve(mockEligibleText);
+      }
+      if (path.includes("/api/v1/ai-interviews")) {
+        return Promise.resolve(mockSetsText);
+      }
+      return Promise.resolve({});
+    });
+
     const handleSelectTemplate = vi.fn();
     render(<AiInterviewsDirectory onSelectTemplate={handleSelectTemplate} />);
 
     expect(screen.getByText("AI Interviews")).toBeInTheDocument();
-    expect(screen.getByText("Select an interview format to generate requirement-grounded question sets and manage practice sessions.")).toBeInTheDocument();
+    expect(screen.getByText("Choose a job, generate interview question sets, and manage candidate interview practice.")).toBeInTheDocument();
 
-    expect(screen.getByText("Text-based interview")).toBeInTheDocument();
-    expect(screen.getByText("Open text interviews")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Text-based" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Audio-based" })).toBeInTheDocument();
 
-    expect(screen.getByText("Audio-based interview")).toBeInTheDocument();
-    expect(screen.getByText("Open audio interviews")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
+      expect(screen.getByText("Staff Infrastructure Engineer")).toBeInTheDocument();
+    });
   });
 
-  it("navigates to Text interviews directory when clicking Open text interviews", async () => {
+  it("switches to Audio interviews directory when clicking the Audio-based tab", async () => {
     (clientModule.apiFetch as any).mockImplementation((path: string) => {
+      if (path.includes("mode=AUDIO")) {
+        if (path.includes("/api/v1/ai-interviews/eligible-jobs")) {
+          return Promise.resolve(mockEligibleAudio);
+        }
+        if (path.includes("/api/v1/ai-interviews")) {
+          return Promise.resolve(mockSetsAudio);
+        }
+      }
       if (path.includes("/api/v1/ai-interviews/eligible-jobs")) {
         return Promise.resolve(mockEligibleText);
       }
@@ -122,22 +142,12 @@ describe("Phase 4D.1 Frontend: Dual-Mode Interview Foundation and Recruiter Stud
 
     render(<AiInterviewsDirectory onSelectTemplate={vi.fn()} />);
 
-    const textBtn = screen.getByRole("button", { name: /Open text interviews/i });
-    fireEvent.click(textBtn);
+    const audioTab = screen.getByRole("tab", { name: "Audio-based" });
+    fireEvent.click(audioTab);
 
     await waitFor(() => {
-      expect(screen.getByText("Text-based")).toBeInTheDocument();
-      expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
       expect(screen.getByText("Staff Infrastructure Engineer")).toBeInTheDocument();
-    });
-
-    // Check Back to interview types button exists and works
-    const backBtn = screen.getByRole("button", { name: /Back to interview types/i });
-    expect(backBtn).toBeInTheDocument();
-    fireEvent.click(backBtn);
-
-    await waitFor(() => {
-      expect(screen.getByText("Select an interview format to generate requirement-grounded question sets and manage practice sessions.")).toBeInTheDocument();
+      expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
     });
   });
 

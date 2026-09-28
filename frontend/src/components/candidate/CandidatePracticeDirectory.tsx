@@ -8,7 +8,7 @@ export function CandidatePracticeDirectory() {
   const [practiceJobs, setPracticeJobs] = useState<CandidatePracticeJobSummary[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeReleaseId, setActiveReleaseId] = useState<string | null>(null);
+  const [activeRelease, setActiveRelease] = useState<CandidatePracticeJobSummary | null>(null);
 
   const fetchData = async () => {
     try {
@@ -27,12 +27,16 @@ export function CandidatePracticeDirectory() {
     fetchData();
   }, []);
 
-  if (activeReleaseId) {
+  if (activeRelease) {
     return (
       <CandidateInterviewWorkspace
-        releaseId={activeReleaseId}
+        releaseId={activeRelease.release_id}
+        initialMode={activeRelease.interview_mode}
+        jobTitle={activeRelease.job_title}
+        jobRevision={activeRelease.job_revision}
+        conversationCount={activeRelease.conversation_question_count ?? activeRelease.conversation_count ?? 0}
         onExit={() => {
-          setActiveReleaseId(null);
+          setActiveRelease(null);
           fetchData();
         }}
       />
@@ -123,11 +127,12 @@ export function CandidatePracticeDirectory() {
         /* Case 1: Exactly 1 Released Official Interview */
         (() => {
           const singleJob = practiceJobs[0];
+          const isAudio = singleJob.interview_mode === "AUDIO";
           const convCount = singleJob.conversation_question_count ?? singleJob.conversation_count ?? 0;
-          const mcqCount = singleJob.mcq_count ?? 0;
+          const mcqCount = isAudio ? 0 : (singleJob.mcq_count ?? 0);
           const revNum = singleJob.job_revision ?? 1;
-          const totalQ = singleJob.total_question_count ?? (convCount + mcqCount);
-          const estMinutes = (convCount * 5) + (mcqCount * 2) || 15;
+          const totalQ = isAudio ? convCount : (singleJob.total_question_count ?? (convCount + mcqCount));
+          const estMinutes = isAudio ? (convCount * 4 || 15) : ((convCount * 5) + (mcqCount * 2) || 15);
 
           return (
             <div
@@ -161,6 +166,19 @@ export function CandidatePracticeDirectory() {
                       }}
                     >
                       Official Interview
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        padding: "3px 8px",
+                        borderRadius: "4px",
+                        backgroundColor: isAudio ? "#f5f3ff" : "#f1f5f9",
+                        color: isAudio ? "#6d28d9" : "#475569",
+                        border: isAudio ? "1px solid #ddd6fe" : "1px solid #cbd5e1",
+                      }}
+                    >
+                      {isAudio ? "Audio-based" : "Text-based"}
                     </span>
                     <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)" }}>
                       Job Revision #{revNum}
@@ -207,7 +225,7 @@ export function CandidatePracticeDirectory() {
                     {totalQ} Questions
                   </div>
                   <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", marginTop: "2px", display: "block" }}>
-                    {convCount} conversational · {mcqCount} MCQ
+                    {isAudio ? `${convCount} conversational` : `${convCount} conversational · ${mcqCount} MCQ`}
                   </span>
                 </div>
 
@@ -264,7 +282,7 @@ export function CandidatePracticeDirectory() {
               >
                 <Icon name="info" size={18} style={{ color: "#2563eb", flexShrink: 0 }} aria-hidden="true" />
                 <p style={{ fontSize: "13px", color: "#1e40af", margin: 0, lineHeight: 1.5 }}>
-                  This official interview was released for your submitted application. The hiring team has approved this question set for Revision #{revNum}.
+                  This official interview was released for your submitted application. The hiring team has approved this {isAudio ? "Audio-based" : "Text-based"} question set for Revision #{revNum}.
                 </p>
               </div>
 
@@ -273,10 +291,10 @@ export function CandidatePracticeDirectory() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={() => setActiveReleaseId(singleJob.release_id)}
+                  onClick={() => setActiveRelease(singleJob)}
                   style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 20px", fontSize: "14px" }}
                 >
-                  <span>Start Interview</span>
+                  <span>{isAudio ? "Prepare Interview" : "Start Interview"}</span>
                   <Icon name="chevron-right" size={16} aria-hidden="true" />
                 </button>
               </div>
@@ -308,11 +326,12 @@ export function CandidatePracticeDirectory() {
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: "20px" }}>
             {practiceJobs.map((job) => {
+              const isAudio = job.interview_mode === "AUDIO";
               const convCount = job.conversation_question_count ?? job.conversation_count ?? 0;
-              const mcqCount = job.mcq_count ?? 0;
+              const mcqCount = isAudio ? 0 : (job.mcq_count ?? 0);
               const revNum = job.job_revision ?? 1;
-              const totalQ = job.total_question_count ?? (convCount + mcqCount);
-              const estMinutes = (convCount * 5) + (mcqCount * 2) || 15;
+              const totalQ = isAudio ? convCount : (job.total_question_count ?? (convCount + mcqCount));
+              const estMinutes = isAudio ? (convCount * 4 || 15) : ((convCount * 5) + (mcqCount * 2) || 15);
 
               return (
                 <div
@@ -334,6 +353,19 @@ export function CandidatePracticeDirectory() {
                       <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
                         <span style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#2563eb", letterSpacing: "0.5px" }}>
                           Official Interview
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            backgroundColor: isAudio ? "#f5f3ff" : "#f1f5f9",
+                            color: isAudio ? "#6d28d9" : "#475569",
+                            border: isAudio ? "1px solid #ddd6fe" : "1px solid #cbd5e1",
+                          }}
+                        >
+                          {isAudio ? "Audio-based" : "Text-based"}
                         </span>
                         <span style={{ fontSize: "11px", color: "var(--text-secondary, #64748b)" }}>
                           • Rev #{revNum}
@@ -367,7 +399,9 @@ export function CandidatePracticeDirectory() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                     <div style={{ backgroundColor: "var(--surface-muted, #f8fafc)", padding: "10px 12px", borderRadius: "6px" }}>
                       <span style={{ fontSize: "11px", color: "var(--text-secondary, #64748b)", display: "block" }}>Questions</span>
-                      <strong style={{ fontSize: "14px", color: "var(--text-primary, #0f172a)" }}>{totalQ} Questions</strong>
+                      <strong style={{ fontSize: "14px", color: "var(--text-primary, #0f172a)" }}>
+                        {totalQ} Questions {isAudio ? "(Conv)" : ""}
+                      </strong>
                     </div>
                     <div style={{ backgroundColor: "var(--surface-muted, #f8fafc)", padding: "10px 12px", borderRadius: "6px" }}>
                       <span style={{ fontSize: "11px", color: "var(--text-secondary, #64748b)", display: "block" }}>Released</span>
@@ -382,10 +416,10 @@ export function CandidatePracticeDirectory() {
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
-                      onClick={() => setActiveReleaseId(job.release_id)}
+                      onClick={() => setActiveRelease(job)}
                       style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
                     >
-                      <span>Start</span>
+                      <span>{isAudio ? "Prepare" : "Start"}</span>
                       <Icon name="chevron-right" size={14} aria-hidden="true" />
                     </button>
                   </div>

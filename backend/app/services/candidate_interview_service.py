@@ -203,6 +203,7 @@ def start_or_resume_interview_session(
             job_id=existing_sess.job_id,
             job_title=existing_sess.job_version.title if existing_sess.job_version else (existing_sess.job.title if existing_sess.job else "Interview"),
             job_revision=existing_sess.job_revision,
+            interview_mode=existing_sess.interview_mode or release.interview_mode or "TEXT",
             status=existing_sess.status,
             total_questions=len(questions_dto),
             answered_questions=answered_count,
@@ -210,6 +211,18 @@ def start_or_resume_interview_session(
             last_saved_at=existing_sess.last_saved_at,
             submitted_at=existing_sess.submitted_at,
             questions=questions_dto,
+        )
+
+    # Phase 4D.2 Execution Gate for Audio interviews
+    # Audio releases may appear and open preparation view, but candidate cannot transition to IN_PROGRESS until Phase 4D.3
+    release_mode = (release.interview_mode or (release.ai_set.interview_mode if release.ai_set else "TEXT") or "TEXT").upper()
+    if release_mode == "AUDIO":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "AUDIO_INTERVIEW_NOT_READY",
+                "message": "Audio interview setup is not yet available.",
+            },
         )
 
     # 3. Create new session from frozen approved question set
@@ -235,6 +248,7 @@ def start_or_resume_interview_session(
         job_revision=release.job_revision,
         ai_set_id=release.ai_set_id,
         set_version=release.set_version,
+        interview_mode=release_mode,
         snapshot_hash=snapshot_hash,
         questions_snapshot=snapshot_items,
         status="IN_PROGRESS",
@@ -253,6 +267,7 @@ def start_or_resume_interview_session(
         job_id=new_session.job_id,
         job_title=release.job_version.title if release.job_version else (release.job.title if release.job else "Interview"),
         job_revision=new_session.job_revision,
+        interview_mode=new_session.interview_mode or release_mode,
         status=new_session.status,
         total_questions=len(questions_dto),
         answered_questions=0,
@@ -302,6 +317,7 @@ def get_interview_session(
         job_id=sess.job_id,
         job_title=sess.job_version.title if sess.job_version else (sess.job.title if sess.job else "Interview"),
         job_revision=sess.job_revision,
+        interview_mode=sess.interview_mode or "TEXT",
         status=sess.status,
         total_questions=len(questions_dto),
         answered_questions=answered_count,

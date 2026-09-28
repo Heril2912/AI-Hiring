@@ -32,21 +32,26 @@ export function ReleaseInterviewSetModal({
   const [releaseActionError, setReleaseActionError] = useState<string | null>(null);
   const [releaseSuccessMsg, setReleaseSuccessMsg] = useState<string | null>(null);
 
+  const isAudioMode = detail.interview_mode === "AUDIO";
   const conversationalCount = (detail.slots || []).filter(
     (s) => s.question_format === "CONVERSATION" || !s.question_format
   ).length;
   const mcqCount = (detail.slots || []).filter(
     (s) => s.question_format === "MCQ_SINGLE_ANSWER"
   ).length;
-  const totalCount = conversationalCount + mcqCount;
+  const totalCount = isAudioMode ? conversationalCount : conversationalCount + mcqCount;
 
-  // Load applicants for this job
+  // Load applicants for this job filtered by mode
   const loadApplicants = async () => {
     if (!detail.job_id) return;
     try {
       setIsLoading(true);
       setLoadError(null);
-      const res = await fetchJobApplicants(detail.job_id, { status: "SUBMITTED", limit: 100 });
+      const res = await fetchJobApplicants(detail.job_id, {
+        status: "SUBMITTED",
+        mode: detail.interview_mode || "TEXT",
+        limit: 100,
+      });
       setApplicants(res.items || []);
     } catch (err: any) {
       setLoadError(err?.message || "Failed to load eligible applicants for this job.");
@@ -177,12 +182,25 @@ export function ReleaseInterviewSetModal({
                 <Icon name="lock" size={11} />
                 <span>Sealed Question Set</span>
               </span>
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  padding: "2px 8px",
+                  borderRadius: "4px",
+                  backgroundColor: isAudioMode ? "#f5f3ff" : "#f1f5f9",
+                  color: isAudioMode ? "#6d28d9" : "#475569",
+                  border: isAudioMode ? "1px solid #ddd6fe" : "1px solid #cbd5e1",
+                }}
+              >
+                {isAudioMode ? "Audio-based interview" : "Text-based interview"}
+              </span>
               <span style={{ fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
-                Controlled Interview Release (Phase 4C.1)
+                Controlled Interview Release
               </span>
             </div>
             <h2 id="release-modal-title" className="aiq-modal-title">
-              Release Interview Set
+              Release {isAudioMode ? "Audio" : "Text"} Interview Set
             </h2>
           </div>
           <button
@@ -212,6 +230,10 @@ export function ReleaseInterviewSetModal({
             <strong style={{ color: "var(--text-primary, #0f172a)" }}>{detail.job_title}</strong>
           </div>
           <div>
+            <span style={{ color: "var(--text-muted, #64748b)", display: "block", fontSize: "11px", textTransform: "uppercase" }}>Interview Type</span>
+            <strong style={{ color: "var(--text-primary, #0f172a)" }}>{isAudioMode ? "Audio-based" : "Text-based"}</strong>
+          </div>
+          <div>
             <span style={{ color: "var(--text-muted, #64748b)", display: "block", fontSize: "11px", textTransform: "uppercase" }}>Job Revision</span>
             <strong style={{ color: "var(--text-primary, #0f172a)" }}>Rev #{detail.job_revision}</strong>
           </div>
@@ -221,7 +243,9 @@ export function ReleaseInterviewSetModal({
           </div>
           <div>
             <span style={{ color: "var(--text-muted, #64748b)", display: "block", fontSize: "11px", textTransform: "uppercase" }}>Total Questions</span>
-            <strong style={{ color: "var(--text-primary, #0f172a)" }}>{totalCount} ({conversationalCount} Conv · {mcqCount} MCQ)</strong>
+            <strong style={{ color: "var(--text-primary, #0f172a)" }}>
+              {isAudioMode ? `${conversationalCount} Conversational` : `${totalCount} (${conversationalCount} Conv · ${mcqCount} MCQ)`}
+            </strong>
           </div>
         </div>
 
