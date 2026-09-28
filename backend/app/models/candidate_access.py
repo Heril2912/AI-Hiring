@@ -245,6 +245,7 @@ class CandidatePracticeReleaseRecord(Base):
         Index("ix_candidate_practice_releases_status", "status"),
         Index("ix_candidate_practice_releases_ai_set_id", "ai_set_id"),
         Index("ix_candidate_practice_releases_template_id", "template_id"),
+        Index("ix_candidate_practice_releases_interview_mode", "interview_mode"),
     )
 
     release_id: Mapped[uuid.UUID] = mapped_column(
@@ -331,6 +332,12 @@ class CandidatePracticeReleaseRecord(Base):
         nullable=False,
         default="RELEASED",
         server_default=text("'RELEASED'"),
+    )
+    interview_mode: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="TEXT",
+        server_default=text("'TEXT'"),
     )
     released_by_user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
@@ -1665,6 +1672,7 @@ class CandidateInterviewSessionRecord(Base):
         Index("ix_candidate_interview_sessions_candidate_id", "candidate_id"),
         Index("ix_candidate_interview_sessions_org_id", "organization_id"),
         Index("ix_candidate_interview_sessions_status", "status"),
+        Index("ix_candidate_interview_sessions_interview_mode", "interview_mode"),
     )
 
     session_id: Mapped[uuid.UUID] = mapped_column(
@@ -1750,6 +1758,12 @@ class CandidateInterviewSessionRecord(Base):
         nullable=False,
         default="IN_PROGRESS",
         server_default=text("'IN_PROGRESS'"),
+    )
+    interview_mode: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="TEXT",
+        server_default=text("'TEXT'"),
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

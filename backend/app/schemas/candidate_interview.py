@@ -45,6 +45,10 @@ class CandidateInterviewSessionResponse(StrictSchema):
     job_id: uuid.UUID
     job_title: str
     job_revision: int
+    interview_mode: str = Field(
+        default="TEXT",
+        description="TEXT or AUDIO interview mode for this session.",
+    )
     status: str  # "IN_PROGRESS" or "SUBMITTED"
     total_questions: int
     answered_questions: int

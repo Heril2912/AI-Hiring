@@ -185,6 +185,7 @@ export interface CandidatePracticeJobSummary {
   job_revision?: number;
   ai_set_id?: string;
   set_version?: number;
+  interview_mode?: InterviewMode;
   conversation_count?: number;
   conversation_question_count?: number;
   mcq_count: number;

@@ -146,14 +146,18 @@ from app.services.ai_provenance_service import evaluate_release_eligibility
 def _evaluate_interview_eligibility(
     application: CandidateApplicationRecord,
     db: Session,
+    mode: Optional[str] = None,
 ) -> RecruiterInterviewReleaseEligibilityDto:
-    # 1. Check if already released
+    target_mode = (mode or "TEXT").upper()
+
+    # 1. Check if already released for this target mode
     stmt_rel = (
         select(CandidatePracticeReleaseRecord)
         .where(
             CandidatePracticeReleaseRecord.candidate_id == application.candidate_id,
             CandidatePracticeReleaseRecord.job_id == application.job_id,
             CandidatePracticeReleaseRecord.job_version_id == application.job_version_id,
+            CandidatePracticeReleaseRecord.interview_mode == target_mode,
             CandidatePracticeReleaseRecord.status == PracticeReleaseStatus.RELEASED.value,
         )
         .order_by(desc(CandidatePracticeReleaseRecord.released_at))
@@ -164,7 +168,8 @@ def _evaluate_interview_eligibility(
         return RecruiterInterviewReleaseEligibilityDto(
             is_eligible=False,
             reason_code="ALREADY_RELEASED",
-            message="An interview for this job revision is already released to this candidate.",
+            message=f"An interview for this job revision is already released to this candidate in {target_mode} mode.",
+            interview_mode=target_mode,
             question_set_id=existing_release.ai_set_id,
             set_version=existing_release.set_version,
             question_count=0,
@@ -178,6 +183,7 @@ def _evaluate_interview_eligibility(
             is_eligible=False,
             reason_code="APPLICATION_NOT_SUBMITTED",
             message="Cannot release interview for a non-submitted or withdrawn application.",
+            interview_mode=target_mode,
         )
 
     # 3. Check candidate active account binding
@@ -191,14 +197,16 @@ def _evaluate_interview_eligibility(
             is_eligible=False,
             reason_code="CANDIDATE_NOT_ACTIVATED",
             message="Candidate must activate their portal account before an interview can be released.",
+            interview_mode=target_mode,
         )
 
-    # 5. Check approved question set for exact submitted revision
+    # 5. Check approved question set for exact submitted revision and target mode
     stmt_set = (
         select(AiInterviewQuestionSetRecord)
         .where(
             AiInterviewQuestionSetRecord.job_id == application.job_id,
             AiInterviewQuestionSetRecord.job_version_id == application.job_version_id,
+            AiInterviewQuestionSetRecord.interview_mode == target_mode,
             AiInterviewQuestionSetRecord.lifecycle_status == "APPROVED",
         )
         .order_by(desc(AiInterviewQuestionSetRecord.set_version))
@@ -209,7 +217,8 @@ def _evaluate_interview_eligibility(
         return RecruiterInterviewReleaseEligibilityDto(
             is_eligible=False,
             reason_code="NO_APPROVED_QUESTION_SET",
-            message=f"No approved AI interview question set exists for submitted job revision (Rev #{application.job_revision}).",
+            message=f"No approved AI interview question set exists for submitted job revision (Rev #{application.job_revision}) in {target_mode} mode.",
+            interview_mode=target_mode,
         )
 
     # 6. Provenance & Server Validation Check
@@ -220,12 +229,13 @@ def _evaluate_interview_eligibility(
                 is_eligible=False,
                 reason_code=prov_eval.reason_code.value if prov_eval.reason_code else "PROVENANCE_INELIGIBLE",
                 message=prov_eval.safe_message or "Question set validation failed for release.",
+                interview_mode=target_mode,
                 question_set_id=ai_set.ai_set_id,
                 set_version=ai_set.set_version,
                 question_count=0,
             )
 
-    # Check question count
+    # Check question count and format constraints
     items = ai_set.items or []
     conv_count = sum(1 for it in items if it.get("question_format", "CONVERSATION") == "CONVERSATION")
     mcq_count = sum(1 for it in items if it.get("question_format") == "MCQ_SINGLE_ANSWER")
@@ -236,15 +246,28 @@ def _evaluate_interview_eligibility(
             is_eligible=False,
             reason_code="NO_VALID_QUESTIONS",
             message="The approved question set contains no questions.",
+            interview_mode=target_mode,
             question_set_id=ai_set.ai_set_id,
             set_version=ai_set.set_version,
             question_count=0,
         )
 
+    if target_mode == "AUDIO" and mcq_count > 0:
+        return RecruiterInterviewReleaseEligibilityDto(
+            is_eligible=False,
+            reason_code="AUDIO_MCQ_NOT_ALLOWED",
+            message="Audio interview question set cannot contain MCQs.",
+            interview_mode=target_mode,
+            question_set_id=ai_set.ai_set_id,
+            set_version=ai_set.set_version,
+            question_count=total_q,
+        )
+
     return RecruiterInterviewReleaseEligibilityDto(
         is_eligible=True,
         reason_code=None,
-        message="Ready to release approved interview to candidate.",
+        message=f"Ready to release approved {target_mode} interview to candidate.",
+        interview_mode=target_mode,
         question_set_id=ai_set.ai_set_id,
         set_version=ai_set.set_version,
         question_count=total_q,
@@ -257,10 +280,12 @@ def list_job_applications_for_recruiter(
     db: Session,
     status_filter: Optional[str] = None,
     review_state_filter: Optional[str] = None,
+    mode_filter: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
 ) -> RecruiterApplicationListResponse:
     job = _get_scoped_job(job_id, actor, db)
+    target_mode = (mode_filter or "TEXT").upper() if mode_filter else None
 
     # Count total active vs withdrawn for this job
     stmt_active_count = select(func.count()).select_from(CandidateApplicationRecord).where(
@@ -312,20 +337,26 @@ def list_job_applications_for_recruiter(
         match_score = match_ev.display_score if match_ev else None
         conf_tier = match_ev.confidence_tier if match_ev else None
 
-        # Check existing release
+        # Check existing release for target mode if specified, or default TEXT
         stmt_rel = select(CandidatePracticeReleaseRecord).where(
             CandidatePracticeReleaseRecord.candidate_id == app.candidate_id,
             CandidatePracticeReleaseRecord.job_id == app.job_id,
             CandidatePracticeReleaseRecord.job_version_id == app.job_version_id,
             CandidatePracticeReleaseRecord.status == PracticeReleaseStatus.RELEASED.value,
         )
+        if target_mode:
+            stmt_rel = stmt_rel.where(CandidatePracticeReleaseRecord.interview_mode == target_mode)
+        stmt_rel = stmt_rel.order_by(desc(CandidatePracticeReleaseRecord.released_at))
+
         existing_rel = db.execute(stmt_rel).scalars().first()
         if existing_rel:
             interview_status = "RELEASED"
             release_id = existing_rel.release_id
+            item_mode = existing_rel.interview_mode
         else:
             interview_status = "NOT_RELEASED"
             release_id = None
+            item_mode = target_mode or "TEXT"
 
         items.append(
             RecruiterApplicationSummaryResponse(
@@ -349,6 +380,7 @@ def list_job_applications_for_recruiter(
                 confidence_tier=conf_tier,
                 interview_status=interview_status,
                 release_id=release_id,
+                interview_mode=item_mode,
             )
         )
 
@@ -379,6 +411,7 @@ def get_job_application_detail_for_recruiter(
     application_id: UUID,
     actor: UserRecord,
     db: Session,
+    mode: Optional[str] = None,
 ) -> RecruiterApplicationDetailResponse:
     job = _get_scoped_job(job_id, actor, db)
 
@@ -409,7 +442,7 @@ def get_job_application_detail_for_recruiter(
     match_ev = _get_match_evidence(app.job_id, app.profile_id, db)
 
     # Evaluate interview release eligibility
-    eligibility = _evaluate_interview_eligibility(app, db)
+    eligibility = _evaluate_interview_eligibility(app, db, mode=mode)
 
     _record_recruiter_audit(
         db=db,
@@ -573,32 +606,55 @@ def release_interview_for_application(
         )
 
     # Check approved question set for exact submitted revision
-    stmt_set = (
-        select(AiInterviewQuestionSetRecord)
-        .where(
-            AiInterviewQuestionSetRecord.job_id == app.job_id,
-            AiInterviewQuestionSetRecord.job_version_id == app.job_version_id,
-            AiInterviewQuestionSetRecord.lifecycle_status == "APPROVED",
-        )
-        .order_by(desc(AiInterviewQuestionSetRecord.set_version))
-    )
     if payload.ai_set_id:
         stmt_set = select(AiInterviewQuestionSetRecord).where(
             AiInterviewQuestionSetRecord.ai_set_id == payload.ai_set_id,
             AiInterviewQuestionSetRecord.job_id == app.job_id,
             AiInterviewQuestionSetRecord.job_version_id == app.job_version_id,
-            AiInterviewQuestionSetRecord.lifecycle_status == "APPROVED",
         )
+        ai_set = db.execute(stmt_set).scalars().first()
+        if not ai_set:
+            # Check if job revision or job mismatches
+            mismatch_check = db.execute(
+                select(AiInterviewQuestionSetRecord).where(AiInterviewQuestionSetRecord.ai_set_id == payload.ai_set_id)
+            ).scalars().first()
+            if mismatch_check:
+                if mismatch_check.job_id != app.job_id or mismatch_check.job_version_id != app.job_version_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={"code": "JOB_REVISION_MISMATCH", "message": "Question set does not match the application job revision."},
+                    )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "QUESTION_SET_NOT_FOUND", "message": "Specified question set not found."},
+            )
+        if ai_set.lifecycle_status != "APPROVED":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "QUESTION_SET_NOT_APPROVED", "message": "Only approved question sets can be released."},
+            )
+    else:
+        stmt_set = (
+            select(AiInterviewQuestionSetRecord)
+            .where(
+                AiInterviewQuestionSetRecord.job_id == app.job_id,
+                AiInterviewQuestionSetRecord.job_version_id == app.job_version_id,
+                AiInterviewQuestionSetRecord.lifecycle_status == "APPROVED",
+            )
+            .order_by(desc(AiInterviewQuestionSetRecord.set_version))
+        )
+        ai_set = db.execute(stmt_set).scalars().first()
+        if not ai_set:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "NO_APPROVED_QUESTION_SET",
+                    "message": f"No approved question set exists for submitted revision (Rev #{app.job_revision}).",
+                },
+            )
 
-    ai_set = db.execute(stmt_set).scalars().first()
-    if not ai_set:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "NO_APPROVED_QUESTION_SET",
-                "message": f"No approved question set exists for submitted revision (Rev #{app.job_revision}).",
-            },
-        )
+    # Derive immutable mode authoritative from persisted question set
+    interview_mode = ai_set.interview_mode or "TEXT"
 
     # Check question set contains questions
     items = ai_set.items or []
@@ -608,6 +664,13 @@ def release_interview_for_application(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "NO_VALID_QUESTIONS", "message": "The approved question set contains no questions."},
+        )
+
+    # Revalidate: AUDIO set rejects MCQs
+    if interview_mode == "AUDIO" and mcq_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "AUDIO_MCQ_NOT_ALLOWED", "message": "Audio interview question set cannot contain MCQs."},
         )
 
     # Server-side validation and provenance check
@@ -624,11 +687,12 @@ def release_interview_for_application(
 
     now = datetime.now(timezone.utc)
 
-    # Idempotency / duplicate check for exact release
+    # Idempotency / duplicate check for exact release in this mode
     stmt_existing = select(CandidatePracticeReleaseRecord).where(
         CandidatePracticeReleaseRecord.candidate_id == app.candidate_id,
         CandidatePracticeReleaseRecord.job_id == app.job_id,
         CandidatePracticeReleaseRecord.job_version_id == app.job_version_id,
+        CandidatePracticeReleaseRecord.interview_mode == interview_mode,
         CandidatePracticeReleaseRecord.status == PracticeReleaseStatus.RELEASED.value,
     )
     existing_release = db.execute(stmt_existing).scalars().first()
@@ -644,7 +708,11 @@ def release_interview_for_application(
                 reason_code=AuditReasonCode.INTERVIEW_RELEASED,
                 resource_type="interview_release",
                 resource_id=str(existing_release.release_id),
-                safe_metadata={"action": "RELEASE_INTERVIEW_IDEMPOTENT_REUSE", "application_id": str(application_id)},
+                safe_metadata={
+                    "action": "RELEASE_INTERVIEW_IDEMPOTENT_REUSE",
+                    "application_id": str(application_id),
+                    "interview_mode": interview_mode,
+                },
             )
             db.commit()
             return RecruiterReleaseInterviewResponse(
@@ -654,14 +722,15 @@ def release_interview_for_application(
                 job_id=app.job_id,
                 job_title=app.job_version.title if app.job_version else job.title,
                 job_revision=app.job_revision,
+                interview_mode=interview_mode,
                 ai_set_id=ai_set.ai_set_id,
                 set_version=ai_set.set_version,
                 status=existing_release.status,
                 released_at=existing_release.released_at,
-                message="Approved interview has already been released to this candidate.",
+                message=f"Approved {interview_mode} interview has already been released to this candidate.",
             )
         else:
-            # Revoke previous revision release safely
+            # Revoke previous revision release safely for THIS MODE ONLY
             existing_release.status = PracticeReleaseStatus.REVOKED.value
             existing_release.revoked_by_user_id = actor.user_id
             existing_release.revoked_at = now
@@ -680,7 +749,7 @@ def release_interview_for_application(
     match_res = db.execute(stmt_match).scalars().first()
     match_result_id = match_res.result_id if match_res else None
 
-    # Create new release linked to this application
+    # Create new release linked to this application and mode
     new_release = CandidatePracticeReleaseRecord(
         release_id=uuid.uuid4(),
         organization_id=binding.organization_id,
@@ -693,6 +762,7 @@ def release_interview_for_application(
         ai_set_id=ai_set.ai_set_id,
         match_result_id=match_result_id,
         set_version=ai_set.set_version,
+        interview_mode=interview_mode,
         status=PracticeReleaseStatus.RELEASED.value,
         released_by_user_id=actor.user_id,
         released_at=now,
@@ -712,6 +782,7 @@ def release_interview_for_application(
             "application_id": str(application_id),
             "job_id": str(job_id),
             "revision": app.job_revision,
+            "interview_mode": interview_mode,
             "ai_set_id": str(ai_set.ai_set_id),
             "match_result_id": str(match_result_id) if match_result_id else None,
         },
@@ -726,9 +797,10 @@ def release_interview_for_application(
         job_id=app.job_id,
         job_title=app.job_version.title if app.job_version else job.title,
         job_revision=new_release.job_revision,
+        interview_mode=interview_mode,
         ai_set_id=ai_set.ai_set_id,
         set_version=ai_set.set_version,
         status=new_release.status,
         released_at=new_release.released_at,
-        message=f"Approved interview for '{app.job_version.title if app.job_version else job.title}' (Rev #{app.job_revision}) successfully released to candidate.",
+        message=f"Approved {interview_mode} interview for '{app.job_version.title if app.job_version else job.title}' (Rev #{app.job_revision}) successfully released to candidate.",
     )

@@ -11,20 +11,28 @@ import { Icon } from "../Icon";
 
 interface CandidateInterviewWorkspaceProps {
   releaseId: string;
+  initialMode?: "TEXT" | "AUDIO";
+  jobTitle?: string;
+  jobRevision?: number;
+  conversationCount?: number;
   onExit: () => void;
 }
 
-type WorkspaceView = "landing" | "question" | "review" | "submitted";
+type WorkspaceView = "landing" | "question" | "review" | "submitted" | "audio_prep";
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function CandidateInterviewWorkspace({
   releaseId,
+  initialMode,
+  jobTitle,
+  jobRevision,
+  conversationCount,
   onExit,
 }: CandidateInterviewWorkspaceProps) {
   const [session, setSession] = useState<CandidateInterviewSessionResponse | null>(null);
-  const [currentView, setCurrentView] = useState<WorkspaceView>("landing");
+  const [currentView, setCurrentView] = useState<WorkspaceView>(initialMode === "AUDIO" ? "audio_prep" : "landing");
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(initialMode !== "AUDIO");
   const [error, setError] = useState<string | null>(null);
 
   // Edit buffer state for the active question
@@ -59,6 +67,11 @@ export function CandidateInterviewWorkspace({
   useEffect(() => {
     let isMounted = true;
     async function init() {
+      if (initialMode === "AUDIO") {
+        // Audio mode preparation view is rendered directly without starting an audio session attempt
+        setIsLoading(false);
+        return;
+      }
       try {
         setIsLoading(true);
         setError(null);
@@ -66,7 +79,9 @@ export function CandidateInterviewWorkspace({
         const data = await startOrResumeInterview(releaseId);
         if (!isMounted) return;
         setSession(data);
-        if (data.status === "SUBMITTED") {
+        if (data.interview_mode === "AUDIO") {
+          setCurrentView("audio_prep");
+        } else if (data.status === "SUBMITTED") {
           setCurrentView("submitted");
           setSubmitReceipt({
             submittedAt: data.submitted_at || new Date().toISOString(),
@@ -83,7 +98,11 @@ export function CandidateInterviewWorkspace({
         }
       } catch (err: any) {
         if (!isMounted) return;
-        setError(err?.message || "Failed to start or resume interview.");
+        if (err?.code === "AUDIO_INTERVIEW_NOT_READY" || err?.message?.includes("Audio interview setup")) {
+          setCurrentView("audio_prep");
+        } else {
+          setError(err?.message || "Failed to start or resume interview.");
+        }
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -92,7 +111,7 @@ export function CandidateInterviewWorkspace({
     return () => {
       isMounted = false;
     };
-  }, [releaseId]);
+  }, [releaseId, initialMode]);
 
   // Handle modal keyboard trap / escape
   useEffect(() => {
@@ -240,6 +259,188 @@ export function CandidateInterviewWorkspace({
         <p style={{ color: "var(--text-secondary, #64748b)", fontSize: "15px" }}>
           Loading official interview session...
         </p>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // AUDIO INTERVIEW PREPARATION VIEW (Phase 4D.2 Execution Gate)
+  // -------------------------------------------------------------
+  if (currentView === "audio_prep") {
+    const title = jobTitle || session?.job_title || "Audio Interview";
+    const revNum = jobRevision || session?.job_revision || 1;
+    const questionsCount = conversationCount || session?.total_questions || 0;
+
+    return (
+      <div
+        className="candidate-home-container"
+        style={{ maxWidth: "760px", margin: "32px auto", padding: "20px" }}
+      >
+        <div
+          style={{
+            backgroundColor: "var(--surface-base, #ffffff)",
+            border: "1px solid var(--border-subtle, #e2e8f0)",
+            borderRadius: "12px",
+            padding: "36px 32px",
+            boxShadow: "0 1px 4px rgba(0, 0, 0, 0.05)",
+          }}
+        >
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+                color: "#6d28d9",
+                backgroundColor: "#f5f3ff",
+                padding: "2px 8px",
+                borderRadius: "4px",
+                border: "1px solid #ddd6fe",
+              }}
+            >
+              Audio-based interview
+            </span>
+            <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)" }}>
+              Job Revision #{revNum}
+            </span>
+          </div>
+
+          <h1
+            style={{
+              fontSize: "24px",
+              fontWeight: 700,
+              color: "var(--text-primary, #0f172a)",
+              margin: "0 0 16px 0",
+            }}
+          >
+            {title}
+          </h1>
+
+          <p
+            style={{
+              fontSize: "14px",
+              color: "var(--text-secondary, #475569)",
+              lineHeight: 1.6,
+              marginBottom: "24px",
+            }}
+          >
+            Welcome to the audio interview preparation space. Review the format and requirements below before your upcoming audio session.
+          </p>
+
+          {/* Key Details Grid */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "14px",
+              marginBottom: "28px",
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: "var(--surface-muted, #f8fafc)",
+                padding: "14px 16px",
+                borderRadius: "8px",
+                border: "1px solid var(--border-subtle, #e2e8f0)",
+              }}
+            >
+              <span style={{ fontSize: "11px", color: "var(--text-secondary, #64748b)", display: "block" }}>
+                Format
+              </span>
+              <strong style={{ fontSize: "16px", color: "var(--text-primary, #0f172a)" }}>
+                Conversational Audio
+              </strong>
+              <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", display: "block", marginTop: "2px" }}>
+                {questionsCount > 0 ? `${questionsCount} conversational questions` : "Conversational questions only"}
+              </span>
+            </div>
+
+            <div
+              style={{
+                backgroundColor: "var(--surface-muted, #f8fafc)",
+                padding: "14px 16px",
+                borderRadius: "8px",
+                border: "1px solid var(--border-subtle, #e2e8f0)",
+              }}
+            >
+              <span style={{ fontSize: "11px", color: "var(--text-secondary, #64748b)", display: "block" }}>
+                Equipment
+              </span>
+              <strong style={{ fontSize: "16px", color: "var(--text-primary, #0f172a)" }}>
+                Working Microphone
+              </strong>
+              <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", display: "block", marginTop: "2px" }}>
+                Quiet environment recommended
+              </span>
+            </div>
+          </div>
+
+          {/* Guidelines and Privacy Disclosures */}
+          <div
+            style={{
+              backgroundColor: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: "8px",
+              padding: "18px 20px",
+              marginBottom: "28px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+              fontSize: "13px",
+              color: "#334155",
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+              <Icon name="shield" size={16} style={{ color: "#2563eb", flexShrink: 0, marginTop: "2px" }} aria-hidden="true" />
+              <div>
+                <strong>Privacy &amp; Data Handling:</strong> Voice recordings are strictly ephemeral and will not be permanently retained.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+              <Icon name="file-text" size={16} style={{ color: "#2563eb", flexShrink: 0, marginTop: "2px" }} aria-hidden="true" />
+              <div>
+                <strong>Evaluation:</strong> Spoken responses will be evaluated from transcripts rather than voice recordings.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+              <Icon name="check-circle" size={16} style={{ color: "#059669", flexShrink: 0, marginTop: "2px" }} aria-hidden="true" />
+              <div>
+                <strong>Text Interviews Independent:</strong> Any separately released text interviews remain fully accessible in your interviews directory.
+              </div>
+            </div>
+          </div>
+
+          {/* Action Row with Neutral Setup Gate */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "16px" }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onExit}
+            >
+              Return to Interviews
+            </button>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <span style={{ fontSize: "13px", color: "var(--text-secondary, #64748b)" }}>
+                Audio interview setup is not yet available.
+              </span>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled
+                title="Audio interview setup is not yet available."
+                style={{ opacity: 0.6, cursor: "not-allowed" }}
+              >
+                Start Audio Interview
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
