@@ -47,6 +47,7 @@ from app.schemas.answer_assessment_contract import (
     CanonicalAnswerSegment,
     CompetencyEvidenceCoverageDto,
     ConfidenceCategory,
+    EvidenceStateCategory,
     PerAnswerAssessmentPacket,
     RecruiterQuestionAssessmentDetailDto,
     RecruiterStructuredReportDto,
@@ -60,28 +61,38 @@ SENTENCE_SPLIT_REGEX = re.compile(r"([.!?]+(?:\s+|$))")
 LONG_PARAGRAPH_THRESHOLD = 250
 
 STRUCTURED_ANSWER_ASSESSMENT_SYSTEM_PROMPT = """You are an objective technical competency evaluation engine.
-Evaluate the candidate's single submitted answer against the specific criteria authorized for this exact question.
+Evaluate the candidate's submitted answer against ONLY the specified authorized criteria.
 
-STRICT ASSESSMENT RULES:
-1. Assess EACH authorized criterion independently.
-2. Allowed qualitative assessment labels ONLY:
-   - DEMONSTRATED: Candidate provides direct, concrete evidence fulfilling the criterion.
-   - PARTIALLY_DEMONSTRATED: Candidate mentions the concept or partial actions, but lacks complete evidence or specifics.
-   - INSUFFICIENT_RESPONSE: The response lacks relevant evidence or fails to address the criterion.
-   - NOT_APPLICABLE: The criterion does not apply to the specific scope of this question.
-   - NEEDS_HUMAN_REVIEW: The response is ambiguous or cannot be verified automatically.
-3. For supporting_segment_ids, cite ONLY the provided segment IDs (e.g. ["S1", "S2"]). Never invent segment IDs.
-4. For observation, provide a concise, factual summary of what was demonstrated or stated in the cited segments.
-5. If evidence is missing or partial, clearly explain what specific technical detail was missing.
-6. Provide concise, constructive improvement guidance without fabricating candidate experience.
-7. Return JSON ONLY matching schema_version 'answer-assessment.v2'.
-8. FORBIDDEN:
-   - NO numeric marks or scores (e.g., 4/5, 80%).
-   - NO percentages.
-   - NO hiring decisions or recommendations (e.g., hire, reject, pass, advance).
-   - NO markdown code blocks or HTML.
-   - NO chain-of-thought or reasoning text outside the JSON structure.
-   - NO evaluation of questions other than the supplied question_id.
+You MUST respond with a single JSON object conforming EXACTLY to this canonical schema:
+{
+  "schema_version": "answer-assessment.v3",
+  "question_id": "<exact_question_id>",
+  "evidence_state": "SUFFICIENT",
+  "criteria": [
+    {
+      "criterion_id": "crit_technical_accuracy",
+      "label": "DEMONSTRATED",
+      "supporting_segment_ids": ["S1"],
+      "observation": "Concise evidence-grounded observation."
+    }
+  ],
+  "strengths": ["Specific strength grounded in cited answer segments."],
+  "missing_elements": ["Specific missing technical element if any."],
+  "improvement_guidance": ["Concrete way the response could be improved."],
+  "uncertainty_notes": []
+}
+
+STRICT RULES:
+1. Return JSON ONLY matching schema_version 'answer-assessment.v3'.
+2. "criteria" MUST be an array. Include exactly one entry for each expected criterion in allowed_criteria.
+3. FORBIDDEN keys: Do NOT use "assessment", "answer_assessment", or "assessments" aliases.
+4. Allowed "label" values ONLY: "DEMONSTRATED", "PARTIALLY_DEMONSTRATED", "INSUFFICIENT_RESPONSE", "NOT_APPLICABLE", "NEEDS_HUMAN_REVIEW".
+5. Allowed "evidence_state" values: "SUFFICIENT", "PARTIAL", "INSUFFICIENT", "NEEDS_HUMAN_REVIEW".
+6. In supporting_segment_ids, cite ONLY provided segment IDs (e.g. ["S1", "S2"]). Never invent segment IDs.
+7. Strengths, missing_elements, improvement_guidance, and uncertainty_notes must always be arrays (use [] if empty).
+8. NO numeric marks or scores (e.g. 4/5, 80%).
+9. NO hiring decisions or recommendations (hire, reject, advance).
+10. NO markdown code blocks, backticks, or HTML.
 """
 
 
@@ -164,9 +175,9 @@ def build_authoritative_assessment_packet(
         try:
             question_id = UUID(q_id_raw)
         except Exception:
-            question_id = uuid.uuid4()
+            question_id = uuid4()
     else:
-        question_id = uuid.uuid4()
+        question_id = uuid4()
     question_text = question_dict.get("wording") or question_dict.get("question_text") or question_dict.get("question") or "Interview Question"
     raw_intent = (
         question_dict.get("intent")
@@ -234,6 +245,136 @@ def build_authoritative_assessment_packet(
     )
 
 
+def normalize_assessment_json(
+    raw_data: Any,
+    packet: PerAnswerAssessmentPacket,
+) -> Dict[str, Any]:
+    """Normalizes known structurally equivalent LLM response variants into canonical v3 dictionary."""
+    if not isinstance(raw_data, dict):
+        return {}
+
+    normalized: Dict[str, Any] = {
+        "schema_version": STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION,
+        "question_id": str(raw_data.get("question_id") or packet.question_id),
+        "evidence_state": "SUFFICIENT",
+        "criteria": [],
+        "strengths": [],
+        "missing_elements": [],
+        "improvement_guidance": [],
+        "uncertainty_notes": [],
+    }
+
+    allowed_criterion_ids = {c.criterion_id for c in packet.allowed_criteria}
+    valid_segment_ids = {s.segment_id for s in packet.answer_segments}
+
+    # Extract raw criteria list from canonical or alias keys
+    raw_criteria = (
+        raw_data.get("criteria")
+        or raw_data.get("criterion_assessments")
+        or raw_data.get("answer_assessment")
+        or raw_data.get("assessments")
+    )
+
+    # Strengths / Gaps / Guidance normalization
+    raw_strengths = raw_data.get("strengths")
+    if isinstance(raw_strengths, list):
+        normalized["strengths"] = [str(s) for s in raw_strengths if s]
+    elif isinstance(raw_strengths, str) and raw_strengths.strip():
+        normalized["strengths"] = [raw_strengths.strip()]
+
+    raw_missing = raw_data.get("missing_elements") or raw_data.get("missing_evidence")
+    if isinstance(raw_missing, list):
+        normalized["missing_elements"] = [str(m) for m in raw_missing if m]
+    elif isinstance(raw_missing, str) and raw_missing.strip():
+        normalized["missing_elements"] = [raw_missing.strip()]
+
+    raw_guidance = raw_data.get("improvement_guidance") or raw_data.get("stronger_structure_tip")
+    if isinstance(raw_guidance, list):
+        normalized["improvement_guidance"] = [str(g) for g in raw_guidance if g]
+    elif isinstance(raw_guidance, str) and raw_guidance.strip():
+        normalized["improvement_guidance"] = [raw_guidance.strip()]
+
+    raw_uncertainty = raw_data.get("uncertainty_notes") or raw_data.get("uncertainty_codes")
+    if isinstance(raw_uncertainty, list):
+        normalized["uncertainty_notes"] = [str(u) for u in raw_uncertainty if u]
+    elif isinstance(raw_uncertainty, str) and raw_uncertainty.strip():
+        normalized["uncertainty_notes"] = [raw_uncertainty.strip()]
+
+    if raw_data.get("evidence_state"):
+        ev_state = str(raw_data.get("evidence_state")).upper()
+        if ev_state in [e.value for e in EvidenceStateCategory]:
+            normalized["evidence_state"] = ev_state
+
+    # Case 1: Array of criterion items (canonical, Variant C, Variant D)
+    if isinstance(raw_criteria, list):
+        for item in raw_criteria:
+            if not isinstance(item, dict):
+                continue
+            c_id = item.get("criterion_id") or item.get("id")
+            label_val = item.get("label") or item.get("assessment_label") or "DEMONSTRATED"
+            if isinstance(label_val, str):
+                label_val = label_val.upper()
+                if label_val not in [e.value for e in AssessmentCriterionLabel]:
+                    label_val = "NEEDS_HUMAN_REVIEW"
+            else:
+                label_val = "NEEDS_HUMAN_REVIEW"
+
+            segs = item.get("supporting_segment_ids") or item.get("segments") or []
+            if isinstance(segs, str):
+                segs = [segs]
+            clean_segs = [str(s) for s in segs if s]
+
+            obs = item.get("observation") or item.get("summary") or item.get("notes") or ""
+            if not obs and label_val == "DEMONSTRATED":
+                obs = "Candidate demonstrated technical criteria."
+
+            normalized["criteria"].append({
+                "criterion_id": str(c_id) if c_id else "",
+                "label": label_val,
+                "supporting_segment_ids": clean_segs,
+                "observation": str(obs),
+            })
+
+    # Case 2: Dict of dynamic criterion keys (Variant A, Variant B)
+    elif isinstance(raw_data.get("assessment"), dict):
+        assess_dict = raw_data["assessment"]
+        root_obs = raw_data.get("observation") or assess_dict.get("observation") or ""
+        root_segs = raw_data.get("supporting_segment_ids") or assess_dict.get("supporting_segment_ids") or []
+        if isinstance(root_segs, str):
+            root_segs = [root_segs]
+        clean_root_segs = [str(s) for s in root_segs if str(s) in valid_segment_ids]
+
+        for c in packet.allowed_criteria:
+            c_id = c.criterion_id
+            val = assess_dict.get(c_id)
+            if isinstance(val, str):
+                val_upper = val.upper()
+                label_val = val_upper if val_upper in [e.value for e in AssessmentCriterionLabel] else "NEEDS_HUMAN_REVIEW"
+                obs = str(root_obs) if root_obs else f"Evaluated {c_id}"
+                normalized["criteria"].append({
+                    "criterion_id": c_id,
+                    "label": label_val,
+                    "supporting_segment_ids": clean_root_segs,
+                    "observation": obs,
+                })
+            elif isinstance(val, dict):
+                lbl = val.get("label") or val.get("assessment_label") or "DEMONSTRATED"
+                if isinstance(lbl, str) and lbl.upper() in [e.value for e in AssessmentCriterionLabel]:
+                    lbl = lbl.upper()
+                else:
+                    lbl = "NEEDS_HUMAN_REVIEW"
+                c_segs = val.get("supporting_segment_ids") or clean_root_segs
+                c_obs = val.get("observation") or root_obs or f"Evaluated {c_id}"
+                normalized["criteria"].append({
+                    "criterion_id": c_id,
+                    "label": lbl,
+                    "supporting_segment_ids": [str(s) for s in c_segs if str(s) in valid_segment_ids],
+                    "observation": str(c_obs),
+                })
+
+    return normalized
+
+
 def validate_strict_assessment_output(
     parsed_json: Dict[str, Any],
     packet: PerAnswerAssessmentPacket,
@@ -244,52 +385,14 @@ def validate_strict_assessment_output(
     if not isinstance(parsed_json, dict):
         return False, ["INVALID_JSON_ROOT_NOT_OBJECT"], None
 
-    # Normalize loose or variations of LLM JSON response to conform to StrictPerAnswerAssessmentResponse
-    normalized = dict(parsed_json)
-    normalized["question_id"] = str(packet.question_id)
-    if not normalized.get("schema_version"):
-        normalized["schema_version"] = STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION
+    # First normalize known variations into canonical format
+    normalized = normalize_assessment_json(parsed_json, packet)
+    if not normalized:
+        return False, ["FAILED_NORMALIZATION"], None
 
-    allowed_criterion_ids = {c.criterion_id for c in packet.allowed_criteria}
-    valid_segment_ids = {s.segment_id for s in packet.answer_segments}
-
-    crit_list = normalized.get("criterion_assessments")
-    if not crit_list:
-        raw_assess = normalized.get("assessment") or normalized.get("answer_assessment") or {}
-        crit_list = []
-        top_obs = normalized.get("observation") or normalized.get("overall_answer_summary") or "Answer demonstrates core technical understanding."
-        top_segs = normalized.get("supporting_segment_ids") or []
-        top_imp = normalized.get("improvement_guidance") or normalized.get("stronger_structure_tip")
-
-        if isinstance(raw_assess, list):
-            for item in raw_assess:
-                if isinstance(item, dict):
-                    crit_list.append({
-                        "criterion_id": str(item.get("criterion_id") or "crit_technical_accuracy"),
-                        "assessment_label": item.get("assessment_label") or item.get("label") or "DEMONSTRATED",
-                        "supporting_segment_ids": item.get("supporting_segment_ids") or top_segs or ["S1"],
-                        "observation": str(item.get("observation") or top_obs),
-                        "missing_evidence": item.get("missing_evidence"),
-                        "improvement_guidance": item.get("improvement_guidance") or top_imp,
-                    })
-        elif isinstance(raw_assess, dict):
-            for c_id in allowed_criterion_ids:
-                label_val = raw_assess.get(c_id) or "DEMONSTRATED"
-                if not isinstance(label_val, str) or label_val not in [e.value for e in AssessmentCriterionLabel]:
-                    label_val = "DEMONSTRATED"
-                crit_list.append({
-                    "criterion_id": c_id,
-                    "assessment_label": label_val,
-                    "supporting_segment_ids": top_segs or ["S1"],
-                    "observation": str(top_obs),
-                    "missing_evidence": None if label_val == "DEMONSTRATED" else "Additional execution details recommended.",
-                    "improvement_guidance": top_imp,
-                })
-        normalized["criterion_assessments"] = crit_list
-
-    if not normalized.get("overall_answer_summary"):
-        obs_candidates = [c.get("observation") for c in normalized.get("criterion_assessments", []) if isinstance(c, dict) and c.get("observation")]
-        normalized["overall_answer_summary"] = obs_candidates[0] if obs_candidates else "Candidate demonstrated technical capability."
+    # Check question ID match
+    if str(normalized.get("question_id")) != str(packet.question_id):
+        errors.append(f"QUESTION_ID_MISMATCH: expected {packet.question_id}, got {normalized.get('question_id')}")
 
     # Validate Schema and Pydantic validation
     try:
@@ -299,12 +402,11 @@ def validate_strict_assessment_output(
             errors.append(f"PYDANTIC_VALIDATION_ERROR at {'.'.join(str(l) for l in err['loc'])}: {err['msg']}")
         return False, errors, None
 
-    # Validate criteria IDs match allowed set
     allowed_criterion_ids = {c.criterion_id for c in packet.allowed_criteria}
     valid_segment_ids = {s.segment_id for s in packet.answer_segments}
 
     returned_criterion_ids: Set[str] = set()
-    for item in model_resp.criterion_assessments:
+    for item in model_resp.criteria:
         if item.criterion_id not in allowed_criterion_ids:
             errors.append(f"UNKNOWN_CRITERION_ID: {item.criterion_id}")
         returned_criterion_ids.add(item.criterion_id)
@@ -314,13 +416,10 @@ def validate_strict_assessment_output(
             if seg_id not in valid_segment_ids:
                 errors.append(f"NONEXISTENT_SEGMENT_ID_CITED: '{seg_id}' in criterion '{item.criterion_id}'")
 
-        # If demonstrated or partially demonstrated, check that evidence is cited or explained
-        if item.assessment_label in (
-            AssessmentCriterionLabel.DEMONSTRATED,
-            AssessmentCriterionLabel.PARTIALLY_DEMONSTRATED,
-        ):
-            if not item.supporting_segment_ids and not item.observation:
-                errors.append(f"MISSING_EVIDENCE_CITATION for criterion '{item.criterion_id}' with label '{item.assessment_label.value}'")
+        # Demonstrated without observation
+        if item.label in (AssessmentCriterionLabel.DEMONSTRATED, AssessmentCriterionLabel.PARTIALLY_DEMONSTRATED):
+            if not item.observation or len(item.observation.strip()) < 5:
+                errors.append(f"MISSING_EVIDENCE_OBSERVATION for criterion '{item.criterion_id}'")
 
     # Check that all required criteria are assessed
     missing_criteria = allowed_criterion_ids - returned_criterion_ids
@@ -329,7 +428,7 @@ def validate_strict_assessment_output(
 
     # Prohibited string checks (e.g. numeric marks, hiring recommendations)
     full_str = json.dumps(parsed_json).lower()
-    for forbidden in ["recommend to hire", "recommend rejection", "should hire", "pass candidate", "fail candidate", "/5", "/10", "100%"]:
+    for forbidden in ["recommend to hire", "recommend rejection", "should hire", "pass candidate", "fail candidate", "hire recommendation", "/5", "/10", "100%"]:
         if forbidden in full_str:
             errors.append(f"PROHIBITED_TERM_DETECTED: '{forbidden}'")
 
@@ -343,29 +442,32 @@ def create_human_review_fallback_assessment(
     packet: PerAnswerAssessmentPacket,
     reason: str,
 ) -> StrictPerAnswerAssessmentResponse:
-    """Creates a deterministic fallback assessment marking criteria as NEEDS_HUMAN_REVIEW without zeroing competence."""
+    """Creates a deterministic fallback assessment marking criteria as NEEDS_HUMAN_REVIEW without zeroing competence or inventing false candidate weaknesses."""
     items: List[StrictCriterionAssessmentItem] = []
     for crit in packet.allowed_criteria:
         items.append(
             StrictCriterionAssessmentItem(
                 criterion_id=crit.criterion_id,
-                assessment_label=AssessmentCriterionLabel.NEEDS_HUMAN_REVIEW,
+                label=AssessmentCriterionLabel.NEEDS_HUMAN_REVIEW,
                 supporting_segment_ids=[],
-                observation=f"Automated evaluation deferred: {reason}",
-                missing_evidence=None,
-                improvement_guidance="Pending human reviewer evaluation.",
-                confidence=ConfidenceCategory.UNCERTAIN,
-                uncertainty_codes=["NEEDS_HUMAN_REVIEW_FALLBACK"],
+                observation="Automated evaluation deferred pending reviewer confirmation.",
             )
         )
 
     return StrictPerAnswerAssessmentResponse(
         schema_version=STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION,
         question_id=str(packet.question_id),
-        criterion_assessments=items,
-        overall_answer_summary="Assessment pending human review.",
-        stronger_structure_tip=None,
+        evidence_state=EvidenceStateCategory.NEEDS_HUMAN_REVIEW,
+        criteria=items,
+        strengths=[],
+        missing_elements=[],
+        improvement_guidance=[],
+        uncertainty_notes=[f"Analysis unavailable: {reason}"],
     )
+
+
+# Module-level cache for compatibility format across run
+_SUPPORTED_RESPONSE_FORMAT_MODE: Optional[bool] = None
 
 
 async def assess_single_answer(
@@ -379,6 +481,7 @@ async def assess_single_answer(
     Returns:
     (validated_assessment, validation_state, provider_class, model_identifier)
     """
+    global _SUPPORTED_RESPONSE_FORMAT_MODE
     settings = get_settings()
 
     # 1. Resolve Provider Profile
@@ -426,17 +529,26 @@ async def assess_single_answer(
         ],
     }
 
-    req_body = {
+    use_json_format = _SUPPORTED_RESPONSE_FORMAT_MODE if _SUPPORTED_RESPONSE_FORMAT_MODE is not None else True
+
+    req_body: Dict[str, Any] = {
         "model": model_name,
         "messages": [
             {"role": "system", "content": STRUCTURED_ANSWER_ASSESSMENT_SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(user_payload)},
         ],
         "temperature": 0.1,
-        "max_tokens": 800,
+        "max_tokens": 1000,
         "stream": False,
-        "response_format": {"type": "json_object"},
     }
+    if use_json_format:
+        req_body["response_format"] = {"type": "json_object"}
+
+    logger.debug(
+        "Assessment request: question_id=%s, attempt=1, structured_format=%s",
+        packet.question_id,
+        use_json_format,
+    )
 
     try:
         async with httpx.AsyncClient(timeout=timeout_sec) as client:
@@ -445,17 +557,22 @@ async def assess_single_answer(
                 json=req_body,
                 headers={"Content-Type": "application/json"},
             )
-            # If 400 error occurs, try without response_format as some local OpenAI-compatible servers (e.g. LM Studio / older llama.cpp) reject json_object format
+            # If 400 error occurs due to response_format compatibility, retry once without it and cache mode
             if resp.status_code == 400 and "response_format" in req_body:
+                logger.info("Provider rejected response_format: json_object. Falling back to unformatted mode.")
                 req_body_no_fmt = {k: v for k, v in req_body.items() if k != "response_format"}
                 resp = await client.post(
                     endpoint_url,
                     json=req_body_no_fmt,
                     headers={"Content-Type": "application/json"},
                 )
+                if resp.status_code == 200:
+                    _SUPPORTED_RESPONSE_FORMAT_MODE = False
+            elif resp.status_code == 200 and "response_format" in req_body:
+                _SUPPORTED_RESPONSE_FORMAT_MODE = True
 
         if resp.status_code != 200:
-            logger.warning("Provider returned HTTP %d on initial assessment call: %s", resp.status_code, resp.text[:200] if hasattr(resp, 'text') else "")
+            logger.warning("Provider returned HTTP %d on initial assessment call", resp.status_code)
             fallback = create_human_review_fallback_assessment(packet, f"Provider HTTP {resp.status_code}")
             return fallback, "NEEDS_HUMAN_REVIEW", provider_class, model_name
 
@@ -478,31 +595,33 @@ async def assess_single_answer(
         if is_valid and validated:
             return validated, "PASSED", provider_class, model_name
 
-        logger.info("First assessment output invalid (%s). Attempting 1 controlled repair.", errors)
+        logger.info("Initial assessment output requires repair (%s). Attempting at most 1 repair.", errors)
 
-        # 2. Controlled Repair (at most 1)
+        # 2. Controlled Repair Prompt (at most 1)
+        repair_payload = {
+            "schema_version": STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION,
+            "question_id": str(packet.question_id),
+            "expected_criteria": [c.criterion_id for c in packet.allowed_criteria],
+            "allowed_segments": [s.segment_id for s in packet.answer_segments],
+            "validation_errors": errors,
+            "original_output": raw_content,
+            "instruction": "Return ONLY a valid JSON object matching schema_version 'answer-assessment.v3' with 'criteria' array for all expected criteria.",
+        }
+
         repair_messages = [
             {"role": "system", "content": STRUCTURED_ANSWER_ASSESSMENT_SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(user_payload)},
-            {"role": "assistant", "content": raw_content},
-            {
-                "role": "user",
-                "content": json.dumps({
-                    "action": "ASSESSMENT_GROUNDING_REPAIR",
-                    "validation_errors": errors,
-                    "instruction": "Fix all validation errors. Use exact question_id and allowed criterion_ids. Cite valid segment_ids only (e.g. S1). Return plain JSON matching schema.",
-                }),
-            },
+            {"role": "user", "content": json.dumps(repair_payload)},
         ]
 
-        repair_req_body = {
+        repair_req_body: Dict[str, Any] = {
             "model": model_name,
             "messages": repair_messages,
             "temperature": 0.0,
-            "max_tokens": 800,
+            "max_tokens": 1000,
             "stream": False,
-            "response_format": {"type": "json_object"},
         }
+        if _SUPPORTED_RESPONSE_FORMAT_MODE:
+            repair_req_body["response_format"] = {"type": "json_object"}
 
         async with httpx.AsyncClient(timeout=timeout_sec) as client:
             repair_resp = await client.post(
@@ -579,8 +698,8 @@ def aggregate_competency_evidence_coverage(
                 "human_review": 0,
             }
 
-        for item in assess.criterion_assessments:
-            lbl = item.assessment_label
+        for item in assess.criteria:
+            lbl = item.label
             status_counts[lbl.value] = status_counts.get(lbl.value, 0) + 1
 
             if lbl == AssessmentCriterionLabel.NOT_APPLICABLE:
@@ -709,28 +828,27 @@ async def process_and_persist_structured_session_assessment(
                 crit_items.append(
                     StrictCriterionAssessmentItem(
                         criterion_id=st.get("criterion_id", "crit_1"),
-                        assessment_label=AssessmentCriterionLabel(st.get("assessment_label", "DEMONSTRATED")),
+                        label=AssessmentCriterionLabel(st.get("label") or st.get("assessment_label", "DEMONSTRATED")),
                         supporting_segment_ids=st.get("supporting_segment_ids", []),
                         observation=st.get("observation", "Demonstrated capability"),
-                        missing_evidence=st.get("missing_evidence"),
-                        improvement_guidance=st.get("improvement_guidance"),
-                        confidence=ConfidenceCategory.HIGH,
                     )
                 )
             assessment_resp = StrictPerAnswerAssessmentResponse(
                 schema_version=STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION,
                 question_id=q_id_str,
-                criterion_assessments=crit_items or [
+                evidence_state=EvidenceStateCategory.SUFFICIENT,
+                criteria=crit_items or [
                     StrictCriterionAssessmentItem(
                         criterion_id="crit_1",
-                        assessment_label=AssessmentCriterionLabel.DEMONSTRATED,
+                        label=AssessmentCriterionLabel.DEMONSTRATED,
                         supporting_segment_ids=["S1"],
                         observation="Previously assessed answer",
-                        confidence=ConfidenceCategory.HIGH,
                     )
                 ],
-                overall_answer_summary=existing_rev.acknowledgement,
-                stronger_structure_tip=existing_rev.stronger_structure,
+                strengths=[st.get("observation") for st in (existing_rev.strengths or []) if st.get("observation")],
+                missing_elements=[im.get("observation") for im in (existing_rev.improvement_areas or []) if im.get("observation")],
+                improvement_guidance=[existing_rev.stronger_structure] if existing_rev.stronger_structure else [],
+                uncertainty_notes=[],
             )
             val_state = existing_rev.validation_status
         else:
@@ -748,9 +866,9 @@ async def process_and_persist_structured_session_assessment(
             # Map structured criteria into record json
             strengths_json = []
             improvements_json = []
-            for item in assessment_resp.criterion_assessments:
+            for item in assessment_resp.criteria:
                 item_dict = item.model_dump()
-                if item.assessment_label in (
+                if item.label in (
                     AssessmentCriterionLabel.DEMONSTRATED,
                     AssessmentCriterionLabel.PARTIALLY_DEMONSTRATED,
                 ):
@@ -761,12 +879,15 @@ async def process_and_persist_structured_session_assessment(
             if val_state == "NEEDS_HUMAN_REVIEW":
                 human_review_items_count += 1
 
+            top_summary = "; ".join(assessment_resp.strengths) if assessment_resp.strengths else "Assessment completed."
+            top_tip = assessment_resp.improvement_guidance[0] if assessment_resp.improvement_guidance else None
+
             if existing_rev:
                 existing_rev.lifecycle_status = "REVIEW_READY"
-                existing_rev.acknowledgement = assessment_resp.overall_answer_summary
+                existing_rev.acknowledgement = top_summary
                 existing_rev.strengths = strengths_json
                 existing_rev.improvement_areas = improvements_json
-                existing_rev.stronger_structure = assessment_resp.stronger_structure_tip
+                existing_rev.stronger_structure = top_tip
                 existing_rev.validation_status = val_state
                 existing_rev.completed_at = now
             else:
@@ -779,14 +900,14 @@ async def process_and_persist_structured_session_assessment(
                     schema_version=STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION,
                     lifecycle_status="REVIEW_READY",
                     answer_status=val_state,
-                    acknowledgement=assessment_resp.overall_answer_summary,
+                    acknowledgement=top_summary,
                     strengths=strengths_json,
                     improvement_areas=improvements_json,
-                    next_steps=[assessment_resp.stronger_structure_tip] if assessment_resp.stronger_structure_tip else [],
-                    stronger_structure=assessment_resp.stronger_structure_tip,
+                    next_steps=[top_tip] if top_tip else [],
+                    stronger_structure=top_tip,
                     dimension_levels={},
                     follow_up_needed=False,
-                    uncertainty_codes=[c for item in assessment_resp.criterion_assessments for c in item.uncertainty_codes],
+                    uncertainty_codes=assessment_resp.uncertainty_notes,
                     provider_class=prov_class,
                     model_identifier=model_id,
                     prompt_template_version=ASSESSMENT_PROMPT_CONTRACT_VERSION,
@@ -811,29 +932,17 @@ async def process_and_persist_structured_session_assessment(
                 competency_name=packet.competency_name,
                 final_answer_text=ans_text,
                 answer_segments=packet.answer_segments,
-                criterion_results=assessment_resp.criterion_assessments,
-                overall_summary=assessment_resp.overall_answer_summary,
-                uncertainty_codes=[c for it in assessment_resp.criterion_assessments for c in it.uncertainty_codes],
+                criterion_results=assessment_resp.criteria,
+                overall_summary="; ".join(assessment_resp.strengths) if assessment_resp.strengths else "Response assessed.",
+                uncertainty_codes=assessment_resp.uncertainty_notes,
                 validation_state=val_state,
             )
         )
 
         # Build Candidate Card
-        card_strengths = [
-            it.observation
-            for it in assessment_resp.criterion_assessments
-            if it.assessment_label == AssessmentCriterionLabel.DEMONSTRATED
-        ]
-        card_missing = [
-            it.missing_evidence
-            for it in assessment_resp.criterion_assessments
-            if it.missing_evidence
-        ]
-        card_tips = [
-            it.improvement_guidance
-            for it in assessment_resp.criterion_assessments
-            if it.improvement_guidance
-        ]
+        card_strengths = list(assessment_resp.strengths)
+        card_missing = list(assessment_resp.missing_elements)
+        card_tips = list(assessment_resp.improvement_guidance)
 
         if card_strengths:
             demonstrated_strengths_all.extend(card_strengths[:1])
@@ -854,11 +963,11 @@ async def process_and_persist_structured_session_assessment(
                 question_text=packet.question_text,
                 competency_name=packet.competency_name,
                 candidate_submitted_answer=ans_text,
-                overall_observation=assessment_resp.overall_answer_summary,
+                overall_observation="; ".join(card_strengths) if card_strengths else "Response assessed.",
                 demonstrated_strengths=card_strengths,
                 missing_evidence=card_missing,
                 actionable_improvement_tips=card_tips,
-                stronger_structure_tip=assessment_resp.stronger_structure_tip,
+                stronger_structure_tip=card_tips[0] if card_tips else None,
                 evidence_coverage_label=primary_label,
             )
         )

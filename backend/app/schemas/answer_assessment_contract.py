@@ -8,12 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.schemas.matching import FrozenSchema, verify_no_prohibited_keys
 from app.schemas.safety_policy import check_prohibited_topics
 
-ASSESSMENT_POLICY_VERSION: str = "2.0.0"
-ASSESSMENT_PROMPT_CONTRACT_VERSION: str = "answer-assessment.v2"
-ASSESSMENT_GUARDRAIL_VERSION: str = "2.0.0"
-STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION: str = "answer-assessment.v2"
-CANDIDATE_REPORT_SCHEMA_VERSION: str = "candidate-coaching-report.v2"
-RECRUITER_REPORT_SCHEMA_VERSION: str = "recruiter-assessment-report.v2"
+ASSESSMENT_POLICY_VERSION: str = "3.0.0"
+ASSESSMENT_PROMPT_CONTRACT_VERSION: str = "answer-assessment.v3"
+ASSESSMENT_GUARDRAIL_VERSION: str = "3.0.0"
+STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION: str = "answer-assessment.v3"
+CANDIDATE_REPORT_SCHEMA_VERSION: str = "candidate-coaching-report.v3"
+RECRUITER_REPORT_SCHEMA_VERSION: str = "recruiter-assessment-report.v3"
 
 
 class AssessmentCriterionLabel(str, enum.Enum):
@@ -22,6 +22,14 @@ class AssessmentCriterionLabel(str, enum.Enum):
     PARTIALLY_DEMONSTRATED = "PARTIALLY_DEMONSTRATED"
     INSUFFICIENT_RESPONSE = "INSUFFICIENT_RESPONSE"
     NOT_APPLICABLE = "NOT_APPLICABLE"
+    NEEDS_HUMAN_REVIEW = "NEEDS_HUMAN_REVIEW"
+
+
+class EvidenceStateCategory(str, enum.Enum):
+    """Overall evidence adequacy state for the question."""
+    SUFFICIENT = "SUFFICIENT"
+    PARTIAL = "PARTIAL"
+    INSUFFICIENT = "INSUFFICIENT"
     NEEDS_HUMAN_REVIEW = "NEEDS_HUMAN_REVIEW"
 
 
@@ -86,24 +94,23 @@ class StrictCriterionAssessmentItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     criterion_id: str = Field(..., min_length=1, max_length=64)
-    assessment_label: AssessmentCriterionLabel
+    label: AssessmentCriterionLabel
     supporting_segment_ids: List[str] = Field(default_factory=list, max_length=10)
     observation: str = Field(..., min_length=5, max_length=500)
-    missing_evidence: Optional[str] = Field(default=None, max_length=500)
-    improvement_guidance: Optional[str] = Field(default=None, max_length=500)
-    confidence: ConfidenceCategory = ConfidenceCategory.HIGH
-    uncertainty_codes: List[str] = Field(default_factory=list)
 
 
 class StrictPerAnswerAssessmentResponse(BaseModel):
-    """Strict JSON payload returned by LLM for a single question-answer assessment."""
+    """Strict JSON payload returned by LLM for a single question-answer assessment (v3)."""
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str = Field(default=STRUCTURED_ANSWER_ASSESSMENT_SCHEMA_VERSION)
     question_id: str = Field(..., min_length=1, max_length=64)
-    criterion_assessments: List[StrictCriterionAssessmentItem] = Field(..., min_length=1, max_length=10)
-    overall_answer_summary: str = Field(..., min_length=10, max_length=600)
-    stronger_structure_tip: Optional[str] = Field(default=None, max_length=500)
+    evidence_state: EvidenceStateCategory = EvidenceStateCategory.SUFFICIENT
+    criteria: List[StrictCriterionAssessmentItem] = Field(..., min_length=1, max_length=10)
+    strengths: List[str] = Field(default_factory=list)
+    missing_elements: List[str] = Field(default_factory=list)
+    improvement_guidance: List[str] = Field(default_factory=list)
+    uncertainty_notes: List[str] = Field(default_factory=list)
 
 
 # =========================================================================

@@ -136,16 +136,7 @@ describe("Phase 4C.4: Recruiter Evaluation Workspace & Candidate Feedback", () =
           sufficient_evidence_guidance: "Must explain WAL",
           insufficient_evidence_guidance: "Lacks internal mechanism details",
         },
-        recruiter_review: {
-          question_evaluation_id: "qe-1",
-          review_state: "ACCEPTED",
-          reviewed_rating: 4,
-          reviewed_observations: {},
-          override_reason: null,
-          recruiter_note: "Senior internal candidate note",
-          reviewer_name: "Senior Recruiter",
-          reviewed_at: "2026-09-27T10:10:00Z",
-        },
+        recruiter_review: null,
       },
       {
         slot_id: "slot-2",
@@ -285,8 +276,8 @@ describe("Phase 4C.4: Recruiter Evaluation Workspace & Candidate Feedback", () =
     expect(screen.getByText("Evaluate interview")).toBeInTheDocument();
   });
 
-  // 4. Level 3: Question and Answer Rendering & AI Provisional Label
-  it("renders Candidate detail workspace with clear AI Provisional Analysis label and separate evidence channels", async () => {
+  // 4. Level 3: Question and Answer Rendering & AI Analysis Label
+  it("renders Candidate detail workspace with clear AI Analysis label and separate evidence channels", async () => {
     vi.mocked(candidateEvaluationsApi.listEvaluationJobs).mockResolvedValueOnce(mockJobs);
     vi.mocked(candidateEvaluationsApi.listJobCandidatesForEvaluation).mockResolvedValueOnce(mockCandidates);
     vi.mocked(candidateEvaluationsApi.getCandidateEvaluationDetail).mockResolvedValueOnce(mockDetail);
@@ -301,7 +292,7 @@ describe("Phase 4C.4: Recruiter Evaluation Workspace & Candidate Feedback", () =
 
     expect(await screen.findByText("How does PostgreSQL guarantee ACID transaction compliance?")).toBeInTheDocument();
     expect(screen.getAllByText(/PostgreSQL utilizes Write-Ahead Logging/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/AI provisional analysis/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/AI analysis/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/What was addressed well/i)[0]).toBeInTheDocument();
     expect(screen.getByText("Mentioned WAL logging")).toBeInTheDocument();
   });
@@ -310,25 +301,25 @@ describe("Phase 4C.4: Recruiter Evaluation Workspace & Candidate Feedback", () =
   it("allows recruiter to edit review and validates override reason when overriding rating", async () => {
     vi.mocked(candidateEvaluationsApi.listEvaluationJobs).mockResolvedValueOnce(mockJobs);
     vi.mocked(candidateEvaluationsApi.listJobCandidatesForEvaluation).mockResolvedValueOnce(mockCandidates);
-    vi.mocked(candidateEvaluationsApi.getCandidateEvaluationDetail).mockResolvedValue(mockDetail);
+    vi.mocked(candidateEvaluationsApi.getCandidateEvaluationDetail).mockResolvedValueOnce(mockDetail);
 
     render(<EvaluationWorkspace />);
 
     const viewBtn = await screen.findByText("View evaluations");
     fireEvent.click(viewBtn);
 
-    const evalBtn = await screen.findByText("Evaluate interview");
-    fireEvent.click(evalBtn);
+    const evalBtns = await screen.findAllByText("Evaluate interview");
+    fireEvent.click(evalBtns[0]);
 
-    const editBtn = await screen.findByText("Edit review");
-    fireEvent.click(editBtn);
+    const editBtns = await screen.findAllByText("Add note / override");
+    fireEvent.click(editBtns[0]);
 
-    // Change review decision to OVERRIDDEN
-    const selectDecision = screen.getByLabelText(/Review decision/i);
+    // Ensure action is OVERRIDDEN
+    const selectDecision = screen.getByLabelText(/Override action/i);
     fireEvent.change(selectDecision, { target: { value: "OVERRIDDEN" } });
 
     // Attempt to save without override reason
-    const saveBtn = screen.getByText("Save review");
+    const saveBtn = screen.getByText("Save optional override");
     fireEvent.click(saveBtn);
 
     expect(await screen.findByText(/Override reason is required/i)).toBeInTheDocument();

@@ -344,13 +344,15 @@ def list_job_candidates_for_evaluation(
             eval_status = "AWAITING_SUBMISSION"
             ai_status = "PENDING"
         else:
-            ai_status = "READY"
             if eval_record and eval_record.status == "FINALIZED":
                 eval_status = "FINALIZED"
+                ai_status = "READY"
             elif eval_record and eval_record.status == "IN_REVIEW":
-                eval_status = "IN_REVIEW"
+                eval_status = "COMPLETE" if (eval_record.aggregate_score is not None or eval_record.questions_reviewed > 0) else "READY_FOR_REVIEW"
+                ai_status = "READY"
             else:
                 eval_status = "READY_FOR_REVIEW"
+                ai_status = "PENDING"
 
         results.append(
             EvaluationCandidateSessionSummaryDto(
@@ -391,7 +393,13 @@ def _synthesize_ai_provisional_analysis(
     answer: Optional[CandidateInterviewAnswerRecord],
     stored_observations: Optional[Dict[str, Any]] = None,
 ) -> AIProvisionalAnalysisDto:
-    """Generates structured provisional AI observations connected to answer evidence, using stored LLM results when available."""
+    """Generates structured provisional AI observations connected to answer evidence, using stored LLM results when available.
+    
+    Strict Failure Semantics:
+    - Valid AI analysis: provisional dimension values & provisional rating calculated from demonstrated criteria.
+    - AI failure / Needs Human Review / Unanalyzed: NO numeric rating (provisional_rating = None), NO dimension scores ({}), NO fake strengths.
+    - Candidate empty response: is_insufficient_evidence=True, provisional_rating=None.
+    """
     q_format = (item.get("question_format") or "").upper()
     is_mcq = q_format in ("MCQ", "MCQ_SINGLE_ANSWER") or bool(item.get("options"))
 
@@ -399,7 +407,21 @@ def _synthesize_ai_provisional_analysis(
         # MCQ Provisional Analysis (deterministic)
         correct_id = item.get("correct_option_id")
         selected_id = answer.selected_option_id if answer else None
+        has_selection = bool(selected_id)
         is_correct = bool(selected_id and correct_id and str(selected_id).strip().upper() == str(correct_id).strip().upper())
+
+        if not has_selection:
+            return AIProvisionalAnalysisDto(
+                addressed_well=[],
+                missing_or_unclear=["No option selected."],
+                suggested_improvement=item.get("answer_explanation") or item.get("explanation"),
+                dimension_scores={},
+                evidence_citations=[],
+                provisional_rating=None,
+                is_insufficient_evidence=True,
+                uncertainty_notes="Candidate did not select an option.",
+                analysis_status="UNAVAILABLE",
+            )
 
         return AIProvisionalAnalysisDto(
             addressed_well=["Selected correct option" if is_correct else "Option recorded"],
@@ -408,38 +430,53 @@ def _synthesize_ai_provisional_analysis(
             dimension_scores={"Accuracy": 5 if is_correct else 1},
             evidence_citations=[],
             provisional_rating=5 if is_correct else 1,
-            is_insufficient_evidence=not bool(selected_id),
+            is_insufficient_evidence=False,
             uncertainty_notes=None,
             analysis_status="READY",
         )
 
     # Conversational Provisional Analysis
     text_ans = (answer.text_answer or "").strip() if answer else ""
-    if not text_ans or len(text_ans) < 10:
+    if not text_ans or len(text_ans) < 5:
         return AIProvisionalAnalysisDto(
             addressed_well=[],
-            missing_or_unclear=["No substantive technical response provided"],
-            suggested_improvement="Provide concrete technical examples and architecture trade-offs.",
-            dimension_scores={
-                "Relevance": 1,
-                "Technical depth": 1,
-                "Clarity": 1,
-                "Evidence and examples": 1,
-                "Problem-solving structure": 1,
-            },
+            missing_or_unclear=["No substantive response recorded."],
+            suggested_improvement="Provide a structured technical response addressing the prompt.",
+            dimension_scores={},
             evidence_citations=[],
-            provisional_rating=1,
+            provisional_rating=None,
             is_insufficient_evidence=True,
-            uncertainty_notes="Candidate submitted empty or minimal response.",
-            analysis_status="READY",
+            uncertainty_notes="Candidate submitted empty response.",
+            analysis_status="UNAVAILABLE",
         )
 
     # If we have stored LLM evaluation in stored_observations (e.g. from evaluate pipeline run)
-    if stored_observations and isinstance(stored_observations, dict) and stored_observations.get("criterion_assessments"):
-        llm_crit = stored_observations.get("criterion_assessments", [])
-        addressed = []
-        missing = []
-        improvements = []
+    if stored_observations and isinstance(stored_observations, dict):
+        llm_crit = stored_observations.get("criteria") or stored_observations.get("criterion_assessments") or []
+        evidence_state = stored_observations.get("evidence_state", "SUFFICIENT")
+
+        # Check if LLM output was a fallback / needs human review
+        has_needs_review = any(
+            (c.get("label") or c.get("assessment_label")) == AssessmentCriterionLabel.NEEDS_HUMAN_REVIEW.value
+            for c in llm_crit
+        )
+        if (has_needs_review and not any((c.get("label") or c.get("assessment_label")) == AssessmentCriterionLabel.DEMONSTRATED.value for c in llm_crit)) or evidence_state == "NEEDS_HUMAN_REVIEW":
+            # AI analysis failed or requires human review -> NO numeric scores, NO fake strengths!
+            return AIProvisionalAnalysisDto(
+                addressed_well=[],
+                missing_or_unclear=[],
+                suggested_improvement=None,
+                dimension_scores={},
+                evidence_citations=[],
+                provisional_rating=None,
+                is_insufficient_evidence=True,
+                uncertainty_notes="AI analysis could not be validated for this response. Complete the rubric review manually or retry analysis.",
+                analysis_status="UNAVAILABLE",
+            )
+
+        addressed = list(stored_observations.get("strengths") or [])
+        missing = list(stored_observations.get("missing_elements") or [])
+        improvements = list(stored_observations.get("improvement_guidance") or [])
         citations_map: Dict[str, EvidenceSegmentDto] = {}
 
         # Extract answer segments
@@ -450,26 +487,21 @@ def _synthesize_ai_provisional_analysis(
         total_eval_crit = len(llm_crit)
 
         for c in llm_crit:
-            label = c.get("assessment_label")
+            label = c.get("label") or c.get("assessment_label")
             obs = c.get("observation")
             if label == AssessmentCriterionLabel.DEMONSTRATED.value:
                 demonstrated_count += 1
-                if obs:
+                if obs and obs not in addressed:
                     addressed.append(obs)
             elif label == AssessmentCriterionLabel.PARTIALLY_DEMONSTRATED.value:
                 demonstrated_count += 0.5
-                if obs:
+                if obs and obs not in addressed:
                     addressed.append(obs)
-                if c.get("missing_evidence"):
+                if c.get("missing_evidence") and c.get("missing_evidence") not in missing:
                     missing.append(c.get("missing_evidence"))
-            else:
-                if c.get("missing_evidence"):
+            elif label in (AssessmentCriterionLabel.INSUFFICIENT_RESPONSE.value, AssessmentCriterionLabel.NEEDS_HUMAN_REVIEW.value):
+                if c.get("missing_evidence") and c.get("missing_evidence") not in missing:
                     missing.append(c.get("missing_evidence"))
-                elif obs:
-                    missing.append(obs)
-
-            if c.get("improvement_guidance"):
-                improvements.append(c.get("improvement_guidance"))
 
             for s_id in c.get("supporting_segment_ids", []):
                 if s_id in seg_dict and s_id not in citations_map:
@@ -495,96 +527,42 @@ def _synthesize_ai_provisional_analysis(
             else:
                 prov_rating = 1
         else:
-            prov_rating = 3
+            prov_rating = None
 
-        summary_tip = stored_observations.get("stronger_structure_tip") or (improvements[0] if improvements else None)
-
-        dim_scores = {
-            "Relevance": min(5, max(1, prov_rating)),
-            "Technical depth": min(5, max(1, prov_rating if ratio >= 0.5 else prov_rating - 1)),
-            "Clarity": min(5, max(1, 4 if len(text_ans) > 50 else 2)),
-            "Evidence and examples": min(5, max(1, len(citations_map) + 1)),
-            "Problem-solving structure": min(5, max(1, prov_rating)),
-        }
+        if prov_rating is not None:
+            dim_scores = {
+                "Relevance": min(5, max(1, prov_rating)),
+                "Technical depth": min(5, max(1, prov_rating if ratio >= 0.5 else prov_rating - 1)),
+                "Clarity": min(5, max(1, 4 if len(text_ans) > 50 else 2)),
+                "Evidence and examples": min(5, max(1, len(citations_map) + 1 if len(citations_map) > 0 else 2)),
+                "Problem-solving structure": min(5, max(1, prov_rating)),
+            }
+        else:
+            dim_scores = {}
 
         return AIProvisionalAnalysisDto(
-            addressed_well=addressed if addressed else ["Technical response recorded."],
-            missing_or_unclear=missing if missing else [],
-            suggested_improvement=summary_tip or "Elaborate on production failure modes and trade-offs.",
+            addressed_well=addressed,
+            missing_or_unclear=missing,
+            suggested_improvement=improvements[0] if improvements else None,
             dimension_scores=dim_scores,
             evidence_citations=list(citations_map.values()),
             provisional_rating=prov_rating,
-            is_insufficient_evidence=False,
+            is_insufficient_evidence=(prov_rating is None),
             uncertainty_notes=None,
-            analysis_status="READY",
+            analysis_status="READY" if prov_rating is not None else "UNAVAILABLE",
         )
 
-    # Fallback heuristic segmenting and scoring when LLM run is not yet stored
-    citations: List[EvidenceSegmentDto] = []
-    canonical_segs = extract_canonical_answer_segments(text_ans)
-    for seg in canonical_segs[:4]:
-        citations.append(
-            EvidenceSegmentDto(
-                segment_id=seg.segment_id,
-                text=seg.text[:180] + ("..." if len(seg.text) > 180 else ""),
-                start_char=seg.start_char,
-                end_char=seg.end_char,
-            )
-        )
-
-    comp = item.get("competency_name") or item.get("competency") or "Technical Competency"
-    word_count = len(text_ans.split())
-
-    if word_count > 80:
-        prov_rating = 4
-        dim_scores = {
-            "Relevance": 4,
-            "Technical depth": 4,
-            "Clarity": 4,
-            "Evidence and examples": 3,
-            "Problem-solving structure": 4,
-        }
-        addressed = [
-            f"Demonstrates practical hands-on understanding of {comp}.",
-            "Articulates problem breakdown and structured workflow clearly.",
-        ]
-        missing = ["Could include more specific performance benchmarks and failure modes."]
-        improvement = f"Elaborate on edge cases and monitoring strategies when implementing {comp}."
-    elif word_count > 30:
-        prov_rating = 3
-        dim_scores = {
-            "Relevance": 3,
-            "Technical depth": 3,
-            "Clarity": 3,
-            "Evidence and examples": 2,
-            "Problem-solving structure": 3,
-        }
-        addressed = [f"Addresses foundational concepts of {comp}."]
-        missing = ["Lacks detailed architectural trade-offs or production incident examples."]
-        improvement = "Include concrete past project metrics and mitigation techniques."
-    else:
-        prov_rating = 2
-        dim_scores = {
-            "Relevance": 2,
-            "Technical depth": 2,
-            "Clarity": 2,
-            "Evidence and examples": 1,
-            "Problem-solving structure": 2,
-        }
-        addressed = [f"Briefly mentions {comp}."]
-        missing = ["Response is concise and lacks practical elaboration."]
-        improvement = "Provide comprehensive implementation details and rationale."
-
+    # If no LLM analysis has been run yet -> DO NOT fabricate artificial scores!
     return AIProvisionalAnalysisDto(
-        addressed_well=addressed,
-        missing_or_unclear=missing,
-        suggested_improvement=improvement,
-        dimension_scores=dim_scores,
-        evidence_citations=citations,
-        provisional_rating=prov_rating,
+        addressed_well=[],
+        missing_or_unclear=[],
+        suggested_improvement=None,
+        dimension_scores={},
+        evidence_citations=[],
+        provisional_rating=None,
         is_insufficient_evidence=False,
         uncertainty_notes=None,
-        analysis_status="READY",
+        analysis_status="UNAVAILABLE",
     )
 
 
@@ -592,8 +570,15 @@ async def run_ai_analysis_for_session(
     session_id: UUID,
     actor: UserRecord,
     db: Session,
+    only_failed: bool = False,
 ) -> CandidateInterviewEvaluationDetailResponse:
-    """Invokes the local LLM assessment pipeline for all submitted conversational responses in the session."""
+    """Invokes the local LLM assessment pipeline for conversational responses in the session.
+    
+    Rules:
+    - If only_failed=True, only re-evaluates answers that currently have failed/needs-human-review or unreviewed state.
+    - If Recruiter previously accepted a result whose source analysis is now superseded, mark review as needing confirmation rather than silently carrying over.
+    - Does not alter finalized evaluation.
+    """
     _require_recruiter_actor(actor)
 
     stmt = (
@@ -668,7 +653,18 @@ async def run_ai_analysis_for_session(
             continue
 
         ans_rec = answers_map.get(slot_id)
-        if not ans_rec or not ans_rec.text_answer or len(ans_rec.text_answer.strip()) < 5:
+        # Empty or skipped response: Do not send to LM Studio. Mark as unanalyzed/unavailable without fabricating explanation.
+        if not ans_rec or not ans_rec.text_answer or len(ans_rec.text_answer.strip()) < 5 or ans_rec.is_skipped:
+            continue
+
+        stmt_qe = select(CandidateQuestionEvaluationRecord).where(
+            CandidateQuestionEvaluationRecord.session_id == session_id,
+            CandidateQuestionEvaluationRecord.slot_id == slot_id,
+        )
+        qe_rec = db.execute(stmt_qe).scalar_one_or_none()
+
+        # If only_failed=True, skip if already successfully reviewed/evaluated
+        if only_failed and qe_rec and qe_rec.reviewed_observations and qe_rec.reviewed_rating is not None:
             continue
 
         # Build packet and call local LLM
@@ -690,23 +686,10 @@ async def run_ai_analysis_for_session(
             llm_dump = {}
 
         if llm_dump:
-            # Store or update question evaluation record with reviewed_observations
-            stmt_qe = select(CandidateQuestionEvaluationRecord).where(
-                CandidateQuestionEvaluationRecord.session_id == session_id,
-                CandidateQuestionEvaluationRecord.slot_id == slot_id,
-            )
-            qe_rec = db.execute(stmt_qe).scalar_one_or_none()
-
-            # Synthesize provisional rating from LLM output
-            synth_prov = _synthesize_ai_provisional_analysis(item, ans_rec, stored_observations=llm_dump)
-
             if qe_rec:
-                # If unreviewed, update observations and provisional rating
-                if qe_rec.review_state == "UNREVIEWED":
-                    qe_rec.reviewed_observations = llm_dump
-                    qe_rec.reviewed_rating = synth_prov.provisional_rating
-                    qe_rec.review_state = "ACCEPTED"
-                    qe_rec.updated_at = now
+                # Update observations without overwriting any explicit human override
+                qe_rec.reviewed_observations = llm_dump
+                qe_rec.updated_at = now
             else:
                 qe_rec = CandidateQuestionEvaluationRecord(
                     question_evaluation_id=uuid.uuid4(),
@@ -714,8 +697,8 @@ async def run_ai_analysis_for_session(
                     session_id=session_id,
                     answer_id=ans_rec.answer_id,
                     slot_id=slot_id,
-                    review_state="ACCEPTED",
-                    reviewed_rating=synth_prov.provisional_rating,
+                    review_state="UNREVIEWED",
+                    reviewed_rating=None,
                     reviewed_observations=llm_dump,
                     override_reason=None,
                     recruiter_note=None,
@@ -925,6 +908,17 @@ def get_candidate_interview_evaluation_detail(
             # Deterministic default review for MCQ
             pass
 
+        # Collect rating for deterministic aggregate:
+        # Priority: Human review rating (if recruiter actively reviewed/overrode) -> AI provisional rating
+        effective_rating = None
+        if review_dto and review_dto.reviewed_rating is not None:
+            effective_rating = review_dto.reviewed_rating
+        elif ai_provisional and ai_provisional.provisional_rating is not None:
+            effective_rating = ai_provisional.provisional_rating
+
+        if effective_rating is not None and not is_supp:
+            reviewed_ratings.append(effective_rating)
+
         questions_dto.append(
             EvaluationQuestionDetailDto(
                 slot_id=slot_id,
@@ -949,32 +943,50 @@ def get_candidate_interview_evaluation_detail(
         )
 
     # Calculate deterministic aggregate score (Core only)
+    # Built directly from valid AI assessments and optional human overrides
     aggregate_score = None
     is_complete = False
-    reviewed_count = len([q for q in questions_dto if q.recruiter_review and q.recruiter_review.review_state != "UNREVIEWED"])
-    core_reviewed_count = len([q for q in questions_dto if not q.is_supplemental and q.recruiter_review and q.recruiter_review.review_state != "UNREVIEWED"])
+    ai_evaluated_count = len([
+        q for q in questions_dto
+        if (q.ai_provisional_analysis and q.ai_provisional_analysis.analysis_status == "READY" and q.ai_provisional_analysis.provisional_rating is not None)
+        or (q.recruiter_review and q.recruiter_review.reviewed_rating is not None)
+    ])
+    core_evaluated_count = len([
+        q for q in questions_dto
+        if not q.is_supplemental and (
+            (q.ai_provisional_analysis and q.ai_provisional_analysis.analysis_status == "READY" and q.ai_provisional_analysis.provisional_rating is not None)
+            or (q.recruiter_review and q.recruiter_review.reviewed_rating is not None)
+        )
+    ])
 
-    if core_reviewed_count == core_q_count and core_q_count > 0:
+    if core_evaluated_count == core_q_count and core_q_count > 0:
         is_complete = True
         if reviewed_ratings:
             aggregate_score = round(sum(reviewed_ratings) / len(reviewed_ratings), 1)
 
-    # Compute dimension averages
+    # Compute dimension averages (strictly exclude dimensions with no valid ratings)
     dim_averages = {}
     for dname, scores in dimension_totals.items():
         if scores:
             dim_averages[dname] = round(sum(scores) / len(scores), 1)
-        else:
-            dim_averages[dname] = 3.0
 
-    eval_status = eval_record.status if eval_record else ("IN_REVIEW" if reviewed_count > 0 else "NOT_STARTED")
+    reviewed_count = len([q for q in questions_dto if q.recruiter_review and q.recruiter_review.review_state != "UNREVIEWED"])
+    
+    if eval_record and eval_record.status == "FINALIZED":
+        eval_status = "FINALIZED"
+    elif is_complete:
+        eval_status = "COMPLETE"
+    elif ai_evaluated_count > 0 or reviewed_count > 0:
+        eval_status = "IN_REVIEW"
+    else:
+        eval_status = "NOT_STARTED"
 
     overview_dto = EvaluationOverviewSummaryDto(
         questions_reviewed=reviewed_count,
         total_questions=len(questions_dto),
         core_questions_count=core_q_count,
         supplemental_questions_count=supp_q_count,
-        ai_coverage_count=len(questions_dto),
+        ai_coverage_count=ai_evaluated_count,
         insufficient_evidence_count=insufficient_count,
         dimension_averages=dim_averages,
         key_strengths=key_strengths_set[:3],
@@ -1271,18 +1283,21 @@ def finalize_candidate_interview_evaluation(
             message="Official interview evaluation is already finalized.",
         )
 
-    # Check if all core questions have been reviewed
-    unreviewed_core = [
+    # Check if all core questions have valid evaluations (either validated AI analysis or recruiter review)
+    unevaluated_core = [
         q for q in detail.questions
-        if not q.is_supplemental and (not q.recruiter_review or q.recruiter_review.review_state == "UNREVIEWED")
+        if not q.is_supplemental and (
+            (not q.ai_provisional_analysis or q.ai_provisional_analysis.analysis_status != "READY" or q.ai_provisional_analysis.provisional_rating is None)
+            and (not q.recruiter_review or q.recruiter_review.reviewed_rating is None)
+        )
     ]
-    if unreviewed_core:
+    if unevaluated_core:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": "INCOMPLETE_EVALUATION",
-                "message": f"Cannot finalize evaluation. {len(unreviewed_core)} core question(s) remain unreviewed.",
-                "unreviewed_core_count": len(unreviewed_core),
+                "message": f"Cannot finalize evaluation. {len(unevaluated_core)} core question(s) have not been evaluated by AI or recruiter.",
+                "unreviewed_core_count": len(unevaluated_core),
             },
         )
 

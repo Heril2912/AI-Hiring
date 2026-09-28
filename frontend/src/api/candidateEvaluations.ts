@@ -296,10 +296,14 @@ export async function publishCandidateFeedbackReport(
 }
 
 export async function triggerAiInterviewAnalysis(
-  sessionId: string
+  sessionId: string,
+  reanalyzeFailed: boolean = false
 ): Promise<CandidateInterviewEvaluationDetail> {
+  const url = reanalyzeFailed
+    ? `/api/v1/recruiter/evaluations/sessions/${sessionId}/analyze?reanalyze_failed=true`
+    : `/api/v1/recruiter/evaluations/sessions/${sessionId}/analyze`;
   return apiFetch<CandidateInterviewEvaluationDetail>(
-    `/api/v1/recruiter/evaluations/sessions/${sessionId}/analyze`,
+    url,
     {
       method: "POST",
     }

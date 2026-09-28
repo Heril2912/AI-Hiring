@@ -12,6 +12,7 @@ from app.schemas.answer_assessment_contract import (
     AllowedRubricCriterion,
     CanonicalAnswerSegment,
     ConfidenceCategory,
+    EvidenceStateCategory,
     PerAnswerAssessmentPacket,
     StrictCriterionAssessmentItem,
     StrictPerAnswerAssessmentResponse,
@@ -87,60 +88,55 @@ def test_packet_authoritative_binding():
 # Test 3: Valid segment references are accepted.
 def test_valid_segment_references_accepted(sample_packet):
     valid_json = {
-        "schema_version": "answer-assessment.v2",
+        "schema_version": "answer-assessment.v3",
         "question_id": str(sample_packet.question_id),
-        "criterion_assessments": [
+        "evidence_state": "SUFFICIENT",
+        "criteria": [
             {
                 "criterion_id": "crit_tech_solution",
-                "assessment_label": "DEMONSTRATED",
+                "label": "DEMONSTRATED",
                 "supporting_segment_ids": ["S1"],
                 "observation": "Explained Redis token bucket implementation.",
-                "missing_evidence": None,
-                "improvement_guidance": "None needed.",
-                "confidence": "HIGH",
             },
             {
                 "criterion_id": "crit_verification",
-                "assessment_label": "DEMONSTRATED",
+                "label": "DEMONSTRATED",
                 "supporting_segment_ids": ["S2"],
                 "observation": "Mentioned Prometheus latency monitoring.",
-                "missing_evidence": None,
-                "improvement_guidance": "Could detail alert thresholds.",
-                "confidence": "HIGH",
             },
         ],
-        "overall_answer_summary": "Clear, practical implementation with verification metrics.",
-        "stronger_structure_tip": "Include failure fallback strategies.",
+        "strengths": ["Clear, practical implementation with verification metrics."],
+        "missing_elements": [],
+        "improvement_guidance": ["Include failure fallback strategies."],
+        "uncertainty_notes": [],
     }
     is_valid, errors, validated = validate_strict_assessment_output(valid_json, sample_packet)
     assert is_valid is True
     assert len(errors) == 0
     assert validated is not None
-    assert len(validated.criterion_assessments) == 2
+    assert len(validated.criteria) == 2
 
 
 # Test 4: Invented segment or criterion IDs are rejected.
 def test_invented_segment_or_criterion_rejected(sample_packet):
     invalid_json = {
-        "schema_version": "answer-assessment.v2",
+        "schema_version": "answer-assessment.v3",
         "question_id": str(sample_packet.question_id),
-        "criterion_assessments": [
+        "evidence_state": "SUFFICIENT",
+        "criteria": [
             {
                 "criterion_id": "crit_invented_random",
-                "assessment_label": "DEMONSTRATED",
+                "label": "DEMONSTRATED",
                 "supporting_segment_ids": ["S99"],
                 "observation": "Invented citation",
-                "confidence": "HIGH",
             },
             {
                 "criterion_id": "crit_verification",
-                "assessment_label": "DEMONSTRATED",
+                "label": "DEMONSTRATED",
                 "supporting_segment_ids": ["S1"],
                 "observation": "Valid citation",
-                "confidence": "HIGH",
             },
         ],
-        "overall_answer_summary": "Candidate provided a clear summary here.",
     }
     is_valid, errors, validated = validate_strict_assessment_output(invalid_json, sample_packet)
     assert is_valid is False
@@ -167,25 +163,27 @@ async def test_single_repair_attempt(sample_packet):
         "choices": [{
             "message": {
                 "content": json.dumps({
-                    "schema_version": "answer-assessment.v2",
+                    "schema_version": "answer-assessment.v3",
                     "question_id": str(sample_packet.question_id),
-                    "criterion_assessments": [
+                    "evidence_state": "SUFFICIENT",
+                    "criteria": [
                         {
                             "criterion_id": "crit_tech_solution",
-                            "assessment_label": "DEMONSTRATED",
+                            "label": "DEMONSTRATED",
                             "supporting_segment_ids": ["S1"],
                             "observation": "Demonstrated Redis token buckets.",
-                            "confidence": "HIGH",
                         },
                         {
                             "criterion_id": "crit_verification",
-                            "assessment_label": "PARTIALLY_DEMONSTRATED",
+                            "label": "PARTIALLY_DEMONSTRATED",
                             "supporting_segment_ids": ["S2"],
                             "observation": "Mentioned Prometheus latency monitoring.",
-                            "confidence": "HIGH",
                         },
                     ],
-                    "overall_answer_summary": "Solid technical response.",
+                    "strengths": ["Solid technical response."],
+                    "missing_elements": [],
+                    "improvement_guidance": [],
+                    "uncertainty_notes": [],
                 })
             }
         }]
@@ -196,7 +194,7 @@ async def test_single_repair_attempt(sample_packet):
         assert mock_post.call_count == 2
         assert state == "REPAIRED"
         assert result is not None
-        assert len(result.criterion_assessments) == 2
+        assert len(result.criteria) == 2
 
 
 # Test 6: Repair failure produces NEEDS_HUMAN_REVIEW.
@@ -216,8 +214,8 @@ async def test_repair_failure_produces_needs_human_review(sample_packet):
         assert mock_post.call_count == 2  # exactly 1 initial + 1 repair
         assert state == "NEEDS_HUMAN_REVIEW"
         assert result is not None
-        for crit in result.criterion_assessments:
-            assert crit.assessment_label == AssessmentCriterionLabel.NEEDS_HUMAN_REVIEW
+        for crit in result.criteria:
+            assert crit.label == AssessmentCriterionLabel.NEEDS_HUMAN_REVIEW
 
 
 # Test 7: Repeated assessment requests are idempotent.
@@ -310,25 +308,27 @@ async def test_assessment_idempotency():
 def test_aggregation_excludes_not_applicable(sample_packet):
     # Assessment 1: 1 demonstrated, 1 not applicable
     assess_1 = StrictPerAnswerAssessmentResponse(
-        schema_version="answer-assessment.v2",
+        schema_version="answer-assessment.v3",
         question_id=str(sample_packet.question_id),
-        criterion_assessments=[
+        evidence_state=EvidenceStateCategory.SUFFICIENT,
+        criteria=[
             StrictCriterionAssessmentItem(
                 criterion_id="crit_tech_solution",
-                assessment_label=AssessmentCriterionLabel.DEMONSTRATED,
+                label=AssessmentCriterionLabel.DEMONSTRATED,
                 supporting_segment_ids=["S1"],
                 observation="Demonstrated solution",
-                confidence=ConfidenceCategory.HIGH,
             ),
             StrictCriterionAssessmentItem(
                 criterion_id="crit_verification",
-                assessment_label=AssessmentCriterionLabel.NOT_APPLICABLE,
+                label=AssessmentCriterionLabel.NOT_APPLICABLE,
                 supporting_segment_ids=[],
                 observation="Not applicable to this scope",
-                confidence=ConfidenceCategory.HIGH,
             ),
         ],
-        overall_answer_summary="Good answer.",
+        strengths=["Good answer."],
+        missing_elements=[],
+        improvement_guidance=[],
+        uncertainty_notes=[],
     )
 
     coverage_dtos, status_counts, overall = aggregate_competency_evidence_coverage(

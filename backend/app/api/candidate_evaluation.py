@@ -114,10 +114,11 @@ async def get_candidate_evaluation_detail_endpoint(
     response_model=CandidateInterviewEvaluationDetailResponse,
     status_code=status.HTTP_200_OK,
     summary="Run AI Analysis on Candidate Interview Responses",
-    description="Invokes the local LLM assessment engine on all candidate answers and updates provisional ratings and observations.",
+    description="Invokes the local LLM assessment engine on candidate answers and updates provisional ratings and observations.",
 )
 async def run_ai_analysis_endpoint(
     session_id: UUID,
+    reanalyze_failed: bool = False,
     auth_ctx: AuthenticatedContext = Depends(require_recruiter),
     db: Session = Depends(get_db),
 ) -> CandidateInterviewEvaluationDetailResponse:
@@ -126,6 +127,7 @@ async def run_ai_analysis_endpoint(
         session_id=session_id,
         actor=auth_ctx.user,
         db=db,
+        only_failed=reanalyze_failed,
     )
 
 
