@@ -304,6 +304,11 @@ def test_audit_event_enum_constraints():
         "CANDIDATE_INVITATION_REVOKED",
         "CANDIDATE_ACTIVATED",
         "CANDIDATE_BINDING_UPDATED",
+        "CANDIDATE_APPLICATION_SUBMITTED",
+        "CANDIDATE_APPLICATION_WITHDRAWN",
+        "CANDIDATE_REVIEW_STATE_UPDATED",
+        "CANDIDATE_INTERVIEW_RELEASED",
+        "CANDIDATE_REGISTERED",
     }
     assert set([e.value for e in AuditResult]) == {"SUCCESS", "FAILURE", "DENIED"}
     assert set([e.value for e in AuditReasonCode]) == {
@@ -333,6 +338,14 @@ def test_audit_event_enum_constraints():
         "INVITATION_CREATED",
         "INVITATION_REVOKED_BY_RECRUITER",
         "CANDIDATE_ACCOUNT_ACTIVATED",
+        "CANDIDATE_ACCOUNT_REGISTERED",
+        "APPLICATION_SUBMITTED",
+        "APPLICATION_WITHDRAWN",
+        "DUPLICATE_APPLICATION",
+        "APPLICATION_NOT_ELIGIBLE",
+        "RESOURCE_NOT_FOUND",
+        "REVIEW_STATE_CHANGED",
+        "INTERVIEW_RELEASED",
     }
 
 

@@ -64,12 +64,13 @@ describe("Phase 3E.1: UI Foundation, Navigation & Shared Primitives", () => {
 
       const navElement = screen.getByRole("navigation", { name: /main navigation|role navigation/i });
       const navButtons = navElement.querySelectorAll("button");
-      expect(navButtons.length).toBe(4);
+      expect(navButtons.length).toBe(5);
 
       expect(navButtons[0]).toHaveTextContent("Jobs");
       expect(navButtons[1]).toHaveTextContent("Candidates");
       expect(navButtons[2]).toHaveTextContent("Interviews");
       expect(navButtons[3]).toHaveTextContent("Evaluations");
+      expect(navButtons[4]).toHaveTextContent("Analytics");
     });
 
     it("marks the active navigation tab with aria-current='page'", () => {

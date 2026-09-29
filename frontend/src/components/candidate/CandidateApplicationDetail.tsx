@@ -10,12 +10,14 @@ interface CandidateApplicationDetailViewProps {
   applicationId: string;
   onBack: () => void;
   onNavigateJobs: () => void;
+  onNavigateInterviews?: () => void;
 }
 
 export function CandidateApplicationDetailView({
   applicationId,
   onBack,
   onNavigateJobs,
+  onNavigateInterviews,
 }: CandidateApplicationDetailViewProps) {
   const [application, setApplication] = useState<CandidateApplication | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -272,6 +274,42 @@ export function CandidateApplicationDetailView({
               <p style={{ fontSize: "14px", color: "var(--text-secondary, #334155)", margin: 0, lineHeight: 1.6 }}>
                 {application.job.summary}
               </p>
+            </div>
+          )}
+
+          {/* Interview Access Link when Submitted */}
+          {isSubmitted && onNavigateInterviews && (
+            <div
+              style={{
+                padding: "16px 20px",
+                borderRadius: "var(--radius-md, 8px)",
+                backgroundColor: "var(--bg-surface-subtle, #f8fafc)",
+                border: "1px solid var(--border-subtle, #e2e8f0)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "12px",
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary, #0f172a)", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Icon name="message-square" size={16} style={{ color: "var(--accent-primary)" }} />
+                  <span>Assigned AI Interviews</span>
+                </div>
+                <p style={{ margin: "2px 0 0 0", fontSize: "13px", color: "var(--text-secondary, #64748b)" }}>
+                  Check if a recruiter has released an official interview for this application.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={onNavigateInterviews}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <span>Go to Interviews</span>
+                <Icon name="chevron-right" size={14} />
+              </button>
             </div>
           )}
 

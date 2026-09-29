@@ -23,6 +23,7 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
   onOpenAiInterviews,
   onOpenMatchingComparison,
 }) => {
+  const [selectedMode, setSelectedMode] = useState<"TEXT" | "AUDIO">("TEXT");
   const [detail, setDetail] = useState<RecruiterApplicationDetail | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +32,11 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
   const [showReleaseConfirm, setShowReleaseConfirm] = useState<boolean>(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
-  const loadDetail = async () => {
+  const loadDetail = async (mode = selectedMode) => {
     try {
       setIsLoading(true);
       setError(null);
-      const res = await fetchJobApplicantDetail(jobId, applicationId);
+      const res = await fetchJobApplicantDetail(jobId, applicationId, mode);
       setDetail(res);
     } catch (err: any) {
       setError(err?.message || "Failed to load application details.");
@@ -45,8 +46,8 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
   };
 
   useEffect(() => {
-    loadDetail();
-  }, [jobId, applicationId]);
+    loadDetail(selectedMode);
+  }, [jobId, applicationId, selectedMode]);
 
   const handleReviewStateTransition = async (targetState: RecruiterReviewState) => {
     if (!detail) return;
@@ -81,10 +82,10 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
         applicationId,
         detail.interviewEligibility.questionSetId || undefined
       );
-      setActionSuccess(res.message || "Interview released successfully.");
-      await loadDetail();
+      setActionSuccess(res.message || `${selectedMode} interview released successfully.`);
+      await loadDetail(selectedMode);
     } catch (err: any) {
-      setError(err?.message || "Failed to release interview.");
+      setError(err?.message || `Failed to release ${selectedMode} interview.`);
     } finally {
       setIsReleasing(false);
     }
@@ -376,10 +377,30 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
       {/* AI Interview Access & Release Section */}
       <div className="applicant-detail-card">
         <div className="applicant-detail-card-header">
-          <h2 className="applicant-detail-card-title">
-            <Icon name="sparkles" size={18} style={{ color: "var(--accent-primary)" }} />
-            <span>Interview Access</span>
-          </h2>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            <h2 className="applicant-detail-card-title" style={{ margin: 0 }}>
+              <Icon name="sparkles" size={18} style={{ color: "var(--accent-primary)" }} />
+              <span>Interview Access</span>
+            </h2>
+            <div className="nav-tab-group" style={{ display: "inline-flex", gap: "4px", backgroundColor: "#f1f5f9", padding: "3px", borderRadius: "6px" }}>
+              <button
+                type="button"
+                className={`btn btn-xs ${selectedMode === "TEXT" ? "btn-primary" : "btn-quiet"}`}
+                onClick={() => setSelectedMode("TEXT")}
+                style={{ padding: "3px 10px", fontSize: "12px" }}
+              >
+                Text Interview
+              </button>
+              <button
+                type="button"
+                className={`btn btn-xs ${selectedMode === "AUDIO" ? "btn-primary" : "btn-quiet"}`}
+                onClick={() => setSelectedMode("AUDIO")}
+                style={{ padding: "3px 10px", fontSize: "12px" }}
+              >
+                Audio Interview
+              </button>
+            </div>
+          </div>
           {onOpenAiInterviews && (
             <button
               type="button"
@@ -410,8 +431,8 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
               <strong style={{ fontSize: "14px", color: "#0f172a" }}>Rev #{detail.jobRevision}</strong>
             </div>
             <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-              <span style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", display: "block" }}>Review Stage</span>
-              <strong style={{ fontSize: "14px", color: "#0f172a" }}>{detail.recruiterReviewState}</strong>
+              <span style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", display: "block" }}>Selected Mode</span>
+              <strong style={{ fontSize: "14px", color: "#0f172a" }}>{selectedMode}</strong>
             </div>
             <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
               <span style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", display: "block" }}>Approved Questions</span>

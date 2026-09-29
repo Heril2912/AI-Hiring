@@ -80,6 +80,12 @@ def test_models_exported_and_tables_registered():
         "candidate_practice_answer_reviews",
         "candidate_practice_answer_segments",
         "candidate_practice_reports",
+        "candidate_applications",
+        "candidate_interview_sessions",
+        "candidate_interview_answers",
+        "candidate_interview_evaluations",
+        "candidate_question_evaluations",
+        "dashboard_tickets",
     }
 
 
