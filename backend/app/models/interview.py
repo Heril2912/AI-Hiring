@@ -16,10 +16,11 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -83,16 +84,16 @@ class JobInterviewTemplateRecord(Base):
     )
 
     template_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     job_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "job_requisitions.job_id",
             ondelete="RESTRICT",
@@ -101,7 +102,7 @@ class JobInterviewTemplateRecord(Base):
         nullable=False,
     )
     job_version_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "job_versions.job_version_id",
             ondelete="RESTRICT",
@@ -120,7 +121,7 @@ class JobInterviewTemplateRecord(Base):
         server_default=text("1"),
     )
     parent_template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "job_interview_templates.template_id",
             ondelete="SET NULL",
@@ -168,7 +169,7 @@ class JobInterviewTemplateRecord(Base):
         nullable=True,
     )
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "users.user_id",
             ondelete="RESTRICT",
@@ -257,12 +258,12 @@ class InterviewQuestionRecord(Base):
     )
 
     question_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     template_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "job_interview_templates.template_id",
             ondelete="CASCADE",
@@ -470,12 +471,12 @@ class InterviewRubricRecord(Base):
     )
 
     rubric_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     question_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "interview_questions.question_id",
             ondelete="CASCADE",
@@ -609,16 +610,16 @@ class CandidateInterviewPlanRecord(Base):
     )
 
     plan_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     template_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "job_interview_templates.template_id",
             ondelete="RESTRICT",
@@ -631,11 +632,11 @@ class CandidateInterviewPlanRecord(Base):
         nullable=False,
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     profile_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "candidate_profiles.profile_id",
             ondelete="RESTRICT",
@@ -648,7 +649,7 @@ class CandidateInterviewPlanRecord(Base):
         nullable=False,
     )
     match_result_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "match_results.result_id",
             ondelete="RESTRICT",
@@ -667,7 +668,7 @@ class CandidateInterviewPlanRecord(Base):
         server_default=text("1"),
     )
     parent_plan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "candidate_interview_plans.plan_id",
             ondelete="SET NULL",
@@ -705,7 +706,7 @@ class CandidateInterviewPlanRecord(Base):
         nullable=True,
     )
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "users.user_id",
             ondelete="RESTRICT",
@@ -772,12 +773,12 @@ class SupplementalQuestionProvenanceRecord(Base):
     )
 
     provenance_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     question_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "interview_questions.question_id",
             ondelete="CASCADE",
@@ -787,7 +788,7 @@ class SupplementalQuestionProvenanceRecord(Base):
         unique=True,
     )
     plan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "candidate_interview_plans.plan_id",
             ondelete="CASCADE",
@@ -796,7 +797,7 @@ class SupplementalQuestionProvenanceRecord(Base):
         nullable=True,
     )
     source_requirement_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "job_requirements.requirement_id",
             ondelete="RESTRICT",
@@ -805,7 +806,7 @@ class SupplementalQuestionProvenanceRecord(Base):
         nullable=False,
     )
     source_match_result_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "match_results.result_id",
             ondelete="RESTRICT",
@@ -814,7 +815,7 @@ class SupplementalQuestionProvenanceRecord(Base):
         nullable=True,
     )
     source_gap_report_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey(
             "gap_reports.report_id",
             ondelete="RESTRICT",
@@ -869,12 +870,12 @@ class ProviderProfileRecord(Base):
     )
 
     profile_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=True,
     )
     display_name: Mapped[str] = mapped_column(
@@ -1016,7 +1017,7 @@ class ProviderProfileRecord(Base):
         server_default=text("1"),
     )
     activated_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=True,
     )
     activated_at: Mapped[Optional[datetime]] = mapped_column(
@@ -1024,7 +1025,7 @@ class ProviderProfileRecord(Base):
         nullable=True,
     )
     deactivated_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=True,
     )
     deactivated_at: Mapped[Optional[datetime]] = mapped_column(
@@ -1062,40 +1063,40 @@ class SimulationAttemptRecord(Base):
     )
 
     attempt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     recruiter_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("users.user_id"),
         nullable=False,
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     plan_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("candidate_interview_plans.plan_id"),
         nullable=False,
     )
     template_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("job_interview_templates.template_id"),
         nullable=False,
     )
     job_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("job_requisitions.job_id"),
         nullable=False,
     )
     job_version_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("job_versions.job_version_id"),
         nullable=False,
     )
@@ -1108,7 +1109,7 @@ class SimulationAttemptRecord(Base):
         nullable=False,
     )
     match_result_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=True,
     )
     plan_version: Mapped[int] = mapped_column(
@@ -1212,17 +1213,17 @@ class SimulationAnswerRecord(Base):
     )
 
     answer_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     attempt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
         nullable=False,
     )
     question_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     question_version: Mapped[int] = mapped_column(
@@ -1310,21 +1311,21 @@ class SimulationAnswerSegmentRecord(Base):
     )
 
     segment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
     )
     answer_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_answers.answer_id", ondelete="CASCADE"),
         nullable=False,
     )
     attempt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
         nullable=False,
     )
     question_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     sequence_order: Mapped[int] = mapped_column(
@@ -1378,26 +1379,26 @@ class SimulationQuestionAssessmentRecord(Base):
     )
 
     assessment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     attempt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
         nullable=False,
     )
     answer_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_answers.answer_id", ondelete="CASCADE"),
         nullable=False,
     )
     question_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     rubric_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=True,
     )
     rubric_version: Mapped[Optional[int]] = mapped_column(
@@ -1493,26 +1494,26 @@ class AssessmentReviewRecord(Base):
     )
 
     review_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     assessment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_question_assessments.assessment_id", ondelete="CASCADE"),
         nullable=False,
     )
     attempt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
         nullable=False,
     )
     question_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     reviewer_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     review_version: Mapped[int] = mapped_column(
@@ -1579,21 +1580,21 @@ class InterviewAssessmentRecord(Base):
     )
 
     interview_assessment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     attempt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
         nullable=False,
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     finalized_by_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     lifecycle_status: Mapped[str] = mapped_column(
@@ -1663,21 +1664,21 @@ class SimulationReviewAuditEventRecord(Base):
     )
 
     audit_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
     attempt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("simulation_attempts.attempt_id", ondelete="CASCADE"),
         nullable=False,
     )
     question_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=True,
     )
     actor_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     event_type: Mapped[str] = mapped_column(
@@ -1729,7 +1730,7 @@ class AiInterviewQuestionSetRecord(Base):
     )
 
     ai_set_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid.uuid4,
     )
@@ -1745,21 +1746,21 @@ class AiInterviewQuestionSetRecord(Base):
         server_default=text("'TEXT'"),
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=False,
     )
     template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("job_interview_templates.template_id", ondelete="CASCADE"),
         nullable=True,
     )
     job_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("job_requisitions.job_id", ondelete="CASCADE"),
         nullable=False,
     )
     job_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("job_versions.job_version_id", ondelete="CASCADE"),
         nullable=True,
     )
@@ -1818,7 +1819,7 @@ class AiInterviewQuestionSetRecord(Base):
         server_default=text("'[]'"),
     )
     provider_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=True,
     )
     provider_class: Mapped[Optional[str]] = mapped_column(
@@ -1848,16 +1849,16 @@ class AiInterviewQuestionSetRecord(Base):
         server_default=text("'practice-question.v1'"),
     )
     predecessor_set_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         nullable=True,
     )
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("users.user_id", ondelete="RESTRICT"),
         nullable=False,
     )
     approved_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
+        Uuid,
         ForeignKey("users.user_id", ondelete="SET NULL"),
         nullable=True,
     )

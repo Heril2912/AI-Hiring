@@ -42,9 +42,6 @@ export function CandidatePracticeReport({ sessionId, onExit, onPracticeAgain }: 
     if (report && reportHeaderRef.current) {
       reportHeaderRef.current.focus();
     }
-    if (report && report.question_trend && report.question_trend.length > 0 && !selectedQuestionId) {
-      setSelectedQuestionId(report.question_trend[0].question_id);
-    }
   }, [report]);
 
   const handleRetry = async () => {

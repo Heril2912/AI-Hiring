@@ -153,6 +153,9 @@ export function CandidateShell({ onLogout, initialTab }: CandidateShellProps) {
                 navigateToTab("jobs");
                 handleBackToJobs();
               }}
+              onNavigateInterviews={() => {
+                navigateToTab("interviews");
+              }}
             />
           ) : (
             <CandidateMyApplications
