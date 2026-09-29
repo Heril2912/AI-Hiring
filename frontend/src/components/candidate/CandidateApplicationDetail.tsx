@@ -165,22 +165,22 @@ export function CandidateApplicationDetailView({
                       : application.status === "WITHDRAWN"
                       ? "var(--bg-surface-subtle, #f1f5f9)"
                       : application.status === "PROCESSING_FAILED"
-                      ? "var(--status-danger-bg, #fef2f2)"
-                      : "var(--accent-subtle, #eef1fc)",
+                      ? "var(--status-danger-bg, #eadfe7)"
+                      : "var(--accent-subtle, #dce8e3)",
                   color:
                     application.status === "SUBMITTED"
-                      ? "var(--status-success, #059669)"
+                      ? "var(--status-success, #2f6b4f)"
                       : application.status === "WITHDRAWN"
-                      ? "var(--text-muted, #64748b)"
+                      ? "var(--text-muted, #6d7772)"
                       : application.status === "PROCESSING_FAILED"
-                      ? "var(--status-danger, #dc2626)"
-                      : "var(--accent-primary, #4f5bd5)",
+                      ? "var(--status-danger, #63445b)"
+                      : "var(--accent-primary)",
                   border: `1px solid ${
                     application.status === "SUBMITTED"
-                      ? "var(--status-success-border, #a7f3d0)"
+                      ? "var(--status-success-border, #aad1b7)"
                       : application.status === "PROCESSING_FAILED"
-                      ? "var(--status-danger-border, #fecaca)"
-                      : "var(--border-subtle, #e2e8f0)"
+                      ? "var(--status-danger-border, #c9b5c3)"
+                      : "var(--border-subtle, #e0ddd2)"
                   }`,
                   fontWeight: 600,
                   display: "inline-flex",

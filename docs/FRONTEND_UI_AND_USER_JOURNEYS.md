@@ -1,8 +1,8 @@
 # AI-Hiring Platform: Frontend UI Components, Design System & User Journeys
 
-**Document Version:** 2.1.0 (Comprehensive Reference)  
+**Document Version:** 2.2.0 (Comprehensive Reference)  
 **Framework:** React 19 | TypeScript 5.5+ | Vite 6.0+ | Modern Vanilla CSS Glassmorphic Design System  
-**Scope:** Complete Frontend Directory Inventory, 12 Strongly-Typed API Clients, 2 Auth Context Providers, 62 UI Components across 9 Specialized Subsystems, 38 Vitest Test Suites, Complete End-to-End User Journeys, and Comprehensive Inter-File Architecture
+**Scope:** Complete Frontend Directory Inventory, 12 Strongly-Typed API Clients, 2 Auth Context Providers, 64 UI Components & Styling across 9 Specialized Subsystems, 42 Vitest Test Suites, Complete End-to-End User Journeys (including Dual-Mode Audio Interviews), and Comprehensive Inter-File Architecture
 
 ---
 
@@ -22,22 +22,22 @@ frontend/
     ├── index.css                            # Master Vanilla CSS Design System (Glassmorphic dark-mode)
     ├── setupTests.ts                        # Vitest test setup, DOM extensions, cleanup hooks
     ├── api/                                 # 12 Strongly-Typed API Client Modules
-    ├── components/                          # 62 Reusable UI and Domain View Components
+    ├── components/                          # 64 Reusable UI and Domain View Components
     │   ├── admin/                           # 2 Administrator Workspace Components
-    │   ├── ai_interviews/                   # 7 AI Interview Studio Components & CSS
+    │   ├── ai_interviews/                   # 7 AI Interview Studio Components & CSS (Text vs. Audio mode)
     │   ├── ats/                             # 2 ATS Modal Dialogs
     │   ├── auth/                            # 2 Authentication Views
-    │   ├── candidate/                       # 16 Candidate Portal Views & Components
+    │   ├── candidate/                       # 16 Candidate Portal Views & Components (Audio Recording & Playback)
     │   ├── common/                          # 8 Reusable UI Primitives
     │   ├── evaluation/                      # 2 Evaluation Workspace Components & CSS
     │   ├── interviews/                      # 5 Requisition Interview Builder & Simulation Views
     │   ├── jobs/                            # 10 Job Requisition & Applicant Workflow Components
     │   ├── reviewer/                        # 1 Reviewer Benchmark Workspace Component
-    │   └── [root components]                # 7 Top-Level Layout & Profile Review Drawers
+    │   └── [root components]                # 9 Top-Level Layout & Profile Review Drawers
     ├── context/                             # 2 Auth & Session State Context Providers
     ├── types/                               # 3 TypeScript Domain Type Modules
     ├── utils/                               # 2 Client Routing and Portal DOM Utilities
-    └── __tests__/                           # 38 Vitest & React Testing Library Test Suites
+    └── __tests__/                           # 42 Vitest & React Testing Library Test Suites
 ```
 
 ---
@@ -259,11 +259,47 @@ sequenceDiagram
     API-->>UI: Render Multi-Dimensional Radar Scorecard (CandidatePracticeReport.tsx)
 ```
 
+### 6.3 Journey 3: Candidate Dual-Mode Audio Interview & Mode-Aware Evaluation
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Candidate
+    participant UI as Candidate Audio Workspace
+    participant API as FastAPI Backend
+    participant TTS as Local TTS (say/Piper)
+    participant STT as Local STT (whisper.cpp)
+    participant Eval as LLM Evaluator
+
+    C->>UI: Launch Official Audio Interview (CandidateInterviewWorkspace.tsx)
+    UI->>API: GET /api/v1/candidate/interviews/sessions/{id}
+    API-->>UI: Return Question List (MCQs Prohibited, Hidden Rubrics Stripped)
+    loop For Each Question
+        C->>UI: Click "Play Question Speech"
+        UI->>API: GET /api/v1/candidate/interviews/sessions/{id}/questions/{slotId}/audio
+        API->>TTS: Generate/Fetch 16kHz WAV
+        TTS-->>API: Return WAV bytes
+        API-->>UI: Play audio stream via HTML5 Audio
+        C->>UI: Click "Record Answer" (MediaRecorder)
+        C->>UI: Speak into microphone & Click "Stop Recording"
+        UI->>API: POST /questions/{slotId}/transcribe (multipart audio)
+        API->>STT: EphemeralAudioProcessor converts & transcribes audio
+        STT-->>API: Return text transcript
+        API->>API: Unconditionally purge temp WAV/raw audio (Zero Retention)
+        API-->>UI: Display candidate review transcript pane
+        C->>UI: Inspect transcript & Click "Use This Transcript"
+        UI->>API: POST /questions/{slotId}/answer (verified transcript text)
+    end
+    C->>UI: Submit Completed Interview
+    UI->>API: POST /api/v1/candidate/interviews/sessions/{id}/complete
+    API->>Eval: Evaluate Answer Content (strictly no voice/acoustic bias)
+    Eval-->>API: Persist dimension scores & observations
+```
+
 ---
 
-## 7. Vitest Component Testing Directory (`src/__tests__/` - 38 Test Files)
+## 7. Vitest Component Testing Directory (`src/__tests__/` - 42 Test Files)
 
-The frontend test suite contains 38 test files verifying all UI components, user interactions, and integration workflows:
+The frontend test suite contains 42 test files verifying all UI components, user interactions, and integration workflows:
 
 ```
 frontend/src/__tests__/
@@ -298,6 +334,10 @@ frontend/src/__tests__/
 ├── phase4c2_candidate_interview_workspace.test.tsx # Tests candidate formal interview workspace
 ├── phase4c3_corrective_ui.test.tsx          # Tests corrective feedback and review drawer operations
 ├── phase4c4_evaluation_workspace.test.tsx   # Tests recruiter evaluation workspace and scoring
+├── phase4d1_dual_mode_ui.test.tsx           # Tests AI Question Studio Text vs. Audio mode toggles and MCQ locks
+├── phase4d2_dual_mode_release_ui.test.tsx   # Tests Release modal mode-specific channels and snapshot isolation
+├── phase4d3_audio_execution_ui.test.tsx     # Tests candidate audio playback controls, mic recording & STT review
+├── phase4d4_mode_aware_evaluation_ui.test.tsx # Tests Evaluation workspace mode badges, rubrics & scorecard rendering
 ├── provider_admin_and_interview_shell.test.tsx # Tests AI Model Provider configuration and test connections
 ├── recruiter_wording_assistance.test.tsx    # Tests AI wording assistant modal and rewrite suggestions
 ├── requirement_gap_report_view.test.tsx     # Tests RequirementGapReportView categorical skill tables
@@ -321,6 +361,7 @@ graph TD
         C_Cand["CandidatesDirectory.tsx & CandidateProfileReview.tsx"]
         C_AIStudio["ai_interviews/AiQuestionSetWorkspace.tsx"]
         C_Practice["candidate/CandidatePracticeRoom.tsx"]
+        C_AudioWorkspace["candidate/CandidateInterviewWorkspace.tsx"]
         C_Eval["evaluation/EvaluationWorkspace.tsx"]
         C_Apps["candidate/CandidateMyApplications.tsx & jobs/JobApplicantsView.tsx"]
     end
@@ -347,6 +388,7 @@ graph TD
         BE_Matches["/api/v1/matches"]
         BE_AI["/api/v1/ai-interviews"]
         BE_Practice["/api/v1/candidate/practice"]
+        BE_Audio["/api/v1/candidate/interviews"]
         BE_Eval["/api/v1/candidate/evaluation"]
     end
 
@@ -355,13 +397,14 @@ graph TD
     C_Cand --> A_Client
     C_AIStudio --> A_CandInterviews
     C_Practice --> A_Practice
+    C_AudioWorkspace --> A_CandInterviews
     C_Eval --> A_Eval
     C_Apps --> A_CandApps
 
     A_Jobs & A_CandApps & A_CandInterviews & A_Practice & A_Eval & A_Tax & A_Ats --> A_Client
     A_Jobs --> BE_Jobs
     A_Client --> BE_Resumes & BE_Matches
-    A_CandInterviews --> BE_AI
+    A_CandInterviews --> BE_AI & BE_Audio
     A_Practice --> BE_Practice
     A_Eval --> BE_Eval
 ```
@@ -369,6 +412,7 @@ graph TD
 ### Detailed Component-to-API Interaction Summary:
 1. **Requisition Authoring & Taxonomy Search**: `components/jobs/JobEditor.tsx` calls `api/jobs.ts` and `api/taxonomy.ts` to fetch concept IDs and persist grounded requirements.
 2. **Resumé Upload & Evidence Inspection**: `components/ResumeUpload.tsx` dispatches uploads via `api/client.ts` to `/api/v1/resumes`, while `components/EvidenceDrawer.tsx` queries bounding-box character offsets from candidate profiles.
-3. **AI Interview Studio Authoring**: `components/ai_interviews/AiQuestionSetWorkspace.tsx` interacts with `api/candidateInterviews.ts` to trigger LLM question generation, inspect 20-point validation badges, and approve question sets.
+3. **AI Interview Studio Authoring**: `components/ai_interviews/AiQuestionSetWorkspace.tsx` interacts with `api/candidateInterviews.ts` to trigger LLM question generation, toggle Text vs. Audio modes, inspect 20-point validation badges, and approve question sets.
 4. **Candidate Practice Sandbox & Adaptive Probes**: `components/candidate/CandidatePracticeRoom.tsx` communicates with `api/candidatePracticeSession.ts` to step through turns, submit responses, receive immediate per-answer feedback, and transition to `components/candidate/CandidatePracticeReport.tsx` upon session completion.
-5. **Interview Evaluation & Radar Scorecards**: `components/evaluation/EvaluationWorkspace.tsx` queries `api/candidateEvaluations.ts` to render `components/common/InterviewDimensionRadar.tsx`, review answer transcripts, and assign final competency ratings.
+5. **Dual-Mode Candidate Audio Execution**: `components/candidate/CandidateInterviewWorkspace.tsx` coordinates playback of question audio and captures browser microphone input via `MediaRecorder`. It sends audio to the transcribe endpoint and displays candidate-verified transcripts for explicit confirmation before submitting.
+6. **Interview Evaluation & Radar Scorecards**: `components/evaluation/EvaluationWorkspace.tsx` queries `api/candidateEvaluations.ts` to render `components/common/InterviewDimensionRadar.tsx`, review answer transcripts (strictly grounded in transcript text), and assign final competency ratings.

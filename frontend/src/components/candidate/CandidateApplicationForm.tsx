@@ -255,7 +255,7 @@ export function CandidateApplicationForm({
               fontWeight: 600,
               textTransform: "uppercase",
               letterSpacing: "0.05em",
-              color: "var(--accent-primary, #4f5bd5)",
+              color: "var(--accent-primary)",
               display: "block",
               marginBottom: "4px",
             }}
@@ -300,9 +300,9 @@ export function CandidateApplicationForm({
               gap: "8px",
               padding: "12px 16px",
               borderRadius: "8px",
-              backgroundColor: "var(--status-danger-bg, #fef2f2)",
-              color: "var(--status-danger, #b91c1c)",
-              border: "1px solid var(--status-danger-border, #fecaca)",
+              backgroundColor: "var(--status-danger-bg, #eadfe7)",
+              color: "var(--status-danger, #63445b)",
+              border: "1px solid var(--status-danger-border, #c9b5c3)",
             }}
           >
             <Icon name="alert-circle" size={18} />
@@ -355,7 +355,7 @@ export function CandidateApplicationForm({
                   accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   style={{ display: "none" }}
                 />
-                <div style={{ color: "var(--accent-primary, #4f5bd5)", marginBottom: "8px" }}>
+                <div style={{ color: "var(--accent-primary)", marginBottom: "8px" }}>
                   <Icon name="upload" size={32} />
                 </div>
                 <p style={{ fontSize: "14px", fontWeight: 500, color: "var(--text-primary, #1e293b)", margin: "0 0 4px 0" }}>
@@ -479,16 +479,16 @@ export function CandidateApplicationForm({
             {currentStatus === "PROCESSING_FAILED" && (
               <div
                 style={{
-                  backgroundColor: "var(--status-danger-bg, #fef2f2)",
-                  border: "1px solid var(--status-danger-border, #fecaca)",
+                  backgroundColor: "var(--status-danger-bg, #eadfe7)",
+                  border: "1px solid var(--status-danger-border, #c9b5c3)",
                   borderRadius: "8px",
                   padding: "20px",
                   marginBottom: "28px",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                  <Icon name="alert-circle" size={20} color="var(--status-danger, #dc2626)" />
-                  <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--status-danger, #b91c1c)", margin: 0 }}>
+                  <Icon name="alert-circle" size={20} color="var(--status-danger, #63445b)" />
+                  <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--status-danger, #63445b)", margin: 0 }}>
                     Resume Extraction Failed
                   </h3>
                 </div>

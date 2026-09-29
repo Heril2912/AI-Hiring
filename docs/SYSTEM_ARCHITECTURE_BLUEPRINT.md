@@ -68,17 +68,21 @@ AI-Hiring/
 │       ├── R010_graduate_software_intern.docx / .pdf
 │       ├── resume_test_A_table_reordered.docx
 │       └── resume_test_B_two_column.pdf
+├── models/                                      # Local Speech & Inference Models
+│   └── whisper/                                 # Whisper STT weights directory
+│       └── ggml-small.en.bin                    # Quantized Whisper small.en model for local audio transcription
 ├── docs/                                        # Master Platform Documentation Suite
 │   ├── SYSTEM_ARCHITECTURE_BLUEPRINT.md         # [This File] Master architectural blueprint & inter-file relationships
-│   ├── BACKEND_SERVICES_AND_API_REFERENCE.md    # Exhaustive reference for 18 Routers, 12 Models, 51 Schemas, 76 Services, 89 Tests
-│   └── FRONTEND_UI_AND_USER_JOURNEYS.md         # Exhaustive reference for 62 Components, 12 API Clients, 38 Tests, User Journeys
+│   ├── BACKEND_SERVICES_AND_API_REFERENCE.md    # Exhaustive reference for 18 Routers, 13 Models, 52 Schemas, 78 Services, 93 Tests
+│   ├── FRONTEND_UI_AND_USER_JOURNEYS.md         # Exhaustive reference for 64 Components, 12 API Clients, 42 Tests, User Journeys
+│   └── VOICE_INTERVIEW_ARCHITECTURE.md          # Voice-Based AI Interview System: End-to-End Implementation Architecture
 ├── backend/                                     # Backend Application (Python 3.14, FastAPI, SQLAlchemy 2.0, Alembic)
 │   ├── alembic.ini                              # Alembic database migration configuration
 │   ├── pytest.ini                               # Pytest execution configuration, markers, and async settings
 │   ├── requirements.txt                         # Python dependencies (FastAPI, SQLAlchemy, psycopg2, pdfplumber, python-docx, etc.)
 │   ├── app/                                     # Backend Application Package
 │   │   ├── __init__.py                          # Package initialization
-│   │   ├── config.py                            # Pydantic Settings (DB URL, Auth secrets, AI provider configs)
+│   │   ├── config.py                            # Pydantic Settings (DB URL, Auth secrets, AI & Speech provider configs)
 │   │   ├── database.py                          # SQLAlchemy engine, session maker, base model, and DB lifecycle
 │   │   ├── main.py                              # FastAPI app assembly, CORS, validation handlers, 18 router registrations
 │   │   ├── api/                                 # 18 REST API Routers & Endpoint Controllers
@@ -105,7 +109,7 @@ AI-Hiring/
 │   │   │   ├── bootstrap_admin.py               # CLI bootstrap script for default org, admin user, and taxonomy load
 │   │   │   ├── import_onet.py                   # CLI tool to ingest O*NET job titles and occupation hierarchy CSVs
 │   │   │   └── matching_evaluation.py           # CLI benchmark runner evaluating parser precision/recall and matching
-│   │   ├── models/                              # 12 SQLAlchemy 2.0 Declarative Relational Models
+│   │   ├── models/                              # 13 SQLAlchemy 2.0 Declarative Relational Models
 │   │   │   ├── __init__.py                      # Model registry and export definitions
 │   │   │   ├── ats.py                           # ATS connections, object mappings, import runs, export receipts
 │   │   │   ├── auth.py                          # Organizations, Users, User Sessions, Security Audit Events
@@ -119,7 +123,7 @@ AI-Hiring/
 │   │   │   ├── matching.py                      # Match Runs, Candidate Match Results, Match Audit Events
 │   │   │   ├── resume.py                        # Resume Artifacts and Intake Processing Jobs
 │   │   │   └── taxonomy.py                      # Skill Concepts, Skill Aliases, Occupations, Taxonomy Snapshots
-│   │   ├── schemas/                             # 51 Pydantic v2 Request/Response Data Transfer Objects (DTOs)
+│   │   ├── schemas/                             # 52 Pydantic v2 Request/Response Data Transfer Objects (DTOs)
 │   │   │   ├── __init__.py
 │   │   │   ├── ai_question_set.py               # AI Question set authoring, items, 20-point validation, approval DTOs
 │   │   │   ├── answer_assessment_contract.py    # Answer evaluation and scoring rubric schemas
@@ -131,7 +135,7 @@ AI-Hiring/
 │   │   │   ├── candidate_access.py              # Invitation creation, account activation, credential setup
 │   │   │   ├── candidate_application.py         # Application draft creation, resume submission, status DTOs
 │   │   │   ├── candidate_evaluation.py          # Candidate evaluation scoring breakdown and feedback schemas
-│   │   │   ├── candidate_interview.py           # Candidate interview turn-taking and response DTOs
+│   │   │   ├── candidate_interview.py           # Candidate interview turn-taking, speech synthesis, and transcription DTOs
 │   │   │   ├── candidate_job.py                 # Public job listing and requirement summaries for candidates
 │   │   │   ├── correction.py                    # Manual profile correction request and audit schemas
 │   │   │   ├── education_project_certification.py # Education, project, and certification extraction DTOs
@@ -172,7 +176,7 @@ AI-Hiring/
 │   │   │   ├── skill_and_summary.py             # Skill extraction and summary schemas
 │   │   │   ├── taxonomy.py                      # Skill concept autocomplete and search result DTOs
 │   │   │   └── wording_contract.py              # AI question wording assistance schemas
-│   │   └── services/                            # 76 Domain Services & Algorithmic Engines (69 Root + 7 ATS)
+│   │   └── services/                            # 78 Domain Services & Algorithmic Engines (71 Root + 7 ATS)
 │   │       ├── __init__.py
 │   │       ├── ai_provenance_service.py         # 20-point server-side validation matrix & release eligibility
 │   │       ├── ai_question_set_service.py       # Manages lifecycle (draft/approved) of AI question sets
@@ -245,6 +249,7 @@ AI-Hiring/
 │   │       ├── security.py                      # Cryptographic helpers, PBKDF2 hashing, HMAC signature checks
 │   │       ├── skill_catalog.py                 # Hierarchical catalog of technical and soft skills
 │   │       ├── skill_summary_extraction.py      # Summarizes candidate skill profiles and calculates years of exp
+│   │       ├── speech_service.py                # Speech runtime capability, local TTS (macOS say/Piper), Whisper STT adapter & EphemeralAudioProcessor
 │   │       ├── taxonomy_normalization.py        # Normalizes raw skill text against standardized taxonomy graph
 │   │       ├── text_normalization.py            # Text cleaning, unicode normalization, whitespace stripping
 │   │       ├── wording_assistance_service.py    # Generates recruiter question wording variants via LLM
@@ -256,14 +261,14 @@ AI-Hiring/
 │   ├── migrations/                              # Alembic Database Migration System
 │   │   ├── env.py                               # Alembic environment runner loading SQLAlchemy MetaData
 │   │   ├── script.py.mako                       # Template for auto-generated migration scripts
-│   │   └── versions/                            # 44 Sequential Migration Scripts (Complete Database Evolution)
+│   │   └── versions/                            # 46 Sequential Migration Scripts (Complete Database Evolution)
 │   ├── runtime/                                 # Ephemeral storage for file uploads and quarantine
 │   │   ├── quarantine/                          # Quarantined malformed or suspicious file uploads (pdf, docx)
 │   │   └── resume_intake/                       # Temporary staging directory for active resume parsing
-│   ├── tests/                                   # Pytest Test Suite (89 Test Files, 900+ Tests)
+│   ├── tests/                                   # Pytest Test Suite (93 Test Files, 950+ Tests)
 │   │   ├── evaluation_support/                  # 6 Helper modules for parser benchmarking
 │   │   ├── fixtures/                            # Test resumes (PDF/DOCX) and ground truth JSON files
-│   │   └── test_*.py                            # 89 Test suites covering all domains, routers, models, and services
+│   │   └── test_*.py                            # 93 Test suites covering all domains, routers, models, services, and dual-mode audio
 │   └── tools/                                   # Administrative & Evaluation Scripts
 │       ├── bootstrap_admin.py                   # Script to create initial organization and admin user
 │       └── run_evaluation.py                    # Parser precision/recall benchmark runner
@@ -282,7 +287,7 @@ AI-Hiring/
 │       │   ├── candidateApplications.ts         # Candidate application creation, resume upload, submission
 │       │   ├── candidateAuth.ts                 # Candidate activation, login, session API client
 │       │   ├── candidateEvaluations.ts          # Candidate interview evaluation, feedback & scoring client
-│       │   ├── candidateInterviews.ts           # Formal candidate interview session and answer client
+│       │   ├── candidateInterviews.ts           # Formal candidate interview session, speech synthesis, and transcription client
 │       │   ├── candidateJobs.ts                 # Candidate job catalog and published job detail API client
 │       │   ├── candidatePractice.ts             # Recruiter practice release and candidate catalog API client
 │       │   ├── candidatePracticeSession.ts      # Candidate practice sandbox turn-taking & report API client
@@ -290,7 +295,7 @@ AI-Hiring/
 │       │   ├── jobs.ts                          # Recruiter job requisition, versioning, requirement API client
 │       │   ├── recruiterApplications.ts         # Recruiter applicant review and stage transition API client
 │       │   └── taxonomy.ts                      # Skill autocomplete and taxonomy resolution API client
-│       ├── components/                          # 62 UI Components Across 9 Specialized Subsystems
+│       ├── components/                          # 64 UI Components & Styling Across 9 Specialized Subsystems
 │       │   ├── AuthenticatedShell.tsx           # Recruiter/Admin top navigation bar and session header
 │       │   ├── CandidateProfileReview.tsx       # Detailed candidate profile inspector with evidence viewer
 │       │   ├── CandidatesDirectory.tsx          # Candidate roster table with search, filter, and upload
@@ -305,10 +310,10 @@ AI-Hiring/
 │       │   │   └── AtsConnectionsAdmin.tsx      # ATS connection management (Greenhouse, Lever, Local)
 │       │   ├── ai_interviews/                   # AI Interview Studio Components
 │       │   │   ├── AiInterviewsDirectory.tsx    # List of job requisitions with AI interview readiness status
-│       │   │   ├── AiQuestionSetWorkspace.tsx   # AI Question Studio (Conversational & MCQ cards, approvals)
+│       │   │   ├── AiQuestionSetWorkspace.tsx   # AI Question Studio (Conversational & MCQ cards, approvals, mode selector)
 │       │   │   ├── CandidateSafePreviewModal.tsx # Zero-leakage preview modal showing candidate view
 │       │   │   ├── McqAuthoringModal.tsx        # Modal for authoring and validating MCQ items
-│       │   │   ├── ReleaseInterviewSetModal.tsx # Modal to release validated AI interview sets
+│       │   │   ├── ReleaseInterviewSetModal.tsx # Modal to release validated AI interview sets (Text vs. Audio)
 │       │   │   ├── SafeRubricModal.tsx          # Recruiter-only modal for inspecting evaluation rubrics
 │       │   │   └── ai-interviews.css            # Studio-specific styles and animations
 │       │   ├── ats/                             # ATS Modal Dialogs
@@ -322,7 +327,7 @@ AI-Hiring/
 │       │   │   ├── CandidateApplicationDetail.tsx # Candidate application detail & withdrawal view
 │       │   │   ├── CandidateApplicationForm.tsx # Resume-first job application modal
 │       │   │   ├── CandidateFeedbackModal.tsx   # Candidate practice feedback modal
-│       │   │   ├── CandidateInterviewWorkspace.tsx # Formal candidate interview execution workspace
+│       │   │   ├── CandidateInterviewWorkspace.tsx # Formal candidate interview execution workspace (Text & Audio playback/recording)
 │       │   │   ├── CandidateInvitationModal.tsx # Recruiter modal to send portal invitations to candidates
 │       │   │   ├── CandidateJobDetail.tsx       # Candidate view of published requisition details
 │       │   │   ├── CandidateLoginPage.tsx       # Candidate portal login page
@@ -375,7 +380,7 @@ AI-Hiring/
 │       ├── utils/                               # Client Utility Functions
 │       │   ├── navigation.ts                    # URL query parameter and tab routing helpers
 │       │   └── portal.ts                        # DOM portal helpers for modal rendering
-│       └── __tests__/                           # 38 Vitest & React Testing Library Test Suites
+│       └── __tests__/                           # 42 Vitest & React Testing Library Test Suites
 │           ├── auth_workflow.test.tsx
 │           ├── candidate_comparison_gap_workflow.test.tsx
 │           ├── candidate_portal_auth.test.tsx
@@ -407,6 +412,10 @@ AI-Hiring/
 │           ├── phase4c2_candidate_interview_workspace.test.tsx
 │           ├── phase4c3_corrective_ui.test.tsx
 │           ├── phase4c4_evaluation_workspace.test.tsx
+│           ├── phase4d1_dual_mode_ui.test.tsx
+│           ├── phase4d2_dual_mode_release_ui.test.tsx
+│           ├── phase4d3_audio_execution_ui.test.tsx
+│           ├── phase4d4_mode_aware_evaluation_ui.test.tsx
 │           ├── provider_admin_and_interview_shell.test.tsx
 │           ├── recruiter_wording_assistance.test.tsx
 │           ├── requirement_gap_report_view.test.tsx
@@ -576,10 +585,13 @@ graph TD
 5. **Candidate Practice Sandbox & Adaptive Turn-Taking Chain**:
    - `components/candidate/CandidatePracticeRoom.tsx` $\rightarrow$ `api/candidatePracticeSession.ts` $\rightarrow$ `api/candidate_practice.py` $\rightarrow$ `services/candidate_authorization_kernel.py` $\rightarrow$ `services/practice_session_service.py` $\rightarrow$ `services/practice_review_service.py` & `services/practice_follow_up_service.py` $\rightarrow$ `models/candidate_access.py` (`CandidatePracticeSessionRecord`, `CandidatePracticeMessageRecord`, `CandidatePracticeAnswerSegmentRecord`) $\rightarrow$ rendered in `components/candidate/CandidateFeedbackModal.tsx`.
 
-6. **Candidate Evaluation & Coaching Analytics Chain**:
-   - `components/evaluation/EvaluationWorkspace.tsx`, `components/candidate/CandidatePracticeReport.tsx`, `components/common/InterviewDimensionRadar.tsx` $\rightarrow$ `api/candidateEvaluations.ts` $\rightarrow$ `api/candidate_evaluation.py` $\rightarrow$ `services/candidate_evaluation_service.py`, `services/answer_assessment_service.py`, `services/practice_report_service.py` $\rightarrow$ `models/candidate_access.py` (`CandidatePracticeReportRecord`, `CandidateInterviewEvaluationRecord`, `CandidateQuestionEvaluationRecord`).
+6. **Formal Dual-Mode Interview & Audio Execution Chain (TTS & Ephemeral STT)**:
+   - `components/candidate/CandidateInterviewWorkspace.tsx` $\rightarrow$ `api/candidateInterviews.ts` $\rightarrow$ `api/candidate_interviews.py` (or `ai_interviews.py`) $\rightarrow$ `services/candidate_interview_service.py` $\rightarrow$ `services/speech_service.py` (`TextToSpeechAdapter` for question audio generation via macOS `say`/Piper, `EphemeralAudioProcessor` + `SpeechToTextAdapter` for candidate answer audio conversion via `ffmpeg` + `whisper.cpp` with zero storage retention) $\rightarrow$ candidate verifies and accepts transcript $\rightarrow$ saved into `models/candidate_access.py` (`CandidateInterviewSessionRecord`, `CandidateInterviewAnswerRecord`).
 
-7. **ATS Integration & Local Synchronization Chain**:
+7. **Candidate Mode-Aware Evaluation & Coaching Analytics Chain**:
+   - `components/evaluation/EvaluationWorkspace.tsx`, `components/candidate/CandidatePracticeReport.tsx`, `components/common/InterviewDimensionRadar.tsx` $\rightarrow$ `api/candidateEvaluations.ts` $\rightarrow$ `api/candidate_evaluation.py` $\rightarrow$ `services/candidate_evaluation_service.py`, `services/answer_assessment_service.py`, `services/practice_report_service.py` $\rightarrow$ evaluates accepted transcript content (strictly prohibiting acoustic/voice bias scoring) $\rightarrow$ persists to `models/candidate_access.py` (`CandidatePracticeReportRecord`, `CandidateInterviewEvaluationRecord`, `CandidateQuestionEvaluationRecord`).
+
+8. **ATS Integration & Local Synchronization Chain**:
    - `components/admin/AtsConnectionsAdmin.tsx`, `components/ats/AtsImportModal.tsx`, `components/ats/AtsExportModal.tsx` $\rightarrow$ `api/ats.ts` $\rightarrow$ `api/ats.py` $\rightarrow$ `services/ats/adapter_registry.py` $\rightarrow `services/ats/local_folder_adapter.py` / `services/ats/csv_json_adapter.py` $\rightarrow `services/ats/import_service.py` & `services/ats/export_service.py` $\rightarrow `models/ats.py` (`ATSConnectionRecord`, `ATSImportRunRecord`, `ATSExportReceiptRecord`).
 
 ---

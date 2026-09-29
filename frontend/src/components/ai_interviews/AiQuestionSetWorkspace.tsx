@@ -79,7 +79,7 @@ export function AiQuestionSetWorkspace({
         icon: "sparkles",
         bg: "#eef1fc",
         color: "#3730a3",
-        border: "#c7d2fe",
+        border: "var(--accent-border)",
       };
     }
     if (norm === "LOCAL_LLM_GENERATED_RECRUITER_EDITED" || norm === "RECRUITER_EDITED") {
@@ -818,7 +818,7 @@ export function AiQuestionSetWorkspace({
               Legacy Question Set (Not eligible for AI practice release)
             </strong>
             <p style={{ color: "#78350f", fontSize: "14px", margin: "0 0 10px 0" }}>
-              This set contains legacy deterministic or manual content without verified local-AI provenance. To make it eligible for Phase 3G release, regenerate it as an AI set.
+              This set contains legacy deterministic or manual content without verified local-AI provenance. To make it eligible for release, regenerate it as an AI question set.
             </p>
             <button
               type="button"
@@ -901,7 +901,7 @@ export function AiQuestionSetWorkspace({
           style={{
             backgroundColor: "var(--accent-subtle, #eef1fc)",
             borderColor: "var(--accent-border, #d4dbf8)",
-            color: "var(--accent-primary, #4f5bd5)",
+            color: "var(--accent-primary)",
             padding: "12px 16px",
             marginBottom: "20px",
             display: "flex",
@@ -1118,7 +1118,7 @@ export function AiQuestionSetWorkspace({
                             className="aiq-tool-btn"
                             onClick={() => handleDeleteSlot(activeSlot.slot_id)}
                             disabled={isUpdatingSlot}
-                            style={{ color: "var(--danger, #ef4444)" }}
+                            style={{ color: "var(--status-danger, #63445b)" }}
                             title="Remove this question from the set and database"
                           >
                             <Icon name="trash" size={14} />

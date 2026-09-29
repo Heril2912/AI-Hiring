@@ -84,7 +84,7 @@ export function CandidateInterviewWorkspace({
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const activeQuestion: CandidateInterviewQuestionDto | undefined =
-    session?.questions[currentQuestionIndex];
+    session?.questions?.[currentQuestionIndex];
 
   const isAudioSession = (session?.interview_mode || initialMode || "TEXT").toUpperCase() === "AUDIO";
 
@@ -1684,7 +1684,7 @@ export function CandidateInterviewWorkspace({
                     width: "52px",
                     height: "52px",
                     borderRadius: "50%",
-                    backgroundColor: "#e0e7ff",
+                    backgroundColor: "var(--accent-subtle)",
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -1711,7 +1711,7 @@ export function CandidateInterviewWorkspace({
                     padding: "10px 24px",
                     fontSize: "15px",
                     backgroundColor: "#4f46e5",
-                    borderColor: "#4338ca",
+                    borderColor: "var(--accent-primary)",
                     whiteSpace: "nowrap",
                   }}
                 >
@@ -1859,7 +1859,7 @@ export function CandidateInterviewWorkspace({
                     disabled={saveState === "saving"}
                     style={{
                       backgroundColor: "#4f46e5",
-                      borderColor: "#4338ca",
+                      borderColor: "var(--accent-primary)",
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -1960,7 +1960,7 @@ export function CandidateInterviewWorkspace({
                     alignItems: "center",
                     gap: "8px",
                     backgroundColor: "#4f46e5",
-                    borderColor: "#4338ca",
+                    borderColor: "var(--accent-primary)",
                     whiteSpace: "nowrap",
                   }}
                 >

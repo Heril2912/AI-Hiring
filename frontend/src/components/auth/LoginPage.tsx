@@ -57,12 +57,14 @@ export function LoginPage() {
         <div className="auth-brand-panel">
           <div className="auth-brand-top">
             <div className="auth-brand-badge" aria-hidden="true">
-              <Icon name="sparkles" size={20} />
+              <Icon name="briefcase" size={20} />
             </div>
             <div className="auth-brand-headings">
-              <h1 className="auth-brand-title">AI-Driven Smart Hiring</h1>
+              <h1 className="auth-brand-title">Smart Hiring Platform</h1>
               <p className="auth-brand-subtitle">
-                Internal Recruitment Platform &amp; Audited Candidate Profiles
+                {portalContext === "admin"
+                  ? "Admin Workspace"
+                  : "Recruiter Workspace"}
               </p>
             </div>
           </div>
@@ -75,7 +77,7 @@ export function LoginPage() {
               <div className="auth-cap-text">
                 <span className="auth-cap-title">Structured candidate profiles</span>
                 <span className="auth-cap-desc">
-                  Deterministic parsing of multi-page resumes into standardized, audited schema.
+                  Parse multi-page resumes into standardised, auditable profiles.
                 </span>
               </div>
             </div>
@@ -87,7 +89,7 @@ export function LoginPage() {
               <div className="auth-cap-text">
                 <span className="auth-cap-title">Evidence-backed review</span>
                 <span className="auth-cap-desc">
-                  Full text span provenance, confidence scores, and immutable correction logs.
+                  Full text-span provenance, confidence scores and correction audit.
                 </span>
               </div>
             </div>
@@ -97,16 +99,16 @@ export function LoginPage() {
                 <Icon name="check" size={15} />
               </div>
               <div className="auth-cap-text">
-                <span className="auth-cap-title">Role-based internal access</span>
+                <span className="auth-cap-title">Role-based access</span>
                 <span className="auth-cap-desc">
-                  Strict boundaries for Recruiter workspaces, Reviewers, and System Administrators.
+                  Separate workspaces for Recruiters, Reviewers and Administrators.
                 </span>
               </div>
             </div>
           </div>
 
           <div className="auth-brand-footer">
-            <p className="auth-system-tag">Smart Hiring Core • Phase 2A Staff Portal</p>
+            <p className="auth-system-tag">Manage jobs, applicants and structured interviews from one place.</p>
           </div>
         </div>
 
@@ -115,7 +117,7 @@ export function LoginPage() {
           <div className="auth-form-header">
             {portalContext !== "default" && (
               <span className="auth-portal-badge" aria-label={`Portal: ${portalContext}`}>
-                {portalContext === "admin" ? "Admin Workspace" : "Recruiter Workspace"}
+                {portalContext === "admin" ? "Admin workspace" : "Recruiter workspace"}
               </span>
             )}
             <h2 className="auth-form-title">Welcome back</h2>
@@ -232,13 +234,13 @@ export function LoginPage() {
 
           <div className="auth-footer">
             <p className="auth-footer-note">
-              Access is limited to authorised recruitment staff. Unauthorized access attempts are monitored and logged.
+              Access is limited to authorised recruitment staff. Unauthorised access attempts are monitored and logged.
             </p>
-            <div style={{ marginTop: "12px", textAlign: "center", borderTop: "1px solid var(--border-subtle, #e2e8f0)", paddingTop: "12px" }}>
+            <div style={{ marginTop: "12px", textAlign: "center", borderTop: "1px solid var(--border-subtle)", paddingTop: "12px" }}>
               <a
                 href="/candidate/login"
                 className="link-button"
-                style={{ fontSize: "13px", fontWeight: 500, color: "var(--brand-primary, #4f5bd5)", textDecoration: "none" }}
+                style={{ fontSize: "var(--text-sm)", fontWeight: 500, color: "var(--accent-primary)", textDecoration: "none" }}
                 onClick={(e) => {
                   if (typeof window !== "undefined" && window.history?.pushState) {
                     e.preventDefault();

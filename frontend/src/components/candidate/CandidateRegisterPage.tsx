@@ -202,7 +202,7 @@ export function CandidateRegisterPage({
             <a
               href="/"
               className="link-button"
-              style={{ fontSize: "12px", color: "var(--brand-primary, #4f5bd5)" }}
+              style={{ fontSize: "12px", color: "var(--accent-primary)" }}
               onClick={(e) => {
                 if (typeof window !== "undefined" && window.history?.pushState) {
                   e.preventDefault();

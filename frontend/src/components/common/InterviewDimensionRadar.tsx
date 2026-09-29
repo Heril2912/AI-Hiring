@@ -171,7 +171,7 @@ function RadarSVG({
         <polygon
           points={dataPointsStr}
           fill="rgba(79, 91, 213, 0.2)"
-          stroke="#4f5bd5"
+          stroke="var(--accent-primary)"
           strokeWidth="2.5"
         />
 
@@ -188,7 +188,7 @@ function RadarSVG({
                 cx={p.x}
                 cy={p.y}
                 r={4.5}
-                fill="#4f5bd5"
+                fill="var(--accent-primary)"
                 stroke="#ffffff"
                 strokeWidth="2"
               />

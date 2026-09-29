@@ -1,8 +1,8 @@
 # AI-Hiring Platform: Backend Domain Services, Data Models & API Reference
 
-**Document Version:** 2.1.0 (Comprehensive Reference)  
+**Document Version:** 2.2.0 (Comprehensive Reference)  
 **Framework:** Python 3.14 | FastAPI 0.115+ | SQLAlchemy 2.0 (PostgreSQL 16) | Pydantic v2 | Alembic  
-**Scope:** Complete Backend Directory Inventory, 18 REST Routers, 12 Relational Models, 51 Pydantic Schemas, 76 Domain Services (69 Root + 7 ATS Adapters), 44 Alembic Migrations, and 89 Pytest Test Suites
+**Scope:** Complete Backend Directory Inventory, 18 REST Routers, 13 Relational Models, 52 Pydantic Schemas, 78 Domain Services (71 Root + 7 ATS Adapters), 46 Alembic Migrations, and 93 Pytest Test Suites
 
 ---
 
@@ -16,22 +16,22 @@ backend/
 ├── pytest.ini                               # Configuration for test execution and markers
 ├── requirements.txt                         # Production and test Python dependencies
 ├── app/
-│   ├── config.py                            # Environment settings and application configuration
+│   ├── config.py                            # Environment settings, secrets, AI & Speech runtime configs
 │   ├── database.py                          # SQLAlchemy engine, session maker, base model, health checks
 │   ├── main.py                              # FastAPI application instantiation, CORS, error handlers, router registration
 │   ├── api/                                 # 18 REST API Router Controllers
 │   ├── cli/                                 # 3 CLI Utilities & Seeders
-│   ├── models/                              # 12 SQLAlchemy Declarative Model Modules
-│   ├── schemas/                             # 51 Pydantic Request/Response Schema Modules
-│   └── services/                            # 76 Domain Services & Algorithmic Engines (69 Root + 7 ATS)
+│   ├── models/                              # 13 SQLAlchemy Declarative Model Modules
+│   ├── schemas/                             # 52 Pydantic Request/Response Schema Modules
+│   └── services/                            # 78 Domain Services & Algorithmic Engines (71 Root + 7 ATS)
 ├── docs/
 │   └── evaluation_reviewer_guide.md         # Ground-truth evaluation reviewer guide
 ├── migrations/
 │   ├── env.py                               # Alembic runtime environment loader
 │   ├── script.py.mako                       # Template for new migration scripts
-│   └── versions/                            # 44 Sequential Database Migration Scripts
-├── runtime/                                 # Ephemeral intake and quarantine storage (pdf, docx)
-├── tests/                                   # 89 Automated Pytest Test Suites + evaluation_support (6 modules)
+│   └── versions/                            # 46 Sequential Database Migration Scripts
+├── runtime/                                 # Ephemeral intake, quarantine & audio temp storage
+├── tests/                                   # 93 Automated Pytest Test Suites + evaluation_support (6 modules)
 └── tools/                                   # Admin bootstrapping and evaluation benchmark tools
 ```
 
@@ -267,7 +267,13 @@ Enforces the mandatory 20 server-side validation checks before any AI question s
 8. `candidate_interview_service.py` & `candidate_evaluation_service.py`: Manages formal interview turn-taking and multi-dimensional evaluation scoring breakdowns.
 9. `answer_assessment_service.py`, `provisional_assessment_service.py`, `human_review_service.py`, `interview_simulation_service.py`, `interview_snapshot_service.py`, `interview_segmentation_service.py`, `interview_lifecycle_service.py`, `interview_generator_service.py`, `interview_catalogue.py`, `live_interview_service.py`, `candidate_plan_generator_service.py`: Comprehensive interview generation, simulation, snapshotting, and human-in-the-loop scoring.
 
-### 6.6 ATS & External Integrations (`app/services/ats/`)
+### 6.6 Speech Synthesis & Local Transcription Engine (`app/services/speech_service.py`)
+1. `SpeechRuntimeCapabilityService`: Probes local machine capabilities at runtime, verifying the existence and operational readiness of `whisper.cpp` (`whisper-cli`), Piper TTS, macOS native `/usr/bin/say`, and `ffmpeg`.
+2. `TextToSpeechAdapter`: Synthesizes question audio from plain question text (excluding hidden rubrics or recruiter evaluation criteria). Produces 16kHz mono 16-bit PCM WAV files, cached deterministically via SHA-256 keys to avoid duplicate synthesis.
+3. `SpeechToTextAdapter`: Transcribes candidate answer audio using local `whisper.cpp` with strict isolation flags (`-l en -nt -otxt`), unique per-request file paths, timestamp stripping, and fallback heuristics.
+4. `EphemeralAudioProcessor`: Manages the ephemeral lifecycle of candidate audio. Creates restrictive temporary directories (`0o700` directories, `0o600` files), converts raw inputs (WebM, Opus, Ogg) to 16kHz mono WAV via `ffmpeg`, validates minimum audio duration/energy ($\ge 0.3\,\text{s}$), enforces word-count plausibility guards, and unconditionally purges all temporary audio files in a `finally` block to guarantee zero-retention privacy.
+
+### 6.7 ATS & External Integrations (`app/services/ats/`)
 1. `adapter_interface.py`: Abstract Base Class for external ATS connectors.
 2. `adapter_registry.py`: Registry for resolving adapter instances (`LOCAL_FOLDER`, `GREENHOUSE`, `LEVER`, `MOCK`).
 3. `local_folder_adapter.py`: Adapter for local filesystem inbox/outbox syncing (`local_ats_demo/`).
@@ -417,6 +423,10 @@ backend/tests/
 ├── test_phase4c1_interview_eligibility.py   # Tests candidate interview eligibility checks
 ├── test_phase4c2_candidate_interview_workspace.py # Tests candidate interview execution workspace
 ├── test_phase4c4_evaluation_workspace.py    # Tests evaluation workspace review and scoring
+├── test_phase4d1_dual_mode_interviews.py    # Tests audio vs text question set schema validation and MCQ rejection
+├── test_phase4d2_dual_mode_release.py       # Tests dual-mode release isolation, frozen snapshots & rubric hiding
+├── test_phase4d3_audio_execution.py         # Tests TTS synthesis, Whisper STT adapter & EphemeralAudioProcessor cleanup
+├── test_phase4d4_mode_aware_evaluation.py   # Tests mode-aware scoring rules and transcript-only evaluation policy
 ├── test_processing_lifecycle.py             # Tests resume intake and quarantine lifecycle
 ├── test_profile_assembly.py                 # Tests CandidateProfile object construction
 ├── test_profile_correction.py               # Tests recruiter manual correction patch operations
@@ -486,9 +496,23 @@ graph TD
         S_Report --> S_CandEval["services/candidate_evaluation_service.py"]
         S_CandEval --> R_CandEval["api/candidate_evaluation.py & candidate_practice.py"]
     end
+
+    subgraph DualModeAudioPipeline ["4. Voice-Based Audio Interview & Ephemeral STT Engine"]
+        M_Interview --> S_CandInterview["services/candidate_interview_service.py"]
+        S_CandInterview --> S_TTS["services/speech_service.py (TextToSpeechAdapter)"]
+        S_TTS --> AudioOut["16kHz WAV Audio Playback"]
+        AudioRecord["Candidate Browser MediaRecorder"] --> S_AudioProc["services/speech_service.py (EphemeralAudioProcessor)"]
+        S_AudioProc --> S_STT["services/speech_service.py (SpeechToTextAdapter: whisper.cpp)"]
+        S_STT --> CleanText["Candidate Verified Transcript"]
+        S_AudioProc --> Purge["Unconditional Temp File Deletion (Zero Retention)"]
+        CleanText --> S_CandInterview
+        S_CandInterview --> M_Answer["models/candidate_access.py (CandidateInterviewAnswerRecord)"]
+        M_Answer --> S_CandEval
+    end
 ```
 
 ### Detailed Inter-Service Flow Description:
 1. **Resume Processing to Persistence**: An upload to `api/resumes.py` passes through `services/destination_policy.py` and `services/pdf_validation.py` into `services/pdf_text_extraction.py` or `services/docx_text_extraction.py`. The text stream is segmented by `services/section_detection.py`, extracted into sub-entities by `identity_extraction.py`, `employment_extraction.py`, `education_project_certification_extraction.py`, and `skill_summary_extraction.py`, normalized via `services/taxonomy_normalization.py`, assembled into an audited profile by `services/profile_assembly.py`, and saved to PostgreSQL via `services/extraction_persistence.py`.
 2. **Matching to Gap Reporting**: When recruiters trigger candidate evaluations in `api/matches.py`, `services/matching_preflight.py` verifies requisition readiness. `services/deterministic_matching.py` and `services/scoring.py` calculate mathematical skill/experience scores, while `services/gap_derivation.py` and `services/gap_report_service.py` construct categorical missing-skill reports before `services/explanation.py` outputs transparent feedback into `models/matching.py` and `models/gap_report.py`.
 3. **AI Generation to Candidate Simulation & Analytics**: `api/ai_interviews.py` invokes `services/ai_question_set_service.py` to synthesize interview questions via `services/wording_provider.py` and `services/provider_registry.py`. The generated items are validated against the 20-point matrix in `services/ai_provenance_service.py` and saved to `models/interview.py`. When released via `services/candidate_practice_service.py`, candidates interact through `services/practice_session_service.py`, receiving real-time reviews from `services/practice_review_service.py` and adaptive probes from `services/practice_follow_up_service.py`. Completed sessions are compiled by `services/practice_report_service.py` and `services/candidate_evaluation_service.py` into multi-dimensional radar scorecards.
+4. **Dual-Mode Audio & Voice Execution Engine**: When an Audio question set is released via `interview_release_service.py` (or `ai_interview_service.py`), questions strictly exclude MCQs (`AUDIO_MCQ_NOT_ALLOWED`). In `services/candidate_interview_service.py`, questions are spoken via `TextToSpeechAdapter` (Piper/macOS `say` subprocess, caching 16kHz mono WAV bytes). Candidate answer audio is received at `/transcribe`, converted via `ffmpeg`, and transcribed locally via `whisper.cpp` in `services/speech_service.py` (`EphemeralAudioProcessor`). Once candidate accepts the transcript, `services/candidate_evaluation_service.py` evaluates only the verified transcript content without scoring acoustic tone, emotion, or vocal delivery.

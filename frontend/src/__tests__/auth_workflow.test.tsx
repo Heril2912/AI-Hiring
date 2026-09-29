@@ -31,11 +31,11 @@ describe("Phase 2A.4: Authentication & Role-Aware Shell Workflow", () => {
     render(<App />);
 
     // Initially shows splash
-    expect(screen.getByText(/Authenticating hiring workspace session/i)).toBeInTheDocument();
+    expect(screen.getByText(/Verifying session/i)).toBeInTheDocument();
 
     // Resolves to login page
     await waitFor(() => {
-      expect(screen.getByText("AI-Driven Smart Hiring")).toBeInTheDocument();
+      expect(screen.getByText(/Smart Hiring/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/Work email/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument();
     });
@@ -338,7 +338,7 @@ describe("Phase 2A.4: Authentication & Role-Aware Shell Workflow", () => {
       expect(screen.getByText("Hiring Reviewer")).toBeInTheDocument();
       expect(screen.getByText("REVIEWER")).toBeInTheDocument();
       expect(screen.getByText(/No assigned reviews yet/i)).toBeInTheDocument();
-      expect(screen.getByText(/Assigned job reviews and evaluation scorecards will appear here once job requisitions are configured in Phase 2B/i)).toBeInTheDocument();
+      expect(screen.getByText(/Assigned job reviews and evaluation scorecards will appear here once job requisitions are configured/i)).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/Platform Users/i)).not.toBeInTheDocument();
@@ -396,7 +396,7 @@ describe("Phase 2A.4: Authentication & Role-Aware Shell Workflow", () => {
 
     await waitFor(() => {
       expect(logoutCalled).toBe(true);
-      expect(screen.getByRole("heading", { name: /AI-Driven Smart Hiring/i })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: /Smart Hiring/i })).toBeInTheDocument();
     });
 
     // Ensure tokens are never placed into localStorage or sessionStorage

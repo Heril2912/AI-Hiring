@@ -168,18 +168,18 @@ export function CandidateMyApplications({
             } else if (isProcessing) {
               statusLabel = "Processing Resume";
               statusBg = "var(--accent-subtle, #eef1fc)";
-              statusColor = "var(--accent-primary, #4f5bd5)";
+              statusColor = "var(--accent-primary)";
               statusBorder = "var(--accent-subtle-border, #d0e0fd)";
             } else if (isReady) {
               statusLabel = "Ready to Submit";
               statusBg = "var(--accent-subtle, #eef1fc)";
-              statusColor = "var(--accent-primary, #4f5bd5)";
+              statusColor = "var(--accent-primary)";
               statusBorder = "var(--accent-subtle-border, #d0e0fd)";
             } else if (isFailed) {
               statusLabel = "Resume Error";
-              statusBg = "var(--status-danger-bg, #fef2f2)";
-              statusColor = "var(--status-danger, #dc2626)";
-              statusBorder = "var(--status-danger-border, #fecaca)";
+              statusBg = "var(--status-danger-bg, #eadfe7)";
+              statusColor = "var(--status-danger, #63445b)";
+              statusBorder = "var(--status-danger-border, #c9b5c3)";
             } else if (isDraft) {
               statusLabel = "Draft";
               statusBg = "var(--bg-surface-subtle, #f1f5f9)";

@@ -76,79 +76,42 @@ export function CandidateShell({ onLogout, initialTab }: CandidateShellProps) {
     setSelectedApplicationId(null);
   };
 
+  const tabItems: { key: CandidateTab; label: string; icon: string }[] = [
+    { key: "jobs", label: "Open Jobs", icon: "briefcase" },
+    { key: "applications", label: "My Applications", icon: "file-text" },
+    { key: "interviews", label: "Practice Interviews", icon: "message-square" },
+  ];
+
   return (
     <div className="candidate-shell-layout">
       <header className="candidate-shell-header" role="banner">
         <div className="candidate-shell-brand">
           <Icon name="briefcase" className="brand-icon" aria-hidden="true" />
-          <span className="brand-title">Smart Hiring Platform</span>
+          <span className="brand-title">Smart Hiring</span>
           <span className="candidate-portal-chip">Candidate Portal</span>
         </div>
 
         <nav
           className="candidate-shell-nav"
           role="navigation"
-          aria-label="Candidate Portal Navigation"
-          style={{ display: "flex", gap: "8px", margin: "0 auto" }}
+          aria-label="Candidate navigation"
         >
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTab === "jobs" ? "btn-primary" : "btn-secondary"}`}
-            onClick={() => {
-              navigateToTab("jobs");
-              handleBackToJobs();
-            }}
-            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-            aria-current={activeTab === "jobs" ? "page" : undefined}
-          >
-            <Icon name="briefcase" size={14} aria-hidden="true" />
-            <span>Open Jobs</span>
-          </button>
-
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTab === "applications" ? "btn-primary" : "btn-secondary"}`}
-            onClick={() => {
-              navigateToTab("applications");
-              handleBackToApplications();
-            }}
-            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-            aria-current={activeTab === "applications" ? "page" : undefined}
-          >
-            <Icon name="file-text" size={14} aria-hidden="true" />
-            <span>My Applications</span>
-          </button>
-
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTab === "interviews" ? "btn-primary" : "btn-secondary"}`}
-            onClick={() => {
-              navigateToTab("interviews");
-              handleBackToJobs();
-              handleBackToApplications();
-            }}
-            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-            aria-current={activeTab === "interviews" ? "page" : undefined}
-            aria-label="Practice Interviews"
-          >
-            <Icon name="message-square" size={14} aria-hidden="true" />
-            <span>Interviews</span>
-          </button>
-
-          <button
-            type="button"
-            className={`btn btn-sm ${activeTab === "profile" ? "btn-primary" : "btn-secondary"}`}
-            onClick={() => {
-              navigateToTab("profile");
-              handleBackToJobs();
-              handleBackToApplications();
-            }}
-            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-            aria-current={activeTab === "profile" ? "page" : undefined}
-          >
-            <Icon name="user" size={14} aria-hidden="true" />
-            <span>Profile</span>
-          </button>
+          {tabItems.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`nav-tab-btn ${activeTab === item.key ? "tab-active" : ""}`}
+              onClick={() => {
+                navigateToTab(item.key);
+                if (item.key === "jobs") handleBackToJobs();
+                if (item.key === "applications") handleBackToApplications();
+              }}
+              aria-current={activeTab === item.key ? "page" : undefined}
+            >
+              <Icon name={item.icon as any} size={15} aria-hidden="true" />
+              <span>{item.label}</span>
+            </button>
+          ))}
         </nav>
 
         <div className="candidate-shell-user-menu">
@@ -159,10 +122,10 @@ export function CandidateShell({ onLogout, initialTab }: CandidateShellProps) {
             type="button"
             className="btn btn-secondary btn-sm candidate-logout-btn"
             onClick={handleLogout}
-            aria-label="Sign out of Candidate Portal"
+            aria-label="Sign out of candidate portal"
           >
             <Icon name="log-out" aria-hidden="true" />
-            <span>Sign Out</span>
+            <span>Sign out</span>
           </button>
         </div>
       </header>
@@ -207,16 +170,16 @@ export function CandidateShell({ onLogout, initialTab }: CandidateShellProps) {
         )}
 
         {activeTab === "profile" && (
-          <div className="candidate-profile-container" style={{ maxWidth: "800px", margin: "0 auto", padding: "24px" }}>
-            <div className="card" style={{ padding: "24px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-subtle, #e2e8f0)" }}>
+          <div className="candidate-profile-container" style={{ maxWidth: "var(--max-reading-width)", margin: "0 auto", padding: "24px" }}>
+            <div style={{ padding: "24px", backgroundColor: "var(--bg-surface-raised)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
                 <div
                   style={{
                     width: "48px",
                     height: "48px",
                     borderRadius: "50%",
-                    backgroundColor: "#e0e7ff",
-                    color: "#4338ca",
+                    backgroundColor: "var(--accent-subtle)",
+                    color: "var(--accent-primary)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -227,35 +190,35 @@ export function CandidateShell({ onLogout, initialTab }: CandidateShellProps) {
                   {(candidateUser?.displayName || "C").charAt(0).toUpperCase()}
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: "var(--text-primary, #0f172a)" }}>
-                    {candidateUser?.displayName || "Candidate Profile"}
+                  <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}>
+                    {candidateUser?.displayName || "Candidate"}
                   </h2>
-                  <p style={{ fontSize: "13px", color: "var(--text-secondary, #64748b)", margin: 0 }}>
+                  <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0 }}>
                     {candidateUser?.email}
                   </p>
                 </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", borderTop: "1px solid var(--border-subtle, #e2e8f0)", paddingTop: "16px", fontSize: "13px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", borderTop: "1px solid var(--border-subtle)", paddingTop: "16px", fontSize: "var(--text-sm)" }}>
                 <div>
-                  <span style={{ color: "var(--text-muted, #64748b)", display: "block", fontSize: "11px", textTransform: "uppercase" }}>Account Role</span>
+                  <span style={{ color: "var(--text-muted)", display: "block", fontSize: "var(--text-xs)", marginBottom: "4px" }}>Account type</span>
                   <strong>Candidate</strong>
                 </div>
                 <div>
-                  <span style={{ color: "var(--text-muted, #64748b)", display: "block", fontSize: "11px", textTransform: "uppercase" }}>Portal Access</span>
-                  <span className="badge badge-success" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                    <Icon name="check-circle" size={11} />
-                    <span>Active Candidate Account</span>
+                  <span style={{ color: "var(--text-muted)", display: "block", fontSize: "var(--text-xs)", marginBottom: "4px" }}>Status</span>
+                  <span className="badge badge-status-approved" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                    <Icon name="check-circle" size={12} />
+                    <span>Active</span>
                   </span>
                 </div>
               </div>
 
-              <div style={{ marginTop: "24px", padding: "16px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                <h3 style={{ fontSize: "14px", fontWeight: 600, margin: "0 0 6px", color: "#0f172a" }}>
-                  Candidate Workspace
+              <div style={{ marginTop: "24px", padding: "16px", backgroundColor: "var(--bg-surface)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                <h3 style={{ fontSize: "var(--text-sm)", fontWeight: 600, margin: "0 0 6px", color: "var(--text-primary)" }}>
+                  Your workspace
                 </h3>
-                <p style={{ fontSize: "13px", color: "#64748b", margin: 0, lineHeight: 1.5 }}>
-                  You can browse and apply for verified job postings, view your submitted applications, and take scheduled AI interviews directly from this portal.
+                <p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0, lineHeight: 1.5 }}>
+                  Browse and apply for job postings, view your submitted applications, and complete scheduled interviews from this portal.
                 </p>
               </div>
             </div>

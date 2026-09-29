@@ -99,21 +99,18 @@ describe("Color Policy Audit: Zero-Red UI Enforcement", () => {
     expect(violations).toEqual([]);
   });
 
-  it("ensures centralized semantic status tokens are accessible non-red amber/gold in index.css", () => {
+  it("ensures centralized semantic status tokens are accessible non-red in index.css", () => {
     const cssPath = path.join(FRONTEND_SRC_DIR, "index.css");
     const cssContent = fs.readFileSync(cssPath, "utf-8");
 
-    // Check status-danger is dark amber/gold
-    expect(cssContent).toContain("--status-danger: #92400e;");
-    expect(cssContent).toContain("--status-danger-bg: #fffbeb;");
-    expect(cssContent).toContain("--status-danger-border: #fde68a;");
+    // Check status-danger is accessible non-red aubergine
+    expect(cssContent).toContain("--status-danger: #63445b;");
+    expect(cssContent).toContain("--status-danger-bg: #eadfe7;");
+    expect(cssContent).toContain("--status-danger-border: #c9b5c3;");
 
     // Check gap tokens exist
-    expect(cssContent).toContain("--gap-covered: #0f766e;");
-    expect(cssContent).toContain("--gap-partial: #b45309;");
-    expect(cssContent).toContain("--gap-not-evidenced: #475569;");
-    expect(cssContent).toContain("--gap-unverified: #4338ca;");
-    expect(cssContent).toContain("--gap-conflicting: #78350f;");
-    expect(cssContent).toContain("--gap-not-applicable: #64748b;");
+    expect(cssContent).toContain("--gap-covered: #2f6b4f;");
+    expect(cssContent).toContain("--gap-partial: #806022;");
+    expect(cssContent).toContain("--gap-not-evidenced: #5b6863;");
   });
 });

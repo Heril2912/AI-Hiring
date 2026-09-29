@@ -314,8 +314,7 @@ describe("Phase 3F.2 MCQ Management & Candidate Practice Release", () => {
       await waitFor(() => {
         expect(candidatePracticeApi.getCandidatePracticeDiscovery).toHaveBeenCalled();
         expect(screen.getByText("Staff Backend Engineer")).toBeInTheDocument();
-        const counts = screen.getAllByText(/5 Questions/i);
-        expect(counts.length).toBe(2);
+        expect(screen.getByText(/5 conversational · 5 MCQ/i)).toBeInTheDocument();
         expect(screen.getByRole("button", { name: /Start Practice Interview/i })).toBeInTheDocument();
       });
     });

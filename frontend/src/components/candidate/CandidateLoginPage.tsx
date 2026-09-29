@@ -49,11 +49,11 @@ export function CandidateLoginPage({
       <div className="candidate-auth-card" role="main">
         <header className="candidate-auth-header">
           <div className="candidate-badge-container">
-            <span className="candidate-portal-badge">Candidate Portal</span>
+            <span className="candidate-portal-badge">Candidate portal</span>
           </div>
-          <h1 className="candidate-auth-title">Candidate Sign In</h1>
+          <h1 className="candidate-auth-title">Sign in</h1>
           <p className="candidate-auth-subtitle">
-            Sign in to access open jobs, your applications, and practice interviews.
+            Apply for roles and complete your released interviews securely.
           </p>
         </header>
 
@@ -70,7 +70,7 @@ export function CandidateLoginPage({
 
         <form className="candidate-auth-form" onSubmit={handleSubmit} noValidate>
           <div className="form-group">
-            <label htmlFor="candidate-email">Email Address</label>
+            <label htmlFor="candidate-email">Email address</label>
             <input
               id="candidate-email"
               name="candidate-email"
@@ -120,14 +120,15 @@ export function CandidateLoginPage({
               type="submit"
               className="btn btn-primary btn-block"
               disabled={isSubmitting || !email.trim() || !password}
+              aria-label="Sign In to Candidate Portal"
             >
               {isSubmitting ? (
                 <>
                   <span className="spinner-inline" aria-hidden="true" />
-                  <span>Signing in...</span>
+                  <span>Signing in…</span>
                 </>
               ) : (
-                "Sign In to Candidate Portal"
+                "Sign in"
               )}
             </button>
           </div>
@@ -144,12 +145,12 @@ export function CandidateLoginPage({
               Create candidate account
             </button>
           </p>
-          <p className="footer-text" style={{ margin: 0, fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
+          <p className="footer-text" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
             Are you a recruiter or hiring manager?{" "}
             <a
               href="/"
               className="link-button"
-              style={{ fontSize: "12px", color: "var(--brand-primary, #4f5bd5)" }}
+              style={{ fontSize: "var(--text-xs)", color: "var(--accent-primary)" }}
               onClick={(e) => {
                 if (typeof window !== "undefined" && window.history?.pushState) {
                   e.preventDefault();
