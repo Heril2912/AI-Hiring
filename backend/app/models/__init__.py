@@ -108,8 +108,11 @@ from app.models.ats import (
     ATSReconciliationStatus,
 )
 
+from app.models.dashboard import DashboardTicketRecord
+
 __all__ = [
     "Base",
+    "DashboardTicketRecord",
     "ArtifactFormat",
     "ArtifactValidationStatus",
     "ProcessingJobStatus",

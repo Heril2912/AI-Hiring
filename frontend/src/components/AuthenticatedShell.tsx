@@ -182,6 +182,17 @@ export function AuthenticatedShell({
                 <Icon name="clipboard-check" size={15} />
                 <span>Evaluations</span>
               </button>
+
+              <button
+                type="button"
+                className={`nav-tab-btn ${activeNavTab === "analytics" ? "tab-active" : ""}`}
+                aria-current={activeNavTab === "analytics" ? "page" : undefined}
+                aria-label="Recruitment Analytics Dashboard"
+                onClick={() => onNavigateTab?.("analytics")}
+              >
+                <Icon name="award" size={15} />
+                <span>Analytics</span>
+              </button>
             </>
           )}
 
@@ -239,6 +250,16 @@ export function AuthenticatedShell({
               >
                 <Icon name="external-link" size={15} />
                 <span>Integrations</span>
+              </button>
+              <button
+                type="button"
+                className={`nav-tab-btn ${activeNavTab === "analytics" ? "tab-active" : ""}`}
+                aria-current={activeNavTab === "analytics" ? "page" : undefined}
+                aria-label="Recruitment Analytics Dashboard"
+                onClick={() => onNavigateTab?.("analytics")}
+              >
+                <Icon name="award" size={15} />
+                <span>Analytics</span>
               </button>
             </>
           )}

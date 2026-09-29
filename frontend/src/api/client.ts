@@ -105,3 +105,16 @@ export async function apiFetch<T = any>(
 
   return response.json();
 }
+
+export interface DashboardSessionResponse {
+  ticket: string;
+  launch_url: string;
+  expires_in_seconds: number;
+}
+
+export async function createDashboardSession(): Promise<DashboardSessionResponse> {
+  return apiFetch<DashboardSessionResponse>("/api/v1/dashboard/session", {
+    method: "POST",
+  });
+}
+
