@@ -20,6 +20,7 @@ import { SimulationWorkspace } from "./components/interviews/SimulationWorkspace
 import { AiInterviewsDirectory } from "./components/ai_interviews/AiInterviewsDirectory";
 import { AiQuestionSetWorkspace } from "./components/ai_interviews/AiQuestionSetWorkspace";
 import { EvaluationWorkspace } from "./components/evaluation/EvaluationWorkspace";
+import { AnalyticsLauncher } from "./components/analytics/AnalyticsLauncher";
 import { apiFetch } from "./api/client";
 import { fetchJobs, JobSummary } from "./api/jobs";
 import { Icon } from "./components/Icon";
@@ -200,6 +201,16 @@ function AuthenticatedApp() {
         setActiveNavTab("evaluation");
         if (typeof window !== "undefined" && window.history?.replaceState) {
           window.history.replaceState(null, "", "/evaluation");
+        }
+      } else if (
+        window.location.pathname.startsWith("/analytics") ||
+        tabParam === "analytics" ||
+        viewParam === "analytics"
+      ) {
+        setActiveView("analytics" as any);
+        setActiveNavTab("analytics");
+        if (typeof window !== "undefined" && window.history?.replaceState) {
+          window.history.replaceState(null, "", "/analytics");
         }
       }
     } catch {
@@ -402,6 +413,11 @@ function AuthenticatedApp() {
       if (typeof window !== "undefined" && window.history?.pushState) {
         window.history.pushState(null, "", "/evaluation");
       }
+    } else if (tab === "analytics") {
+      setActiveView("analytics" as any);
+      if (typeof window !== "undefined" && window.history?.pushState) {
+        window.history.pushState(null, "", "/analytics");
+      }
     }
   };
 
@@ -435,7 +451,9 @@ function AuthenticatedApp() {
 
       {role === "ADMIN" && (
         <>
-          {activeNavTab === "jobs" ? (
+          {activeNavTab === "analytics" ? (
+            <AnalyticsLauncher />
+          ) : activeNavTab === "jobs" ? (
             activeView === "jobs" ? (
               <JobsDirectory
                 jobs={jobs}
@@ -737,6 +755,10 @@ function AuthenticatedApp() {
 
               {activeView === "evaluation" && (
                 <EvaluationWorkspace />
+              )}
+
+              {activeNavTab === "analytics" && (
+                <AnalyticsLauncher />
               )}
             </>
           )}

@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     audio_tts_cache_dir: str = "backend/runtime/audio_tts_cache"
     audio_ephemeral_temp_dir: str = "backend/runtime/audio_temp"
 
+    # Streamlit Dashboard Configuration (Phase 4E.2)
+    dashboard_token_secret: str = "dashboard-local-secure-token-secret-change-in-prod"
+    dashboard_ticket_ttl_seconds: int = 120
+    dashboard_session_ttl_minutes: int = 30
+    dashboard_public_url: str = "http://localhost:8501"
+
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
         extra="ignore",

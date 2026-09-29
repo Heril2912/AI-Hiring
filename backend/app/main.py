@@ -20,6 +20,7 @@ from app.api.matches import router as matches_router
 from app.api.recruiter_applications import router as recruiter_applications_router
 from app.api.resumes import router as resumes_router
 from app.api.taxonomy import router as taxonomy_router
+from app.api.dashboard import router as dashboard_router
 from app.config import get_settings
 from app.database import check_database_connection
 from app.services.speech_service import cleanup_abandoned_audio_temp_files
@@ -85,6 +86,7 @@ app.include_router(resumes_router)
 app.include_router(matches_router)
 app.include_router(gap_reports_router)
 app.include_router(result_reports_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/api/v1/health")
