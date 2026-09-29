@@ -243,7 +243,7 @@ export function AiInterviewsDirectory({
               borderRadius: "6px",
               border: "none",
               backgroundColor: selectedMode === "AUDIO" ? "#ffffff" : "transparent",
-              color: selectedMode === "AUDIO" ? "#4338ca" : "var(--text-secondary, #64748b)",
+              color: selectedMode === "AUDIO" ? "var(--accent-primary)" : "var(--text-secondary, #64748b)",
               boxShadow: selectedMode === "AUDIO" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
               cursor: "pointer",
               transition: "all 0.15s ease",

@@ -231,7 +231,7 @@ export function CandidateJobDetailView({
                     padding: "3px 10px",
                     borderRadius: "var(--radius-full, 9999px)",
                     backgroundColor: "var(--accent-subtle, #eef1fc)",
-                    color: "var(--accent-primary, #4f5bd5)",
+                    color: "var(--accent-primary)",
                     fontWeight: 500,
                   }}
                 >

@@ -87,28 +87,23 @@ export function AuthenticatedShell({
       <header className="dashboard-top-nav" role="banner">
         <div className="nav-brand-section">
           <div className="brand-logo-icon" aria-hidden="true">
-            <Icon name="sparkles" size={18} />
+            <Icon name="briefcase" size={18} />
           </div>
           <div className="brand-title-group">
             <div className="brand-title-row">
-              <h1 className="brand-title">Smart Hiring Platform</h1>
+              <h1 className="brand-title">Smart Hiring</h1>
               <span
                 className="portal-workspace-label"
-                aria-label={`Current Workspace: ${displayedWorkspaceLabel}`}
+                aria-label={`Current workspace: ${displayedWorkspaceLabel}`}
               >
                 {displayedWorkspaceLabel}
               </span>
             </div>
-            <span className="brand-subtitle">
-              {role === "ADMIN" && "Administration & User Governance"}
-              {role === "RECRUITER" && "Evidence-Based Parsing & Audited Profiles"}
-              {role === "REVIEWER" && "Candidate Review & Evaluation"}
-            </span>
           </div>
         </div>
 
         {/* Role-Specific Navigation Tabs */}
-        <nav className="nav-links-group" aria-label="Role Navigation">
+        <nav className="nav-links-group" aria-label="Main navigation">
           {role === "RECRUITER" && (
             <>
               <button
@@ -127,18 +122,17 @@ export function AuthenticatedShell({
               >
                 <Icon name="briefcase" size={15} />
                 <span>Jobs</span>
-                {jobsCount > 0 && <span className="nav-count-pill">{jobsCount}</span>}
               </button>
 
               <button
                 type="button"
                 className={`nav-tab-btn ${
-                  activeNavTab === "candidates" || activeNavTab === "profile" || activeNavTab === "extraction"
+                  activeNavTab === "candidates" || activeNavTab === "profile" || activeNavTab === "extraction" || activeNavTab === "upload"
                     ? "tab-active"
                     : ""
                 }`}
                 aria-current={
-                  activeNavTab === "candidates" || activeNavTab === "profile" || activeNavTab === "extraction"
+                  activeNavTab === "candidates" || activeNavTab === "profile" || activeNavTab === "extraction" || activeNavTab === "upload"
                     ? "page"
                     : undefined
                 }
@@ -153,16 +147,6 @@ export function AuthenticatedShell({
 
               <button
                 type="button"
-                className={`nav-tab-btn ${activeNavTab === "upload" ? "tab-active" : ""}`}
-                aria-current={activeNavTab === "upload" ? "page" : undefined}
-                onClick={() => onNavigateTab?.("upload")}
-              >
-                <Icon name="upload" size={15} />
-                <span>Upload Resume</span>
-              </button>
-
-              <button
-                type="button"
                 className={`nav-tab-btn ${
                   activeNavTab === "ai_interviews" || activeNavTab === "ai-interviews"
                     ? "tab-active"
@@ -173,14 +157,11 @@ export function AuthenticatedShell({
                     ? "page"
                     : undefined
                 }
-                aria-label="AI-generated interviews and question sets"
+                aria-label="AI-generated interview questions"
                 onClick={() => onNavigateTab?.("ai_interviews")}
               >
-                <Icon name="sparkles" size={15} />
-                <span>AI Interviews</span>
-                {aiQuestionsCount !== undefined && aiQuestionsCount > 0 && (
-                  <span className="nav-count-pill">{aiQuestionsCount}</span>
-                )}
+                <Icon name="message-square" size={15} />
+                <span>Interviews</span>
               </button>
 
               <button
@@ -199,7 +180,7 @@ export function AuthenticatedShell({
                 onClick={() => onNavigateTab?.("evaluation")}
               >
                 <Icon name="clipboard-check" size={15} />
-                <span>Evaluation</span>
+                <span>Evaluations</span>
               </button>
             </>
           )}
@@ -222,7 +203,6 @@ export function AuthenticatedShell({
               >
                 <Icon name="briefcase" size={15} />
                 <span>Jobs</span>
-                {jobsCount > 0 && <span className="nav-count-pill">{jobsCount}</span>}
               </button>
               <button
                 type="button"
@@ -231,7 +211,7 @@ export function AuthenticatedShell({
                 onClick={() => onNavigateTab?.("users")}
               >
                 <Icon name="user" size={15} />
-                <span>User Management</span>
+                <span>Users</span>
               </button>
               <button
                 type="button"
@@ -240,7 +220,7 @@ export function AuthenticatedShell({
                 onClick={() => onNavigateTab?.("events")}
               >
                 <Icon name="shield" size={15} />
-                <span>Security Events</span>
+                <span>Security</span>
               </button>
               <button
                 type="button"
@@ -248,8 +228,8 @@ export function AuthenticatedShell({
                 aria-current={activeNavTab === "ai_providers" ? "page" : undefined}
                 onClick={() => onNavigateTab?.("ai_providers")}
               >
-                <Icon name="sparkles" size={15} />
-                <span>AI Providers</span>
+                <Icon name="settings" size={15} />
+                <span>Local AI</span>
               </button>
               <button
                 type="button"
@@ -258,7 +238,7 @@ export function AuthenticatedShell({
                 onClick={() => onNavigateTab?.("ats_integrations")}
               >
                 <Icon name="external-link" size={15} />
-                <span>ATS Integrations</span>
+                <span>Integrations</span>
               </button>
             </>
           )}
@@ -278,14 +258,13 @@ export function AuthenticatedShell({
 
         {/* User Profile & System Status Area */}
         <div className="nav-user-actions-section">
-          <div className="nav-system-status" aria-label="Database Health">
-            <span className={`status-indicator-dot ${connectionState}`} />
-            <span className="status-indicator-text">
-              {connectionState === "checking" && "Connecting..."}
-              {connectionState === "connected" && "System Connected"}
-              {connectionState === "unavailable" && "Service Unavailable"}
-            </span>
-          </div>
+          {/* Only show system status when unavailable — hide the always-green dot */}
+          {connectionState === "unavailable" && (
+            <div className="nav-system-status" aria-label="System status" role="status" aria-live="polite">
+              <span className={`status-indicator-dot ${connectionState}`} />
+              <span className="status-indicator-text">Service unavailable</span>
+            </div>
+          )}
 
           {/* User Profile Menu */}
           <div className="user-profile-menu-container" ref={menuRef}>
@@ -317,6 +296,23 @@ export function AuthenticatedShell({
                   <p className="dropdown-email">{user?.email}</p>
                 </div>
                 <div className="dropdown-divider" />
+
+                {/* ATS integrations link for Recruiters (moved from top nav) */}
+                {role === "RECRUITER" && (
+                  <button
+                    type="button"
+                    className="dropdown-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      onNavigateTab?.("ats_integrations");
+                    }}
+                  >
+                    <Icon name="external-link" size={15} />
+                    <span>Integrations</span>
+                  </button>
+                )}
+
                 <a
                   href={getCrossPortalUrl(portalContext === "admin" || role === "ADMIN" ? "recruiter" : "admin")}
                   target="_blank"
@@ -340,7 +336,7 @@ export function AuthenticatedShell({
                   disabled={isLoggingOut}
                 >
                   <Icon name="arrow-left" size={15} />
-                  <span>{isLoggingOut ? "Signing Out..." : "Sign Out"}</span>
+                  <span>{isLoggingOut ? "Signing out…" : "Sign Out"}</span>
                 </button>
               </div>
             )}

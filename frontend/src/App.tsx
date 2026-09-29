@@ -469,7 +469,7 @@ function AuthenticatedApp() {
           {isLoadingProfile && (
             <div className="profile-loading-overlay">
               <div className="loading-spinner" />
-              <p className="loading-text">Loading candidate profile &amp; verified evidence...</p>
+              <p className="loading-text">Loading candidate profile…</p>
             </div>
           )}
 
@@ -781,7 +781,7 @@ function CandidateMainContent({ initialView }: { initialView?: "register" | "log
     return (
       <div className="auth-loading-splash" role="status" aria-live="polite">
         <div className="loading-spinner" />
-        <p className="loading-text">Authenticating candidate session...</p>
+        <p className="loading-text">Verifying session…</p>
       </div>
     );
   }
@@ -851,7 +851,7 @@ function MainContent() {
     return (
       <div className="auth-loading-splash" role="status" aria-live="polite">
         <div className="loading-spinner" />
-        <p className="loading-text">Authenticating hiring workspace session...</p>
+        <p className="loading-text">Verifying session…</p>
       </div>
     );
   }

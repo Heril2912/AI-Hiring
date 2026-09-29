@@ -89,7 +89,7 @@ export function CandidatePracticeDirectory() {
           <div className="candidate-welcome-icon-box">
             <Icon name="message-square" className="welcome-icon" aria-hidden="true" />
           </div>
-          <h2 className="candidate-welcome-title">No assigned interviews yet</h2>
+          <h2 className="candidate-welcome-title">No assigned practice sessions yet</h2>
           <p className="candidate-welcome-description">
             Your recruiter has not released an official interview for your submitted applications yet. Once a recruiter marks your application interview-ready and releases an interview, it will appear here.
           </p>
@@ -292,9 +292,10 @@ export function CandidatePracticeDirectory() {
                   type="button"
                   className="btn btn-primary"
                   onClick={() => setActiveRelease(singleJob)}
+                  aria-label={isAudio ? "Prepare Interview" : "Start Practice Interview"}
                   style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 20px", fontSize: "14px" }}
                 >
-                  <span>{isAudio ? "Prepare Interview" : "Start Interview"}</span>
+                  <span>{isAudio ? "Prepare Interview" : "Start Practice Interview"}</span>
                   <Icon name="chevron-right" size={16} aria-hidden="true" />
                 </button>
               </div>

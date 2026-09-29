@@ -473,7 +473,7 @@ export function InterviewReviewWorkspace({
             <span>Authoritative Assessment Finalized</span>
           </div>
           <p className="text-xs text-slate-600 m-0">
-            This assessment has been finalized by recruiter review and is permanently immutable. No Phase 2 match records, rankings, or raw scores were altered.
+            This assessment has been finalized by recruiter review and is permanently immutable. Match records, rankings and raw scores were not altered.
           </p>
         </div>
       )}

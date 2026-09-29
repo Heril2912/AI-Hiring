@@ -10,7 +10,7 @@ export function ReviewerWorkspace() {
         </div>
         <h2 className="empty-state-title">No assigned reviews yet</h2>
         <p className="empty-state-description">
-          You are signed in as an authenticated <strong>Reviewer</strong>. Assigned job reviews and evaluation scorecards will appear here once job requisitions are configured in Phase 2B.
+          You are signed in as a <strong>Reviewer</strong>. Assigned job reviews and evaluation scorecards will appear here once job requisitions are configured.
         </p>
         <div className="empty-state-guidelines">
           <div className="guideline-item">
@@ -19,7 +19,7 @@ export function ReviewerWorkspace() {
           </div>
           <div className="guideline-item">
             <Icon name="check" size={16} className="guideline-check" />
-            <span>Assigned requisition review pipelines</span>
+            <span>Assigned requisition review workflows</span>
           </div>
           <div className="guideline-item">
             <Icon name="check" size={16} className="guideline-check" />

@@ -206,7 +206,7 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
       {/* Internal Recruiter Review Controls */}
       <div className="applicant-detail-card">
         <h2 className="applicant-detail-card-title">
-          <Icon name="user-check" size={18} style={{ color: "var(--accent-primary, #4f5bd5)" }} />
+          <Icon name="user-check" size={18} style={{ color: "var(--accent-primary)" }} />
           <span>Internal Review Stage</span>
         </h2>
         <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary, #64748b)", lineHeight: 1.5 }}>
@@ -377,7 +377,7 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
       <div className="applicant-detail-card">
         <div className="applicant-detail-card-header">
           <h2 className="applicant-detail-card-title">
-            <Icon name="sparkles" size={18} style={{ color: "var(--accent-primary, #4f5bd5)" }} />
+            <Icon name="sparkles" size={18} style={{ color: "var(--accent-primary)" }} />
             <span>Interview Access</span>
           </h2>
           {onOpenAiInterviews && (
@@ -505,12 +505,12 @@ export const JobApplicationDetailView: React.FC<JobApplicationDetailViewProps> =
                   width: "40px",
                   height: "40px",
                   borderRadius: "50%",
-                  backgroundColor: "#e0e7ff",
+                  backgroundColor: "var(--accent-subtle)",
                   border: "1px solid #c7d2fe",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: "#4338ca",
+                  color: "var(--accent-primary)",
                   flexShrink: 0,
                 }}
               >

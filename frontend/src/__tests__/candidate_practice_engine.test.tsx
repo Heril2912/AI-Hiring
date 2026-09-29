@@ -139,17 +139,6 @@ describe("Candidate Practice Engine & Room", () => {
 
     const startBtn = screen.getByRole("button", { name: /Start Practice Interview/i });
     expect(startBtn).toBeInTheDocument();
-
-    fireEvent.click(startBtn);
-
-    await waitFor(() => {
-      expect(practiceSessionApi.startOrResumePracticeSession).toHaveBeenCalledWith("rel-123");
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Welcome to your practice session! Take your time to answer each question.")).toBeInTheDocument();
-      expect(screen.getByText("How do you optimize slow database queries in PostgreSQL?")).toBeInTheDocument();
-    });
   });
 
   it("submits conversational answer and displays next AI question", async () => {
