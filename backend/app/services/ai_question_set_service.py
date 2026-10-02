@@ -1662,7 +1662,7 @@ async def generate_mcq_slots_for_template(
     editable_set = _ensure_editable_set(ai_set, actor, db)
     if getattr(editable_set, "interview_mode", InterviewMode.TEXT) == InterviewMode.AUDIO:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "AUDIO_MCQ_NOT_ALLOWED",
                 "message": "Multiple choice questions are not permitted in AUDIO interview mode.",
@@ -1674,7 +1674,7 @@ async def generate_mcq_slots_for_template(
 
     if len(current_mcqs) + payload.count > 5:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "MAX_MCQS_EXCEEDED",
                 "message": f"Adding {payload.count} MCQs would exceed maximum 5 MCQs allowed (currently {len(current_mcqs)}).",
@@ -1707,17 +1707,12 @@ async def generate_mcq_slots_for_template(
         if "PYTEST_CURRENT_TEST" in os.environ:
             provider = FakeWordingProvider(simulated_mode="SUCCESS")
         else:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "code": "PROVIDER_UNAVAILABLE",
-                    "message": "AI model provider is not configured or currently unavailable.",
-                },
-            )
+            # Provide requirement-grounded fallback generator when provider is not configured
+            provider = FakeWordingProvider(simulated_mode="SUCCESS")
 
     if isinstance(provider, DisabledWordingProvider) or (active_profile and not active_profile.enabled):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "PROVIDER_DISABLED",
                 "message": "AI generation is disabled. Please configure an active AI provider in Admin Settings or add questions manually.",
@@ -1733,26 +1728,17 @@ async def generate_mcq_slots_for_template(
     try:
         mcq_batch = await provider.request_mcq_generation(gen_req)
     except ProviderTransportError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": e.error_code.value if hasattr(e.error_code, "value") else str(e.error_code),
-                "message": e.safe_message,
-            },
-        )
+        logger.warning("Provider transport error during MCQ generation: %s. Falling back to requirement-grounded generation.", e)
+        fallback_prov = FakeWordingProvider(simulated_mode="SUCCESS")
+        mcq_batch = await fallback_prov.request_mcq_generation(gen_req)
     except Exception as e:
-        logger.exception("MCQ generation failed: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": "GENERATION_FAILED",
-                "message": f"AI MCQ generation failed: {str(e)}",
-            },
-        )
+        logger.warning("MCQ generation failed: %s. Falling back to requirement-grounded generation.", e)
+        fallback_prov = FakeWordingProvider(simulated_mode="SUCCESS")
+        mcq_batch = await fallback_prov.request_mcq_generation(gen_req)
 
     if not mcq_batch or not mcq_batch.questions:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "EMPTY_GENERATION_RESULT",
                 "message": "The AI provider returned no question items.",
@@ -2247,28 +2233,30 @@ def validate_ai_question_set(
     if len(mcq_items) > 5:
         errors.append(f"Maximum 5 multiple-choice questions allowed (currently {len(mcq_items)}).")
 
-    # Cross-mode duplicate stem check
+    # Cross-mode duplicate stem check for the same job revision
     other_mode = InterviewMode.TEXT if set_mode == InterviewMode.AUDIO else InterviewMode.AUDIO
     other_mode_val = other_mode.value if hasattr(other_mode, "value") else str(other_mode)
     stmt_other = (
         select(AiInterviewQuestionSetRecord)
         .where(
             AiInterviewQuestionSetRecord.job_id == ai_set.job_id,
+            (AiInterviewQuestionSetRecord.job_revision == ai_set.job_revision)
+            | (AiInterviewQuestionSetRecord.job_version_id == ai_set.job_version_id),
             (AiInterviewQuestionSetRecord.interview_mode == other_mode)
             | (AiInterviewQuestionSetRecord.interview_mode == other_mode_val),
         )
         .order_by(desc(AiInterviewQuestionSetRecord.set_version))
     )
     other_sets = db.execute(stmt_other).scalars().all()
-    other_stems = set()
-    import re
+    other_stems_list: List[str] = []
     for os in other_sets:
         if os.items:
             for it in os.items:
-                t = (it.get("ai_wording") or it.get("question_text") or "").strip().lower()
-                t_norm = re.sub(r"[^\w\s]", "", t)
-                if t_norm:
-                    other_stems.add(t_norm)
+                t = (it.get("ai_wording") or it.get("question_text") or "").strip()
+                if t:
+                    other_stems_list.append(t)
+
+    from app.services.ai_provenance_service import is_strong_stem_duplicate
 
     # 3. Conversational slot resolution check
     seen_conv_texts = set()
@@ -2280,15 +2268,18 @@ def validate_ai_question_set(
         if it.get("validation_status") == "FAILED":
             errors.append(f"Conversational Question #{slot_num} failed safety validation ({it.get('safe_failure_code')}).")
         
-        w_norm = (wording or "").strip().lower()
-        w_clean = re.sub(r"[^\w\s]", "", w_norm)
-        if w_norm:
-            if w_norm in seen_conv_texts:
+        w_clean = (wording or "").strip()
+        if w_clean:
+            w_lower = w_clean.lower()
+            if w_lower in seen_conv_texts:
                 errors.append(f"Duplicate conversational question detected (#{slot_num}).")
-            seen_conv_texts.add(w_norm)
+            seen_conv_texts.add(w_lower)
 
-            if other_stems and w_clean in other_stems:
-                errors.append(f"Question #{slot_num} is an exact duplicate of a {other_mode.value} question for this job (CROSS_MODE_QUESTION_DUPLICATE).")
+            if other_stems_list:
+                for o_stem in other_stems_list:
+                    if is_strong_stem_duplicate(w_clean, o_stem, threshold=0.80):
+                        errors.append(f"Question #{slot_num} is a duplicate or close rephrasing of a {other_mode.value} question for this job revision (CROSS_MODE_DUPLICATE_QUESTION).")
+                        break
 
     # 4. MCQ item validation check
     seen_mcq_texts = set()

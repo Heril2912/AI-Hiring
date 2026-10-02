@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.auth import UserRecord, UserRole
 from app.models.candidate import CandidateProfileRecord
+from app.models.candidate_access import (
+    CandidateApplicationRecord,
+    CandidateApplicationStatus,
+)
 from app.models.job import (
     JobLifecycleStatus,
     JobRequisition,
@@ -388,10 +392,13 @@ def orchestrate_match_run(
             status_code=422,
         )
 
-    # 5. Verify every candidate profile version exists in the database
+    # 5. Verify every candidate has an eligible, SUBMITTED application for this exact job and revision
     # Support both direct profile_id and artifact_id lookup for robustness
     normalized_cand_keys: List[Tuple[uuid.UUID, int]] = []
     seen_normalized: Set[Tuple[uuid.UUID, int]] = set()
+
+    actor_org = getattr(actor, "organization_id", None) or getattr(actor, "org_id", None)
+    job_org = getattr(req, "organization_id", None) or getattr(req, "org_id", None)
 
     for cand_id, profile_version in cand_keys:
         stmt_cand = select(CandidateProfileRecord).where(
@@ -412,6 +419,73 @@ def orchestrate_match_run(
                 f"Duplicate candidate profile ({cand_rec.profile_id}, v{profile_version}) in selection."
             )
         seen_normalized.add(norm_key)
+
+        # Enforce Authoritative Application Eligibility Rule:
+        # 1. Candidate must have a CandidateApplicationRecord for this job and revision
+        # 2. Application status must be SUBMITTED
+        # 3. Application organization must match recruiter/job organization
+        # 4. Application profile_id and profile_version must match the selected profile version
+        stmt_app = select(CandidateApplicationRecord).where(
+            CandidateApplicationRecord.job_id == req.job_id,
+            CandidateApplicationRecord.job_version_id == target_version.job_version_id,
+            CandidateApplicationRecord.job_revision == target_version.revision,
+            CandidateApplicationRecord.status == CandidateApplicationStatus.SUBMITTED.value,
+            or_(
+                CandidateApplicationRecord.profile_id == cand_rec.profile_id,
+                CandidateApplicationRecord.artifact_id == cand_rec.artifact_id,
+                CandidateApplicationRecord.candidate_id == cand_rec.identity_id,
+            ),
+        )
+        apps = db.execute(stmt_app).scalars().all()
+        if not apps:
+            # Check if an application exists in another status or for another job
+            any_app = db.execute(
+                select(CandidateApplicationRecord).where(
+                    CandidateApplicationRecord.job_id == req.job_id,
+                    or_(
+                        CandidateApplicationRecord.profile_id == cand_rec.profile_id,
+                        CandidateApplicationRecord.artifact_id == cand_rec.artifact_id,
+                        CandidateApplicationRecord.candidate_id == cand_rec.identity_id,
+                    ),
+                )
+            ).scalars().first()
+            if any_app:
+                if any_app.status != CandidateApplicationStatus.SUBMITTED.value:
+                    raise MatchOrchestrationError(
+                        code="APPLICATION_NOT_SUBMITTED",
+                        message=f"Candidate application is not submitted (status: {any_app.status}).",
+                        status_code=400,
+                    )
+                if any_app.job_version_id != target_version.job_version_id or any_app.job_revision != target_version.revision:
+                    raise MatchOrchestrationError(
+                        code="APPLICATION_JOB_REVISION_MISMATCH",
+                        message=f"Candidate application belongs to revision {any_app.job_revision}, not requested revision {target_version.revision}.",
+                        status_code=400,
+                    )
+            raise MatchOrchestrationError(
+                code="APPLICATION_REQUIRED_FOR_JOB",
+                message="Candidate has no submitted application for this job revision.",
+                status_code=400,
+            )
+
+        matching_app = None
+        for app in apps:
+            if actor_org is not None and app.organization_id != actor_org:
+                continue
+            if job_org is not None and app.organization_id != job_org:
+                continue
+            if app.profile_version is not None and app.profile_version != profile_version:
+                continue
+            matching_app = app
+            break
+
+        if not matching_app:
+            raise MatchOrchestrationError(
+                code="APPLICATION_PROFILE_MISMATCH",
+                message="Candidate application profile version or organization mismatch.",
+                status_code=400,
+            )
+
         normalized_cand_keys.append(norm_key)
 
     cand_keys = normalized_cand_keys

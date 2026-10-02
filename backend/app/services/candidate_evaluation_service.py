@@ -15,7 +15,7 @@ import uuid
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.auth import UserRecord, UserRole
@@ -23,6 +23,7 @@ from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
 from app.models.candidate_access import (
     CandidateAccountBindingRecord,
     CandidateApplicationRecord,
+    CandidateApplicationStatus,
     CandidateBindingStatus,
     CandidateInterviewAnswerRecord,
     CandidateInterviewEvaluationRecord,
@@ -31,7 +32,8 @@ from app.models.candidate_access import (
     CandidateQuestionEvaluationRecord,
 )
 from app.models.job import JobRequisition, JobVersion
-from app.models.matching import MatchResultRecord
+from app.models.matching import MatchResultRecord, MatchRunRecord
+from app.schemas.phase3_enums import PracticeReleaseStatus
 from app.schemas.candidate_evaluation import (
     AIProvisionalAnalysisDto,
     CandidateEvaluationExportDto,
@@ -92,12 +94,13 @@ def list_evaluation_jobs(actor: UserRecord, db: Session) -> List[EvaluationJobSu
 
     actor_org = getattr(actor, "organization_id", None) or getattr(actor, "org_id", None)
 
-    # Query all releases and sessions for the recruiter / organization
+    # Query all active releases and sessions for the recruiter / organization
     stmt = (
         select(
             CandidatePracticeReleaseRecord.job_id,
             CandidatePracticeReleaseRecord.job_version_id,
             CandidatePracticeReleaseRecord.job_revision,
+            CandidatePracticeReleaseRecord.candidate_id,
             JobVersion.title.label("job_title"),
             JobVersion.department.label("department"),
             CandidatePracticeReleaseRecord.release_id,
@@ -109,12 +112,23 @@ def list_evaluation_jobs(actor: UserRecord, db: Session) -> List[EvaluationJobSu
         .join(JobRequisition, CandidatePracticeReleaseRecord.job_id == JobRequisition.job_id)
         .join(JobVersion, CandidatePracticeReleaseRecord.job_version_id == JobVersion.job_version_id)
         .outerjoin(
+            CandidateApplicationRecord,
+            CandidatePracticeReleaseRecord.application_id == CandidateApplicationRecord.application_id,
+        )
+        .outerjoin(
             CandidateInterviewSessionRecord,
             CandidatePracticeReleaseRecord.release_id == CandidateInterviewSessionRecord.release_id,
         )
         .outerjoin(
             CandidateInterviewEvaluationRecord,
             CandidateInterviewSessionRecord.session_id == CandidateInterviewEvaluationRecord.session_id,
+        )
+        .where(
+            CandidatePracticeReleaseRecord.status == PracticeReleaseStatus.RELEASED.value,
+            or_(
+                CandidatePracticeReleaseRecord.application_id.is_(None),
+                CandidateApplicationRecord.status != CandidateApplicationStatus.WITHDRAWN.value,
+            ),
         )
     )
 
@@ -131,6 +145,16 @@ def list_evaluation_jobs(actor: UserRecord, db: Session) -> List[EvaluationJobSu
     grouped: Dict[Tuple[UUID, int], Dict[str, Any]] = {}
 
     for r in rows:
+        # If candidate has a withdrawn application for this job and no active submitted application, exclude
+        if r.candidate_id and r.job_id:
+            stmt_apps = select(CandidateApplicationRecord.status).where(
+                CandidateApplicationRecord.candidate_id == r.candidate_id,
+                CandidateApplicationRecord.job_id == r.job_id,
+            )
+            app_statuses = db.execute(stmt_apps).scalars().all()
+            if app_statuses and all(st in (CandidateApplicationStatus.WITHDRAWN.value, CandidateApplicationStatus.DRAFT.value) for st in app_statuses):
+                continue
+
         key = (r.job_id, r.job_revision)
         if key not in grouped:
             grouped[key] = {
@@ -244,13 +268,35 @@ def list_job_candidates_for_evaluation(
             selectinload(CandidatePracticeReleaseRecord.candidate),
             selectinload(CandidatePracticeReleaseRecord.match_result),
         )
+        .outerjoin(
+            CandidateApplicationRecord,
+            CandidatePracticeReleaseRecord.application_id == CandidateApplicationRecord.application_id,
+        )
         .where(
             CandidatePracticeReleaseRecord.job_id == job_id,
             CandidatePracticeReleaseRecord.job_revision == job_revision,
+            CandidatePracticeReleaseRecord.status == PracticeReleaseStatus.RELEASED.value,
+            or_(
+                CandidatePracticeReleaseRecord.application_id.is_(None),
+                CandidateApplicationRecord.status != CandidateApplicationStatus.WITHDRAWN.value,
+            ),
         )
         .order_by(desc(CandidatePracticeReleaseRecord.created_at))
     )
-    releases = db.execute(stmt).scalars().all()
+    raw_releases = db.execute(stmt).scalars().all()
+
+    # Filter out any releases where candidate's applications for this job are withdrawn
+    releases = []
+    for rel in raw_releases:
+        if rel.candidate_id and rel.job_id:
+            stmt_apps = select(CandidateApplicationRecord.status).where(
+                CandidateApplicationRecord.candidate_id == rel.candidate_id,
+                CandidateApplicationRecord.job_id == rel.job_id,
+            )
+            app_statuses = db.execute(stmt_apps).scalars().all()
+            if app_statuses and all(st in (CandidateApplicationStatus.WITHDRAWN.value, CandidateApplicationStatus.DRAFT.value) for st in app_statuses):
+                continue
+        releases.append(rel)
 
     release_ids = [rel.release_id for rel in releases]
     if not release_ids:
@@ -479,13 +525,16 @@ def _synthesize_ai_provisional_analysis(
         llm_crit = stored_observations.get("criteria") or stored_observations.get("criterion_assessments") or []
         evidence_state = stored_observations.get("evidence_state", "SUFFICIENT")
 
-        # Check if LLM output was a fallback / needs human review
-        has_needs_review = any(
-            (c.get("label") or c.get("assessment_label")) == AssessmentCriterionLabel.NEEDS_HUMAN_REVIEW.value
+        # Check if LLM output was an unrecoverable fallback / completely failed
+        has_positive_evidence = any(
+            (c.get("label") or c.get("assessment_label")) in (
+                AssessmentCriterionLabel.DEMONSTRATED.value,
+                AssessmentCriterionLabel.PARTIALLY_DEMONSTRATED.value,
+            )
             for c in llm_crit
         )
-        if (has_needs_review and not any((c.get("label") or c.get("assessment_label")) == AssessmentCriterionLabel.DEMONSTRATED.value for c in llm_crit)) or evidence_state == "NEEDS_HUMAN_REVIEW":
-            # AI analysis failed or requires human review -> NO numeric scores, NO fake strengths!
+        if not has_positive_evidence and (evidence_state == "NEEDS_HUMAN_REVIEW" or not llm_crit):
+            # AI analysis completely failed or was an empty fallback
             return AIProvisionalAnalysisDto(
                 addressed_well=[],
                 missing_or_unclear=[],
@@ -794,6 +843,40 @@ def get_candidate_interview_evaluation_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "SESSION_NOT_FOUND", "message": "Interview session not found or access denied."},
         )
+
+    # Validate release and candidate application active status
+    if sess.release_id:
+        stmt_rel = select(CandidatePracticeReleaseRecord).where(
+            CandidatePracticeReleaseRecord.release_id == sess.release_id
+        )
+        rel = db.execute(stmt_rel).scalar_one_or_none()
+        if rel:
+            if rel.status == PracticeReleaseStatus.REVOKED.value:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "RELEASE_REVOKED", "message": "Interview release has been revoked or withdrawn."},
+                )
+            if rel.application_id:
+                stmt_app = select(CandidateApplicationRecord.status).where(
+                    CandidateApplicationRecord.application_id == rel.application_id
+                )
+                app_status = db.execute(stmt_app).scalar_one_or_none()
+                if app_status == CandidateApplicationStatus.WITHDRAWN.value:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail={"code": "APPLICATION_WITHDRAWN", "message": "Candidate application has been withdrawn."},
+                    )
+            elif rel.candidate_id and rel.job_id:
+                stmt_apps = select(CandidateApplicationRecord.status).where(
+                    CandidateApplicationRecord.candidate_id == rel.candidate_id,
+                    CandidateApplicationRecord.job_id == rel.job_id,
+                )
+                app_statuses = db.execute(stmt_apps).scalars().all()
+                if app_statuses and all(st in (CandidateApplicationStatus.WITHDRAWN.value, CandidateApplicationStatus.DRAFT.value) for st in app_statuses):
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail={"code": "APPLICATION_WITHDRAWN", "message": "Candidate application has been withdrawn."},
+                    )
 
     cand = sess.candidate
     cand_name = (cand.full_name or cand.primary_email or "Candidate") if cand else "Candidate"

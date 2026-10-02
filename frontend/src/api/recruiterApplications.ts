@@ -105,6 +105,7 @@ export async function fetchJobApplicants(
     status?: string;
     reviewState?: string;
     mode?: string;
+    revision?: number;
     page?: number;
     limit?: number;
   }
@@ -113,6 +114,7 @@ export async function fetchJobApplicants(
   if (params?.status) query.set("status", params.status);
   if (params?.reviewState) query.set("review_state", params.reviewState);
   if (params?.mode) query.set("mode", params.mode);
+  if (params?.revision !== undefined && params?.revision !== null) query.set("revision", String(params.revision));
   if (params?.page) query.set("page", String(params.page));
   if (params?.limit) query.set("limit", String(params.limit));
 

@@ -11,6 +11,7 @@ from app.database import get_db
 from app.main import app
 from app.models.auth import Base, UserRecord, UserRole
 from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
+from app.models.candidate_access import CandidateApplicationRecord, CandidateApplicationStatus
 from app.models.job import (
     JobLifecycleStatus,
     JobRequirement,
@@ -192,6 +193,27 @@ def _seed_job(test_db, recruiter_id, status_val=JobVersionStatus.READY_FOR_MATCH
     return job, ver
 
 
+def _seed_application(test_db, job, ver, cand, status=CandidateApplicationStatus.SUBMITTED.value):
+    app = CandidateApplicationRecord(
+        application_id=uuid.uuid4(),
+        organization_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        user_id=uuid.uuid4(),
+        binding_id=uuid.uuid4(),
+        candidate_id=cand.identity_id,
+        job_id=job.job_id,
+        job_version_id=ver.job_version_id,
+        job_revision=ver.revision,
+        artifact_id=cand.artifact_id,
+        profile_id=cand.profile_id,
+        profile_version=cand.profile_version,
+        status=status,
+        submitted_at=datetime.now(timezone.utc),
+    )
+    test_db.add(app)
+    test_db.commit()
+    return app
+
+
 def test_unauthenticated_request_rejected(client):
     """Unauthenticated access to create match run is rejected with 401."""
     resp = client.post(
@@ -229,6 +251,7 @@ def test_recruiter_owner_lifecycle_and_concealment(client, test_db):
     recruiter_b = _seed_user(test_db, email="recruiter.b@company.test", role=UserRole.RECRUITER)
     job_a, ver_a = _seed_job(test_db, recruiter_a.user_id)
     cand = _seed_candidate(test_db, name="Candidate One")
+    _seed_application(test_db, job_a, ver_a, cand)
 
     # Recruiter A logs in and creates match run
     _login_user(client, email="recruiter.a@company.test")
@@ -297,6 +320,8 @@ def test_idempotent_retry_and_conflict(client, test_db):
     job, ver = _seed_job(test_db, recruiter.user_id)
     cand1 = _seed_candidate(test_db, name="Candidate A")
     cand2 = _seed_candidate(test_db, name="Candidate B")
+    _seed_application(test_db, job, ver, cand1)
+    _seed_application(test_db, job, ver, cand2)
 
     _login_user(client, email="recruiter.idem@company.test")
     payload = {
@@ -346,6 +371,7 @@ def test_draft_job_revision_rejected(client, test_db):
     recruiter = _seed_user(test_db, email="recruiter.draft@company.test", role=UserRole.RECRUITER)
     job, ver = _seed_job(test_db, recruiter.user_id, status_val=JobVersionStatus.DRAFT)
     cand = _seed_candidate(test_db)
+    _seed_application(test_db, job, ver, cand)
 
     _login_user(client, email="recruiter.draft@company.test")
     resp = client.post(
@@ -366,6 +392,7 @@ def test_duplicate_candidate_input_rejected(client, test_db):
     recruiter = _seed_user(test_db, email="recruiter.dup@company.test", role=UserRole.RECRUITER)
     job, ver = _seed_job(test_db, recruiter.user_id)
     cand = _seed_candidate(test_db)
+    _seed_application(test_db, job, ver, cand)
 
     _login_user(client, email="recruiter.dup@company.test")
     resp = client.post(
@@ -388,6 +415,7 @@ def test_response_contains_zero_identity_or_protected_data(client, test_db):
     recruiter = _seed_user(test_db, email="recruiter.priv@company.test", role=UserRole.RECRUITER)
     job, ver = _seed_job(test_db, recruiter.user_id)
     cand = _seed_candidate(test_db, name="Secret Candidate", skills=["Python"])
+    _seed_application(test_db, job, ver, cand)
 
     _login_user(client, email="recruiter.priv@company.test")
     resp = client.post(

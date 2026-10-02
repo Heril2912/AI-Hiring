@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useCandidateAuth } from "../../context/CandidateAuthContext";
 import { Icon } from "../Icon";
 
@@ -20,6 +20,10 @@ export function CandidateRegisterPage({
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    document.title = "Create Account — Candidate Portal | Smart Hiring";
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,33 +190,17 @@ export function CandidateRegisterPage({
           </div>
         </form>
 
-        <footer className="candidate-auth-footer" style={{ display: "flex", flexDirection: "column", gap: "8px", textAlign: "center" }}>
-          <p className="footer-text" style={{ margin: 0 }}>
+        <footer className="candidate-auth-footer" style={{ textAlign: "center" }}>
+          <p className="footer-text" style={{ margin: 0, fontSize: "14px" }}>
             Already have an account?{" "}
             <button
               type="button"
               className="link-button"
               onClick={onNavigateLogin}
+              style={{ fontWeight: 600, color: "var(--accent-primary, #3b82f6)", background: "none", border: "none", cursor: "pointer", padding: "0 4px" }}
             >
-              Candidate Sign In
+              Sign in
             </button>
-          </p>
-          <p className="footer-text" style={{ margin: 0, fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
-            Are you a recruiter or hiring manager?{" "}
-            <a
-              href="/"
-              className="link-button"
-              style={{ fontSize: "12px", color: "var(--accent-primary)" }}
-              onClick={(e) => {
-                if (typeof window !== "undefined" && window.history?.pushState) {
-                  e.preventDefault();
-                  window.history.pushState(null, "", "/");
-                  window.dispatchEvent(new PopStateEvent("popstate"));
-                }
-              }}
-            >
-              Staff sign in
-            </a>
           </p>
         </footer>
       </div>

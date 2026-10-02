@@ -120,15 +120,10 @@ class SpeechRuntimeCapabilityService:
         if not stt_ok or not tts_ok:
             missing = []
             if not stt_ok:
-                missing.append("speech transcription (whisper.cpp)")
+                missing.append("speech transcription")
             if not tts_ok:
-                missing.append("question speech synthesis (Piper)")
-            safe_reason = f"Local runtime component(s) not ready: {', '.join(missing)}."
-
-        model_label = cls.get_configured_model_label()
-        model_warning: Optional[str] = None
-        if model_label in ("base.en", "tiny.en"):
-            model_warning = "ggml-small.en.bin is recommended for higher conversational transcription accuracy."
+                missing.append("question speech audio")
+            safe_reason = f"Audio interview service is currently unavailable ({', '.join(missing)})."
 
         return {
             "speech_to_text_available": stt_ok,
@@ -137,8 +132,8 @@ class SpeechRuntimeCapabilityService:
             "secure_context_required": True,
             "max_recording_seconds": settings.audio_max_seconds,
             "max_upload_bytes": settings.audio_max_upload_bytes,
-            "configured_model_label": model_label,
-            "model_recommendation_warning": model_warning,
+            "configured_model_label": None,
+            "model_recommendation_warning": None,
             "safe_unavailable_reason": safe_reason,
             "unavailable_reason": safe_reason,
         }

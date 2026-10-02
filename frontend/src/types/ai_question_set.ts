@@ -192,6 +192,9 @@ export interface CandidatePracticeJobSummary {
   total_question_count?: number;
   released_at: string;
   status?: "RELEASED" | "REVOKED" | string;
+  status_label?: string;
+  session_status?: "IN_PROGRESS" | "SUBMITTED" | string;
+  is_submitted?: boolean;
 }
 
 export interface CandidatePracticeDiscoveryResponse {

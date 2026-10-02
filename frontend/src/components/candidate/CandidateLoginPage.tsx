@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useCandidateAuth } from "../../context/CandidateAuthContext";
 import { Icon } from "../Icon";
 
@@ -18,6 +18,10 @@ export function CandidateLoginPage({
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    document.title = "Sign In — Candidate Portal | Smart Hiring";
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,12 +52,18 @@ export function CandidateLoginPage({
     <div className="candidate-auth-layout">
       <div className="candidate-auth-card" role="main">
         <header className="candidate-auth-header">
-          <div className="candidate-badge-container">
-            <span className="candidate-portal-badge">Candidate portal</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", marginBottom: "8px" }}>
+            <Icon name="briefcase" size={20} className="text-primary" aria-hidden="true" />
+            <span style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>
+              Smart Hiring
+            </span>
           </div>
-          <h1 className="candidate-auth-title">Sign in</h1>
+          <div className="candidate-badge-container">
+            <span className="candidate-badge">Candidate portal</span>
+          </div>
+          <h1 className="candidate-auth-title">Welcome back</h1>
           <p className="candidate-auth-subtitle">
-            Apply for roles and complete your released interviews securely.
+            Sign in to manage applications and complete released interviews.
           </p>
         </header>
 
@@ -62,6 +72,18 @@ export function CandidateLoginPage({
             className="candidate-auth-error-banner"
             role="alert"
             aria-live="assertive"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "10px 14px",
+              backgroundColor: "#fef2f2",
+              border: "1px solid #fecaca",
+              borderRadius: "6px",
+              color: "#b91c1c",
+              fontSize: "13px",
+              marginBottom: "16px",
+            }}
           >
             <Icon name="alert-triangle" className="error-icon" aria-hidden="true" />
             <span>{errorMessage}</span>
@@ -73,14 +95,14 @@ export function CandidateLoginPage({
             <label htmlFor="candidate-email">Email address</label>
             <input
               id="candidate-email"
-              name="candidate-email"
+              name="email"
               type="email"
               className="form-input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@example.com"
+              placeholder="e.g. alex@example.com"
               required
-              autoComplete="username"
+              autoComplete="email"
               disabled={isSubmitting}
             />
           </div>
@@ -90,7 +112,7 @@ export function CandidateLoginPage({
             <div className="password-input-wrapper">
               <input
                 id="candidate-login-password"
-                name="candidate-login-password"
+                name="password"
                 type={showPassword ? "text" : "password"}
                 className="form-input"
                 value={password}
@@ -115,12 +137,13 @@ export function CandidateLoginPage({
             </div>
           </div>
 
-          <div className="form-actions">
+          <div className="form-actions" style={{ marginTop: "4px" }}>
             <button
               type="submit"
-              className="btn btn-primary btn-block"
+              className="btn btn-primary btn-block candidate-submit-btn"
               disabled={isSubmitting || !email.trim() || !password}
               aria-label="Sign In to Candidate Portal"
+              style={{ width: "100%", height: "46px", fontSize: "15px", fontWeight: 600 }}
             >
               {isSubmitting ? (
                 <>
@@ -134,33 +157,17 @@ export function CandidateLoginPage({
           </div>
         </form>
 
-        <footer className="candidate-auth-footer" style={{ display: "flex", flexDirection: "column", gap: "8px", textAlign: "center" }}>
-          <p className="footer-text" style={{ margin: 0 }}>
-            Don't have an account?{" "}
+        <footer className="candidate-auth-footer" style={{ marginTop: "24px", paddingTop: "16px", textAlign: "center" }}>
+          <p className="footer-text" style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary, #64748b)" }}>
+            New to Smart Hiring?{" "}
             <button
               type="button"
               className="link-button"
               onClick={onNavigateRegister}
+              style={{ fontWeight: 600, color: "var(--accent-primary, #3b82f6)", background: "none", border: "none", cursor: "pointer", padding: "0 4px" }}
             >
               Create candidate account
             </button>
-          </p>
-          <p className="footer-text" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
-            Are you a recruiter or hiring manager?{" "}
-            <a
-              href="/"
-              className="link-button"
-              style={{ fontSize: "var(--text-xs)", color: "var(--accent-primary)" }}
-              onClick={(e) => {
-                if (typeof window !== "undefined" && window.history?.pushState) {
-                  e.preventDefault();
-                  window.history.pushState(null, "", "/");
-                  window.dispatchEvent(new PopStateEvent("popstate"));
-                }
-              }}
-            >
-              Staff sign in
-            </a>
           </p>
         </footer>
       </div>

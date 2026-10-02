@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.auth import Base, UserRecord, UserRole
 from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
+from app.models.candidate_access import CandidateApplicationRecord, CandidateApplicationStatus
 from app.models.job import (
     JobLifecycleStatus,
     JobRequirement,
@@ -192,12 +193,35 @@ def _seed_job(
     return job, ver
 
 
+def _seed_application(test_db, job, ver, cand, status=CandidateApplicationStatus.SUBMITTED.value):
+    app = CandidateApplicationRecord(
+        application_id=uuid.uuid4(),
+        organization_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        user_id=uuid.uuid4(),
+        binding_id=uuid.uuid4(),
+        candidate_id=cand.identity_id,
+        job_id=job.job_id,
+        job_version_id=ver.job_version_id,
+        job_revision=ver.revision,
+        artifact_id=cand.artifact_id,
+        profile_id=cand.profile_id,
+        profile_version=cand.profile_version,
+        status=status,
+        submitted_at=datetime.now(timezone.utc),
+    )
+    test_db.add(app)
+    test_db.commit()
+    return app
+
+
 def test_single_and_multiple_candidates_match_execution(test_db):
     """Test that single and multiple candidates create the expected number of match results."""
     recruiter = _seed_recruiter(test_db)
     job, ver = _seed_job(test_db, recruiter.user_id, skills=["Python", "SQL"])
     cand1 = _seed_candidate(test_db, name="Alice", skills=["Python", "SQL"])
     cand2 = _seed_candidate(test_db, name="Bob", skills=["Python"])
+    _seed_application(test_db, job, ver, cand1)
+    _seed_application(test_db, job, ver, cand2)
 
     # 1. Single candidate run
     run1, results1, _ = orchestrate_match_run(
@@ -238,6 +262,7 @@ def test_atomic_rollback_on_candidate_failure(test_db):
     recruiter = _seed_recruiter(test_db)
     job, ver = _seed_job(test_db, recruiter.user_id, skills=["Python"])
     cand1 = _seed_candidate(test_db, name="ValidAlice", skills=["Python"])
+    _seed_application(test_db, job, ver, cand1)
     non_existent_id = uuid.uuid4()
 
     # Pass one valid candidate and one non-existent candidate profile
@@ -362,6 +387,7 @@ def test_no_raw_resume_text_or_prohibited_identity_in_persisted_results(test_db)
     recruiter = _seed_recruiter(test_db)
     job, ver = _seed_job(test_db, recruiter.user_id, skills=["Python"])
     cand = _seed_candidate(test_db, name="ConfidentialCandidate", skills=["Python"])
+    _seed_application(test_db, job, ver, cand)
 
     run, results, _ = orchestrate_match_run(
         actor=recruiter,

@@ -81,12 +81,14 @@ class McqReorderRequest(StrictSchema):
 
 
 # Structured AI Provider Output Contract
-class StructuredAiMcqOption(StrictSchema):
+class StructuredAiMcqOption(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     option_id: str
     text: str
 
 
-class StructuredAiMcqQuestion(StrictSchema):
+class StructuredAiMcqQuestion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     question_text: str
     options: List[StructuredAiMcqOption]
     correct_option_id: str
@@ -96,7 +98,8 @@ class StructuredAiMcqQuestion(StrictSchema):
     difficulty: str = "FOUNDATIONAL"
 
 
-class StructuredAiMcqBatchResponse(StrictSchema):
+class StructuredAiMcqBatchResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     questions: List[StructuredAiMcqQuestion]
 
 
@@ -135,6 +138,8 @@ class CandidatePracticeJobSummary(FrozenSchema):
     released_at: datetime
     interview_mode: str = "TEXT"
     status_label: str = "Practice content ready"
+    session_status: Optional[str] = None
+    is_submitted: bool = False
 
 
 class CandidatePracticeDiscoveryResponse(FrozenSchema):

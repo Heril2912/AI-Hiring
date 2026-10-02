@@ -37,11 +37,9 @@ const CANDIDATE_STATUS_FILTERS = [
   { id: "READY", label: "Ready for review" },
   { id: "IN_REVIEW", label: "In review" },
   { id: "FINALIZED", label: "Finalized" },
-  { id: "UNAVAILABLE", label: "Analysis unavailable" },
 ] as const;
 
 const CANDIDATE_MODE_FILTERS = [
-  { id: "ALL", label: "All modes" },
   { id: "TEXT", label: "Text-based" },
   { id: "AUDIO", label: "Audio-based" },
 ] as const;
@@ -969,8 +967,15 @@ export const EvaluationWorkspace: React.FC = () => {
             {filteredCandidates.map((cand) => (
               <div key={cand.release_id} className="eval-candidate-card">
                 <div className="eval-candidate-info">
-                  <div className="eval-candidate-avatar">
-                    {cand.candidate_name.charAt(0).toUpperCase()}
+                  <div className="eval-candidate-avatar-wrap">
+                    <div className="eval-candidate-avatar">
+                      {cand.candidate_name.charAt(0).toUpperCase()}
+                    </div>
+                    <span
+                      className={`eval-submission-indicator-dot ${cand.submitted_at ? "submitted" : "pending"}`}
+                      title={cand.submitted_at ? "Interview submitted" : "Interview awaiting submission"}
+                      aria-label={cand.submitted_at ? "Submitted" : "Not yet submitted"}
+                    />
                   </div>
                   <div className="eval-candidate-details">
                     <div className="eval-candidate-badges">
@@ -980,18 +985,20 @@ export const EvaluationWorkspace: React.FC = () => {
                       <span className="eval-status-badge eval-status-source">
                         {cand.application_source}
                       </span>
-                      <span
-                        className={`eval-status-badge ${cand.recruiter_evaluation_status === "Finalized"
-                          ? "finalized"
-                          : cand.recruiter_evaluation_status === "In review"
-                            ? "in-review"
-                            : cand.recruiter_evaluation_status === "Ready for review"
-                              ? "ready"
-                              : "unavailable"
-                          }`}
-                      >
-                        {cand.recruiter_evaluation_status}
-                      </span>
+                      {cand.recruiter_evaluation_status && (
+                        <span
+                          className={`eval-status-badge ${cand.recruiter_evaluation_status === "Finalized"
+                            ? "finalized"
+                            : cand.recruiter_evaluation_status === "In review"
+                              ? "in-review"
+                              : cand.recruiter_evaluation_status === "Ready for review"
+                                ? "ready"
+                                : ""
+                            }`}
+                        >
+                          {cand.recruiter_evaluation_status}
+                        </span>
+                      )}
                     </div>
                     <h3 className="eval-candidate-name">{cand.candidate_name}</h3>
                     <div className="eval-candidate-sub">

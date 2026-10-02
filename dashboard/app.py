@@ -1,4 +1,14 @@
 """Streamlit Recruitment Analytics Dashboard Entrypoint (Phase 4E.2)."""
+import sys
+from pathlib import Path
+
+# Ensure both project root and dashboard directory are on sys.path
+_current_dir = Path(__file__).resolve().parent
+_project_root = _current_dir.parent
+for _p in [str(_project_root), str(_current_dir)]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import streamlit as st
 
 from dashboard.auth import ensure_authenticated_dashboard_session, get_current_user_role

@@ -59,6 +59,7 @@ async def list_job_applicants(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     mode: Optional[str] = Query(None, description="Optional interview mode filter (TEXT, AUDIO)"),
+    revision: Optional[int] = Query(None, description="Optional job revision filter"),
     auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
     db: Session = Depends(get_db),
 ) -> RecruiterApplicationListResponse:
@@ -69,6 +70,7 @@ async def list_job_applicants(
         status_filter=status,
         review_state_filter=review_state,
         mode_filter=mode,
+        revision=revision,
         page=page,
         limit=limit,
     )

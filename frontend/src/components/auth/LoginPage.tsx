@@ -1,4 +1,4 @@
-import React, { useState, FormEvent } from "react";
+import React, { useState, useEffect, FormEvent } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { Icon } from "../Icon";
 import { getPortalContext, getLoginPortalSubtitle } from "../../utils/portal";
@@ -14,6 +14,16 @@ export function LoginPage() {
   const [serverError, setServerError] = useState<string | null>(null);
 
   const portalContext = getPortalContext();
+
+  useEffect(() => {
+    const portalTitle =
+      portalContext === "admin"
+        ? "Admin Sign In | Smart Hiring"
+        : portalContext === "recruiter"
+        ? "Recruiter Sign In | Smart Hiring"
+        : "Staff Sign In | Smart Hiring";
+    document.title = portalTitle;
+  }, [portalContext]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

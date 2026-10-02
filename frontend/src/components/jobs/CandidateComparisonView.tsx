@@ -8,7 +8,7 @@ import {
   fetchGapReportsForResult,
   createGapReport,
 } from "../../api/jobs";
-import { apiFetch } from "../../api/client";
+import { fetchJobApplicants } from "../../api/recruiterApplications";
 import { CandidateSummary } from "../CandidatesDirectory";
 import { Icon } from "../Icon";
 import {
@@ -113,6 +113,15 @@ export function CandidateComparisonView({
   const [currentPage, setCurrentPage] = useState<number>(initialPage);
   const pageSize = 25;
 
+  // Clear selection and results whenever jobId or revision changes
+  useEffect(() => {
+    setSelectedProfileIds(new Set());
+    if (!initialResults) {
+      setResults([]);
+      setMatchRun(null);
+    }
+  }, [jobId, revision]);
+
   // 0. Automatically load existing match run and ranking results if initialRunId is provided
   useEffect(() => {
     const targetRunId = initialRunId || initialMatchRun?.runId;
@@ -150,7 +159,7 @@ export function CandidateComparisonView({
     }
   }, [initialRunId, initialMatchRun]);
 
-  // 1. Fetch available candidate pool
+  // 1. Fetch submitted eligible applicants for this job & revision
   useEffect(() => {
     if (initialCandidates && initialCandidates.length > 0) {
       setCandidates(initialCandidates);
@@ -158,17 +167,39 @@ export function CandidateComparisonView({
       return;
     }
     let isMounted = true;
-    async function loadCandidates() {
+    async function loadApplicants() {
       try {
         setIsLoadingCandidates(true);
         setLoadError(null);
-        const data = await apiFetch<CandidateSummary[]>("/api/v1/resumes");
+        const data = await fetchJobApplicants(jobId, {
+          status: "SUBMITTED",
+          revision,
+          limit: 100,
+        });
         if (!isMounted) return;
-        setCandidates(data || []);
-        // Auto-select candidate profiles that have extraction/profile ready if no initial selection provided
+
+        // Map submitted applications to CandidateSummary items for comparison view
+        const mappedCandidates: CandidateSummary[] = (data.items || []).map((app) => ({
+          artifactId: app.profileId,
+          originalFilename: app.candidateName,
+          detectedFormat: "PDF",
+          validationStatus: "VALID",
+          createdAt: app.submittedAt,
+          hasExtraction: true,
+          latestProfileVersion: app.profileVersion,
+          latestProfileId: app.profileId,
+          fullName: app.candidateName,
+          headline: app.currentRole || `Applied for Rev #${app.jobRevision}`,
+          reviewRequired: false,
+          provenance: "SUBMITTED_APPLICATION",
+        }));
+
+        setCandidates(mappedCandidates);
+
+        // Auto-select eligible applicant profiles if no initial selection provided
         if (!initialSelectedProfileIds || initialSelectedProfileIds.length === 0) {
           const validIds = new Set<string>();
-          (data || []).forEach((c) => {
+          mappedCandidates.forEach((c) => {
             if (c.latestProfileVersion && c.latestProfileVersion > 0) {
               validIds.add(c.artifactId);
             }
@@ -176,18 +207,17 @@ export function CandidateComparisonView({
           setSelectedProfileIds(validIds);
         }
       } catch (err: any) {
-        if (isMounted) {
-          setLoadError(err?.message || "Failed to load candidate directory.");
-        }
+        if (!isMounted) return;
+        setLoadError(err?.message || "Failed to load applicants for this job.");
       } finally {
         if (isMounted) setIsLoadingCandidates(false);
       }
     }
-    loadCandidates();
+    loadApplicants();
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [jobId, revision]);
 
   // Filter candidate pool by search query
   const filteredCandidates = useMemo(() => {
@@ -240,7 +270,7 @@ export function CandidateComparisonView({
         }));
 
       if (candidatesPayload.length === 0) {
-        setRunError("None of the selected candidates have an active processed profile version.");
+        setRunError("None of the selected applicants have an active processed profile version.");
         return;
       }
 
@@ -260,7 +290,7 @@ export function CandidateComparisonView({
       setResults(res.items || []);
       setCurrentPage(1);
     } catch (err: any) {
-      setRunError(err?.message || "Failed to execute candidate comparison match run.");
+      setRunError(err?.message || "Failed to execute applicant comparison match run.");
     } finally {
       setIsComparing(false);
     }
@@ -467,17 +497,17 @@ export function CandidateComparisonView({
             <input
               type="text"
               className="search-input"
-              placeholder="Search candidate pool..."
+              placeholder="Search applicants for this job..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              aria-label="Filter candidates for comparison"
+              aria-label="Filter applicants for comparison"
             />
             {searchQuery && (
               <button
                 type="button"
                 className="search-clear-btn"
                 onClick={() => setSearchQuery("")}
-                aria-label="Clear candidate search"
+                aria-label="Clear applicant search"
               >
                 <Icon name="x" size={13} />
               </button>
@@ -507,11 +537,11 @@ export function CandidateComparisonView({
 
         {isLoadingCandidates ? (
           <p style={{ fontSize: "13px", color: "var(--text-secondary)", padding: "12px" }}>
-            Loading candidate profiles...
+            Loading applicants for this job...
           </p>
         ) : filteredCandidates.length === 0 ? (
           <p style={{ fontSize: "13px", color: "var(--text-secondary)", padding: "12px" }}>
-            No matching candidates found in directory.
+            No submitted applicants are available for this job. Candidates will appear here after submitting an application and resume.
           </p>
         ) : (
           <div className="candidate-select-grid">

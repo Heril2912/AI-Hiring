@@ -189,23 +189,43 @@ export function CandidatePracticeDirectory() {
                   </h2>
                 </div>
 
-                <span
-                  style={{
-                    backgroundColor: "#f0fdf4",
-                    color: "#166534",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    padding: "6px 12px",
-                    borderRadius: "16px",
-                    border: "1px solid #bbf7d0",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#22c55e" }} />
-                  Available
-                </span>
+                {singleJob.is_submitted || singleJob.session_status === "SUBMITTED" ? (
+                  <span
+                    style={{
+                      backgroundColor: "#f8fafc",
+                      color: "#475569",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      padding: "6px 12px",
+                      borderRadius: "16px",
+                      border: "1px solid #cbd5e1",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <Icon name="check-circle" size={14} style={{ color: "#16a34a" }} aria-hidden="true" />
+                    Interview Submitted
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      backgroundColor: "#f0fdf4",
+                      color: "#166534",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      padding: "6px 12px",
+                      borderRadius: "16px",
+                      border: "1px solid #bbf7d0",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#22c55e" }} />
+                    Available
+                  </span>
+                )}
               </div>
 
               {/* Assessment Breakdown Blocks */}
@@ -272,32 +292,52 @@ export function CandidatePracticeDirectory() {
               <div
                 style={{
                   padding: "14px 18px",
-                  backgroundColor: "#eff6ff",
+                  backgroundColor: singleJob.is_submitted || singleJob.session_status === "SUBMITTED" ? "#f0fdf4" : "#eff6ff",
                   borderRadius: "8px",
-                  border: "1px solid #bfdbfe",
+                  border: singleJob.is_submitted || singleJob.session_status === "SUBMITTED" ? "1px solid #bbf7d0" : "1px solid #bfdbfe",
                   display: "flex",
                   alignItems: "center",
                   gap: "12px",
                 }}
               >
-                <Icon name="info" size={18} style={{ color: "#2563eb", flexShrink: 0 }} aria-hidden="true" />
-                <p style={{ fontSize: "13px", color: "#1e40af", margin: 0, lineHeight: 1.5 }}>
-                  This official interview was released for your submitted application. The hiring team has approved this {isAudio ? "Audio-based" : "Text-based"} question set for Revision #{revNum}.
+                <Icon
+                  name={singleJob.is_submitted || singleJob.session_status === "SUBMITTED" ? "check-circle" : "info"}
+                  size={18}
+                  style={{ color: singleJob.is_submitted || singleJob.session_status === "SUBMITTED" ? "#16a34a" : "#2563eb", flexShrink: 0 }}
+                  aria-hidden="true"
+                />
+                <p style={{ fontSize: "13px", color: singleJob.is_submitted || singleJob.session_status === "SUBMITTED" ? "#166534" : "#1e40af", margin: 0, lineHeight: 1.5 }}>
+                  {singleJob.is_submitted || singleJob.session_status === "SUBMITTED"
+                    ? "You have already completed and submitted your official interview for this position. Responses are finalized and under review by the hiring team."
+                    : `This official interview was released for your submitted application. The hiring team has approved this ${isAudio ? "Audio-based" : "Text-based"} question set for Revision #${revNum}.`}
                 </p>
               </div>
 
               {/* Action Button */}
               <div style={{ display: "flex", justifyContent: "flex-start", paddingTop: "8px" }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => setActiveRelease(singleJob)}
-                  aria-label={isAudio ? "Prepare Interview" : "Start Practice Interview"}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 20px", fontSize: "14px" }}
-                >
-                  <span>{isAudio ? "Prepare Interview" : "Start Practice Interview"}</span>
-                  <Icon name="chevron-right" size={16} aria-hidden="true" />
-                </button>
+                {singleJob.is_submitted || singleJob.session_status === "SUBMITTED" ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setActiveRelease(singleJob)}
+                    aria-label="View Submitted Interview"
+                    style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 20px", fontSize: "14px" }}
+                  >
+                    <Icon name="check-circle" size={16} aria-hidden="true" />
+                    <span>View Submission</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => setActiveRelease(singleJob)}
+                    aria-label={isAudio ? "Prepare Interview" : "Start Practice Interview"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "10px 20px", fontSize: "14px" }}
+                  >
+                    <span>{isAudio ? "Prepare Interview" : "Start Practice Interview"}</span>
+                    <Icon name="chevron-right" size={16} aria-hidden="true" />
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -377,24 +417,45 @@ export function CandidatePracticeDirectory() {
                       </h2>
                     </div>
 
-                    <span
-                      style={{
-                        backgroundColor: "#f0fdf4",
-                        color: "#166534",
-                        fontSize: "11px",
-                        fontWeight: 600,
-                        padding: "3px 8px",
-                        borderRadius: "12px",
-                        border: "1px solid #bbf7d0",
-                        whiteSpace: "nowrap",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#22c55e" }} />
-                      Available
-                    </span>
+                    {job.is_submitted || job.session_status === "SUBMITTED" ? (
+                      <span
+                        style={{
+                          backgroundColor: "#f8fafc",
+                          color: "#475569",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          padding: "3px 8px",
+                          borderRadius: "12px",
+                          border: "1px solid #cbd5e1",
+                          whiteSpace: "nowrap",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <Icon name="check-circle" size={12} style={{ color: "#16a34a" }} aria-hidden="true" />
+                        Submitted
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          backgroundColor: "#f0fdf4",
+                          color: "#166534",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          padding: "3px 8px",
+                          borderRadius: "12px",
+                          border: "1px solid #bbf7d0",
+                          whiteSpace: "nowrap",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#22c55e" }} />
+                        Available
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
@@ -414,15 +475,27 @@ export function CandidatePracticeDirectory() {
                     <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)" }}>
                       ~{estMinutes} Mins
                     </span>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setActiveRelease(job)}
-                      style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
-                    >
-                      <span>{isAudio ? "Prepare" : "Start"}</span>
-                      <Icon name="chevron-right" size={14} aria-hidden="true" />
-                    </button>
+                    {job.is_submitted || job.session_status === "SUBMITTED" ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setActiveRelease(job)}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                      >
+                        <Icon name="check-circle" size={14} aria-hidden="true" />
+                        <span>View</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => setActiveRelease(job)}
+                        style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                      >
+                        <span>{isAudio ? "Prepare" : "Start"}</span>
+                        <Icon name="chevron-right" size={14} aria-hidden="true" />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
