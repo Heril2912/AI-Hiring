@@ -580,7 +580,8 @@ class DashboardAnalyticsService:
 
         # Local AI
         ai_status = "DISABLED"
-        if self.settings.llm_enabled:
+        is_configured = self.settings.llm_enabled or bool(self.settings.llm_base_url)
+        if is_configured:
             ai_status = "AVAILABLE" if self.settings.llm_base_url else "ATTENTION_NEEDED"
 
         # Speech capabilities (whisper.cpp and piper)

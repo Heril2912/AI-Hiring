@@ -71,10 +71,9 @@ export function AiQuestionSetWorkspace({
   // Provenance Label Helper
   const getProvenanceBadge = (origin?: string, modelDisplayName?: string | null) => {
     const norm = (origin || "").toUpperCase();
-    const modelTag = modelDisplayName ? (modelDisplayName.includes("Qwen3") ? "Qwen3" : modelDisplayName) : "Qwen3";
     if (norm === "LOCAL_LLM_GENERATED" || norm === "AI_GENERATED") {
       return {
-        label: `Generated locally with ${modelTag}`,
+        label: "AI-generated question set",
         className: "prov-ai",
         icon: "sparkles",
         bg: "#eef1fc",
@@ -627,7 +626,7 @@ export function AiQuestionSetWorkspace({
               }}
             >
               <Icon name="sparkles" size={12} />
-              <span>{detail.model_display_name || "Qwen3-4B MLX"}</span>
+              <span>AI-generated question set</span>
             </span>
 
             {/* Compact Release Summary Badge */}
@@ -766,9 +765,9 @@ export function AiQuestionSetWorkspace({
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", fontSize: "13px" }}>
             <div>
-              <span style={{ color: "var(--text-muted, #64748b)" }}>Local Model:</span>
+              <span style={{ color: "var(--text-muted, #64748b)" }}>Generation:</span>
               <div style={{ fontWeight: 600, color: "var(--text-primary, #0f172a)" }}>
-                {detail.model_display_name || "Qwen3-4B MLX"}
+                AI-generated question set
               </div>
             </div>
             <div>

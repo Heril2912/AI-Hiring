@@ -897,209 +897,250 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
         </div>
       )}
 
-      {/* Single-Column Form */}
+        {/* Single-Column Form */}
       <div className="job-editor-single-col">
-        {/* Section 1: Job details */}
+        {/* Section: Job details */}
         <section className="job-section-card" aria-labelledby="section-job-details-title">
           <div className="section-card-header">
-            <Icon name="building" size={18} className="section-icon" />
             <div>
-              <h3 id="section-job-details-title" className="section-title">1. Job details</h3>
-              <p className="section-subtitle">Core title, department, and workplace parameters.</p>
+              <h3 id="section-job-details-title" className="section-title">Job details</h3>
+              <p className="section-subtitle">Core information for this role.</p>
             </div>
           </div>
 
-          <div className="form-fields-stack">
-            <div className="form-group">
-              <label htmlFor="job-title-input" className="form-label">
-                Job Title <span className="required-star">*</span>
-              </label>
-              <input
-                id="job-title-input"
-                type="text"
-                className="form-input"
-                placeholder="e.g. Senior Backend Developer"
-                disabled={isReadOnly}
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value);
-                  setIsDirty(true);
-                }}
-                required
-              />
-            </div>
-
-            <div className="form-two-col-grid">
+          {isReadOnly ? (
+            <dl className="job-read-only-grid">
+              <div className="job-read-only-item">
+                <dt className="job-read-only-dt">Department</dt>
+                <dd className="job-read-only-dd">{department || "Not specified"}</dd>
+              </div>
+              <div className="job-read-only-item">
+                <dt className="job-read-only-dt">Location</dt>
+                <dd className="job-read-only-dd">{location || "Not specified"}</dd>
+              </div>
+              <div className="job-read-only-item">
+                <dt className="job-read-only-dt">Employment type</dt>
+                <dd className="job-read-only-dd">
+                  {employmentType === "FULL_TIME"
+                    ? "Full-time"
+                    : employmentType === "PART_TIME"
+                    ? "Part-time"
+                    : employmentType === "CONTRACT"
+                    ? "Contract"
+                    : employmentType === "INTERNSHIP"
+                    ? "Internship"
+                    : employmentType === "TEMPORARY"
+                    ? "Temporary"
+                    : employmentType || "Not specified"}
+                </dd>
+              </div>
+              <div className="job-read-only-item">
+                <dt className="job-read-only-dt">Workplace</dt>
+                <dd className="job-read-only-dd">
+                  {workplaceType === "HYBRID"
+                    ? "Hybrid"
+                    : workplaceType === "ON_SITE"
+                    ? "On-site"
+                    : workplaceType === "REMOTE"
+                    ? "Remote"
+                    : workplaceType || "Not specified"}
+                </dd>
+              </div>
+              <div className="job-read-only-item">
+                <dt className="job-read-only-dt">Openings</dt>
+                <dd className="job-read-only-dd">{openingsCount || "1"}</dd>
+              </div>
+              <div className="job-read-only-item">
+                <dt className="job-read-only-dt">Reference code</dt>
+                <dd className="job-read-only-dd">{internalReference || "None"}</dd>
+              </div>
+            </dl>
+          ) : (
+            <div className="form-fields-stack">
               <div className="form-group">
-                <label htmlFor="job-dept-input" className="form-label">Department</label>
+                <label htmlFor="job-title-input" className="form-label">
+                  Job title <span className="required-star">*</span>
+                </label>
                 <input
-                  id="job-dept-input"
+                  id="job-title-input"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Engineering"
-                  disabled={isReadOnly}
-                  value={department}
+                  placeholder="e.g. Frontend developer"
+                  value={title}
                   onChange={(e) => {
-                    setDepartment(e.target.value);
+                    setTitle(e.target.value);
                     setIsDirty(true);
                   }}
+                  required
                 />
               </div>
 
-              <div className="form-group">
-                <label htmlFor="job-loc-input" className="form-label">Location</label>
-                <input
-                  id="job-loc-input"
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. San Francisco, CA / Remote"
-                  disabled={isReadOnly}
-                  value={location}
-                  onChange={(e) => {
-                    setLocation(e.target.value);
-                    setIsDirty(true);
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="form-three-col-grid">
-              <div className="form-group">
-                <label htmlFor="job-emp-type" className="form-label">Employment Type</label>
-                <select
-                  id="job-emp-type"
-                  className="form-input"
-                  disabled={isReadOnly}
-                  value={employmentType}
-                  onChange={(e) => {
-                    setEmploymentType(e.target.value);
-                    setIsDirty(true);
-                  }}
-                >
-                  <option value="FULL_TIME">Full-Time</option>
-                  <option value="PART_TIME">Part-Time</option>
-                  <option value="CONTRACT">Contract</option>
-                  <option value="INTERNSHIP">Internship</option>
-                  <option value="TEMPORARY">Temporary</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="job-work-type" className="form-label">Workplace Type</label>
-                <select
-                  id="job-work-type"
-                  className="form-input"
-                  disabled={isReadOnly}
-                  value={workplaceType}
-                  onChange={(e) => {
-                    setWorkplaceType(e.target.value);
-                    setIsDirty(true);
-                  }}
-                >
-                  <option value="HYBRID">Hybrid</option>
-                  <option value="ON_SITE">On-Site</option>
-                  <option value="REMOTE">Remote</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="job-openings" className="form-label">Openings</label>
-                <input
-                  id="job-openings"
-                  type="number"
-                  min={1}
-                  max={999}
-                  className="form-input"
-                  disabled={isReadOnly}
-                  value={openingsCount}
-                  onChange={(e) => {
-                    setOpeningsCount(e.target.value);
-                    setIsDirty(true);
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Collapsed Job Details: More options */}
-            <div className="form-disclosure-row">
-              <button
-                type="button"
-                className="btn-disclosure"
-                onClick={() => setShowJobDetailsMore(!showJobDetailsMore)}
-                aria-expanded={showJobDetailsMore}
-              >
-                <Icon name={showJobDetailsMore ? "chevron-down" : "chevron-right"} size={13} />
-                <span>Additional requisition details (Reference code)</span>
-              </button>
-            </div>
-
-            {showJobDetailsMore && (
-              <div className="form-disclosure-panel">
+              <div className="form-two-col-grid">
                 <div className="form-group">
-                  <label htmlFor="job-ref-input" className="form-label">
-                    Internal Reference / Requisition Code
-                  </label>
+                  <label htmlFor="job-dept-input" className="form-label">Department</label>
                   <input
-                    id="job-ref-input"
+                    id="job-dept-input"
                     type="text"
                     className="form-input"
-                    placeholder="e.g. REQ-2026-084"
-                    disabled={isReadOnly}
-                    value={internalReference}
+                    placeholder="e.g. Product engineering"
+                    value={department}
                     onChange={(e) => {
-                      setInternalReference(e.target.value);
+                      setDepartment(e.target.value);
+                      setIsDirty(true);
+                    }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="job-loc-input" className="form-label">Location</label>
+                  <input
+                    id="job-loc-input"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Ahmedabad, Gujarat"
+                    value={location}
+                    onChange={(e) => {
+                      setLocation(e.target.value);
                       setIsDirty(true);
                     }}
                   />
                 </div>
               </div>
-            )}
-          </div>
+
+              <div className="form-three-col-grid">
+                <div className="form-group">
+                  <label htmlFor="job-emp-type" className="form-label">Employment type</label>
+                  <select
+                    id="job-emp-type"
+                    className="form-input"
+                    value={employmentType}
+                    onChange={(e) => {
+                      setEmploymentType(e.target.value);
+                      setIsDirty(true);
+                    }}
+                  >
+                    <option value="FULL_TIME">Full-time</option>
+                    <option value="PART_TIME">Part-time</option>
+                    <option value="CONTRACT">Contract</option>
+                    <option value="INTERNSHIP">Internship</option>
+                    <option value="TEMPORARY">Temporary</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="job-work-type" className="form-label">Workplace type</label>
+                  <select
+                    id="job-work-type"
+                    className="form-input"
+                    value={workplaceType}
+                    onChange={(e) => {
+                      setWorkplaceType(e.target.value);
+                      setIsDirty(true);
+                    }}
+                  >
+                    <option value="HYBRID">Hybrid</option>
+                    <option value="ON_SITE">On-site</option>
+                    <option value="REMOTE">Remote</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="job-openings" className="form-label">Openings</label>
+                  <input
+                    id="job-openings"
+                    type="number"
+                    min={1}
+                    max={999}
+                    className="form-input"
+                    value={openingsCount}
+                    onChange={(e) => {
+                      setOpeningsCount(e.target.value);
+                      setIsDirty(true);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="job-ref-input" className="form-label">
+                  Reference code (optional)
+                </label>
+                <input
+                  id="job-ref-input"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. ENG-104"
+                  value={internalReference}
+                  onChange={(e) => {
+                    setInternalReference(e.target.value);
+                    setIsDirty(true);
+                  }}
+                />
+                <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", marginTop: "4px", display: "block" }}>
+                  Internal identifier used by your recruitment team.
+                </span>
+              </div>
+            </div>
+          )}
         </section>
 
-        {/* Section 2: About the role */}
+        {/* Section: About the role */}
         <section className="job-section-card" aria-labelledby="section-about-role-title">
           <div className="section-card-header">
-            <Icon name="file-text" size={18} className="section-icon" />
             <div>
-              <h3 id="section-about-role-title" className="section-title">2. About the role</h3>
-              <p className="section-subtitle">Overview narrative and primary responsibilities.</p>
+              <h3 id="section-about-role-title" className="section-title">About the role</h3>
             </div>
           </div>
 
-          <div className="form-fields-stack">
-            <div className="form-group">
-              <label htmlFor="job-summary-input" className="form-label">Role Summary</label>
-              <textarea
-                id="job-summary-input"
-                className="form-input form-textarea"
-                rows={3}
-                placeholder="Brief summary of the role..."
-                disabled={isReadOnly}
-                value={summary}
-                onChange={(e) => {
-                  setSummary(e.target.value);
-                  setIsDirty(true);
-                }}
-              />
-            </div>
+          {isReadOnly ? (
+            <div className="job-read-only-stack">
+              <div className="job-read-only-block">
+                <span className="job-read-only-block-label">Role summary</span>
+                <div className="job-read-only-block-content">
+                  {summary || "No summary provided."}
+                </div>
+              </div>
 
-            <div className="form-group">
-              <label htmlFor="job-resp-input" className="form-label">Responsibilities</label>
-              <textarea
-                id="job-resp-input"
-                className="form-input form-textarea"
-                rows={4}
-                placeholder="Key duties and day-to-day responsibilities..."
-                disabled={isReadOnly}
-                value={responsibilities}
-                onChange={(e) => {
-                  setResponsibilities(e.target.value);
-                  setIsDirty(true);
-                }}
-              />
+              <div className="job-read-only-block">
+                <span className="job-read-only-block-label">Responsibilities</span>
+                <div className="job-read-only-block-content">
+                  {responsibilities || "No responsibilities specified."}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="form-fields-stack">
+              <div className="form-group">
+                <label htmlFor="job-summary-input" className="form-label">Role summary</label>
+                <textarea
+                  id="job-summary-input"
+                  className="form-input form-textarea"
+                  rows={3}
+                  placeholder="Brief summary of the role..."
+                  value={summary}
+                  onChange={(e) => {
+                    setSummary(e.target.value);
+                    setIsDirty(true);
+                  }}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="job-resp-input" className="form-label">Responsibilities</label>
+                <textarea
+                  id="job-resp-input"
+                  className="form-input form-textarea"
+                  rows={4}
+                  placeholder="Key duties and day-to-day responsibilities..."
+                  value={responsibilities}
+                  onChange={(e) => {
+                    setResponsibilities(e.target.value);
+                    setIsDirty(true);
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Optional Collapsed Section: Occupation reference (optional) */}
@@ -1118,7 +1159,6 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
             aria-expanded={showOccupationSection}
           >
             <div className="section-header-left">
-              <Icon name="briefcase" size={18} className="section-icon" />
               <div>
                 <h3 id="section-occupation-title" className="section-title">
                   Occupation reference <span className="text-muted font-normal">(optional)</span>
@@ -1140,7 +1180,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
           {showOccupationSection && (
             <div className="section-collapsible-content">
               {isReadOnly ? (
-                <p className="text-muted" style={{ padding: "8px 0" }}>
+                <p className="job-read-only-text" style={{ padding: "8px 0", margin: 0, color: "var(--text-primary)" }}>
                   {occupationTitle ? `Selected O*NET occupation: ${occupationTitle}` : "No O*NET occupation selected for this revision."}
                 </p>
               ) : (
@@ -1154,14 +1194,13 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
           )}
         </section>
 
-        {/* Section 3: Requirements */}
+        {/* Section: Requirements */}
         <section className="job-section-card" aria-labelledby="section-requirements-title">
           <div className="section-card-header-row">
             <div className="section-header-left">
-              <Icon name="badge-check" size={18} className="section-icon" />
               <div>
                 <div className="requirements-header-line">
-                  <h3 id="section-requirements-title" className="section-title">3. Requirements</h3>
+                  <h3 id="section-requirements-title" className="section-title">Requirements</h3>
                   <div className="requirements-count-chips">
                     <span className="chip-req-total">
                       {reviewSummary.total} {reviewSummary.total === 1 ? "requirement" : "requirements"}
@@ -1237,13 +1276,12 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
           )}
         </section>
 
-        {/* Section 4: Requisition Readiness & Revision Locking */}
+        {/* Section: Requisition Readiness & Revision Locking */}
         <section className="job-section-card draft-checks-section" aria-labelledby="section-readiness-title">
           <div className="section-card-header-row">
             <div className="section-header-left">
-              <Icon name="check" size={18} className="section-icon" />
               <div>
-                <h3 id="section-readiness-title" className="section-title">4. Requisition readiness & locking</h3>
+                <h3 id="section-readiness-title" className="section-title">Requisition readiness & locking</h3>
                 <p className="section-subtitle">Validate authoritative criteria and lock revision for candidate matching.</p>
               </div>
             </div>

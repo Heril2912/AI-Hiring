@@ -42,6 +42,17 @@ export function CandidateShell({ onLogout, initialTab }: CandidateShellProps) {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  // Update browser tab title dynamically per candidate tab
+  useEffect(() => {
+    const tabTitles: Record<CandidateTab, string> = {
+      jobs: "Open Jobs — Candidate Portal | Smart Hiring",
+      applications: "My Applications — Candidate Portal | Smart Hiring",
+      interviews: "Practice Interviews — Candidate Portal | Smart Hiring",
+      profile: "My Profile — Candidate Portal | Smart Hiring",
+    };
+    document.title = tabTitles[activeTab] || "Candidate Portal | Smart Hiring";
+  }, [activeTab]);
+
   const navigateToTab = (tab: CandidateTab) => {
     setActiveTab(tab);
     const targetUrl = `/candidate/${tab}`;

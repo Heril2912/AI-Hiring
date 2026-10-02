@@ -187,11 +187,26 @@ def _evaluate_interview_eligibility(
         )
 
     # 3. Check candidate active account binding
-    stmt_binding = select(CandidateAccountBindingRecord).where(
-        CandidateAccountBindingRecord.candidate_id == application.candidate_id,
-        CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
-    )
-    binding = db.execute(stmt_binding).scalar_one_or_none()
+    binding = None
+    if application.candidate_id:
+        stmt_binding = select(CandidateAccountBindingRecord).where(
+            CandidateAccountBindingRecord.candidate_id == application.candidate_id,
+            CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
+        )
+        binding = db.execute(stmt_binding).scalar_one_or_none()
+    if not binding and application.binding_id:
+        stmt_binding = select(CandidateAccountBindingRecord).where(
+            CandidateAccountBindingRecord.binding_id == application.binding_id,
+            CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
+        )
+        binding = db.execute(stmt_binding).scalar_one_or_none()
+    if not binding and application.user_id:
+        stmt_binding = select(CandidateAccountBindingRecord).where(
+            CandidateAccountBindingRecord.user_id == application.user_id,
+            CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
+        )
+        binding = db.execute(stmt_binding).scalar_one_or_none()
+
     if not binding:
         return RecruiterInterviewReleaseEligibilityDto(
             is_eligible=False,
@@ -205,9 +220,12 @@ def _evaluate_interview_eligibility(
         select(AiInterviewQuestionSetRecord)
         .where(
             AiInterviewQuestionSetRecord.job_id == application.job_id,
-            AiInterviewQuestionSetRecord.job_version_id == application.job_version_id,
             AiInterviewQuestionSetRecord.interview_mode == target_mode,
             AiInterviewQuestionSetRecord.lifecycle_status == "APPROVED",
+        )
+        .filter(
+            (AiInterviewQuestionSetRecord.job_version_id == application.job_version_id)
+            | (AiInterviewQuestionSetRecord.job_revision == application.job_revision)
         )
         .order_by(desc(AiInterviewQuestionSetRecord.set_version))
     )
@@ -281,6 +299,7 @@ def list_job_applications_for_recruiter(
     status_filter: Optional[str] = None,
     review_state_filter: Optional[str] = None,
     mode_filter: Optional[str] = None,
+    revision: Optional[int] = None,
     page: int = 1,
     limit: int = 20,
 ) -> RecruiterApplicationListResponse:
@@ -315,6 +334,9 @@ def list_job_applications_for_recruiter(
 
     if review_state_filter and review_state_filter.upper() in [r.value for r in RecruiterReviewState]:
         stmt = stmt.where(CandidateApplicationRecord.recruiter_review_state == review_state_filter.upper())
+
+    if revision is not None:
+        stmt = stmt.where(CandidateApplicationRecord.job_revision == revision)
 
     # Count total filtered items
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -594,11 +616,26 @@ def release_interview_for_application(
         )
 
     # Check candidate binding
-    stmt_binding = select(CandidateAccountBindingRecord).where(
-        CandidateAccountBindingRecord.candidate_id == app.candidate_id,
-        CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
-    )
-    binding = db.execute(stmt_binding).scalar_one_or_none()
+    binding = None
+    if app.candidate_id:
+        stmt_binding = select(CandidateAccountBindingRecord).where(
+            CandidateAccountBindingRecord.candidate_id == app.candidate_id,
+            CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
+        )
+        binding = db.execute(stmt_binding).scalar_one_or_none()
+    if not binding and app.binding_id:
+        stmt_binding = select(CandidateAccountBindingRecord).where(
+            CandidateAccountBindingRecord.binding_id == app.binding_id,
+            CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
+        )
+        binding = db.execute(stmt_binding).scalar_one_or_none()
+    if not binding and app.user_id:
+        stmt_binding = select(CandidateAccountBindingRecord).where(
+            CandidateAccountBindingRecord.user_id == app.user_id,
+            CandidateAccountBindingRecord.status == CandidateBindingStatus.ACTIVE.value,
+        )
+        binding = db.execute(stmt_binding).scalar_one_or_none()
+
     if not binding:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -608,18 +645,27 @@ def release_interview_for_application(
     # Check approved question set for exact submitted revision
     if payload.ai_set_id:
         stmt_set = select(AiInterviewQuestionSetRecord).where(
-            AiInterviewQuestionSetRecord.ai_set_id == payload.ai_set_id,
+            (AiInterviewQuestionSetRecord.ai_set_id == payload.ai_set_id)
+            | (AiInterviewQuestionSetRecord.template_id == payload.ai_set_id),
             AiInterviewQuestionSetRecord.job_id == app.job_id,
-            AiInterviewQuestionSetRecord.job_version_id == app.job_version_id,
+        ).filter(
+            (AiInterviewQuestionSetRecord.job_version_id == app.job_version_id)
+            | (AiInterviewQuestionSetRecord.job_revision == app.job_revision)
         )
         ai_set = db.execute(stmt_set).scalars().first()
         if not ai_set:
             # Check if job revision or job mismatches
             mismatch_check = db.execute(
-                select(AiInterviewQuestionSetRecord).where(AiInterviewQuestionSetRecord.ai_set_id == payload.ai_set_id)
+                select(AiInterviewQuestionSetRecord).where(
+                    (AiInterviewQuestionSetRecord.ai_set_id == payload.ai_set_id)
+                    | (AiInterviewQuestionSetRecord.template_id == payload.ai_set_id)
+                )
             ).scalars().first()
             if mismatch_check:
-                if mismatch_check.job_id != app.job_id or mismatch_check.job_version_id != app.job_version_id:
+                if mismatch_check.job_id != app.job_id or (
+                    mismatch_check.job_version_id != app.job_version_id
+                    and mismatch_check.job_revision != app.job_revision
+                ):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail={"code": "JOB_REVISION_MISMATCH", "message": "Question set does not match the application job revision."},
@@ -638,8 +684,11 @@ def release_interview_for_application(
             select(AiInterviewQuestionSetRecord)
             .where(
                 AiInterviewQuestionSetRecord.job_id == app.job_id,
-                AiInterviewQuestionSetRecord.job_version_id == app.job_version_id,
                 AiInterviewQuestionSetRecord.lifecycle_status == "APPROVED",
+            )
+            .filter(
+                (AiInterviewQuestionSetRecord.job_version_id == app.job_version_id)
+                | (AiInterviewQuestionSetRecord.job_revision == app.job_revision)
             )
             .order_by(desc(AiInterviewQuestionSetRecord.set_version))
         )

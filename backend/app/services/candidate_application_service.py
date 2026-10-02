@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import desc, or_, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -31,7 +31,9 @@ from app.models.candidate_access import (
     CandidateApplicationRecord,
     CandidateApplicationStatus,
     CandidateBindingStatus,
+    CandidatePracticeReleaseRecord,
 )
+from app.schemas.phase3_enums import PracticeReleaseStatus
 from app.models.job import (
     JobLifecycleStatus,
     JobPublicationStatus,
@@ -1261,6 +1263,22 @@ def withdraw_candidate_application(
     app_rec.status = CandidateApplicationStatus.WITHDRAWN.value
     app_rec.withdrawn_at = now
     app_rec.updated_at = now
+
+    # Cascade revocation to any active interview releases associated with this application or candidate/job
+    stmt_releases = select(CandidatePracticeReleaseRecord).where(
+        or_(
+            CandidatePracticeReleaseRecord.application_id == app_rec.application_id,
+            and_(
+                CandidatePracticeReleaseRecord.candidate_id == app_rec.candidate_id,
+                CandidatePracticeReleaseRecord.job_id == app_rec.job_id,
+            ),
+        ),
+        CandidatePracticeReleaseRecord.status == PracticeReleaseStatus.RELEASED.value,
+    )
+    releases_to_revoke = db.execute(stmt_releases).scalars().all()
+    for rel in releases_to_revoke:
+        rel.status = PracticeReleaseStatus.REVOKED.value
+        rel.revoked_at = now
 
     _record_authz_audit(
         db=db,

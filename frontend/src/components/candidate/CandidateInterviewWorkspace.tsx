@@ -12,6 +12,7 @@ import {
   transcribeQuestionAudio,
 } from "../../api/candidateInterviews";
 import { Icon } from "../Icon";
+import { VoiceAnalogDisplay } from "./VoiceAnalogDisplay";
 
 interface CandidateInterviewWorkspaceProps {
   releaseId: string;
@@ -66,6 +67,7 @@ export function CandidateInterviewWorkspace({
   const [questionAudioUrl, setQuestionAudioUrl] = useState<string | null>(null);
   const [isFetchingQuestionAudio, setIsFetchingQuestionAudio] = useState<boolean>(false);
   const [questionAudioError, setQuestionAudioError] = useState<string | null>(null);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // Candidate Recording & Ephemeral STT
@@ -74,6 +76,7 @@ export function CandidateInterviewWorkspace({
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [transcriptDraft, setTranscriptDraft] = useState<string | null>(null);
   const [audioRecordingError, setAudioRecordingError] = useState<string | null>(null);
+  const [activeMediaStream, setActiveMediaStream] = useState<MediaStream | null>(null);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -88,12 +91,18 @@ export function CandidateInterviewWorkspace({
 
   const isAudioSession = (session?.interview_mode || initialMode || "TEXT").toUpperCase() === "AUDIO";
 
+  useEffect(() => {
+    const rolePrefix = jobTitle ? `${jobTitle} — ` : "";
+    document.title = `${rolePrefix}AI Interview — Candidate Portal | Smart Hiring`;
+  }, [jobTitle]);
+
   // Cleanup helper for media stream tracks and object URLs
   const stopAllRecordingTracks = () => {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
     }
+    setActiveMediaStream(null);
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
@@ -383,12 +392,16 @@ export function CandidateInterviewWorkspace({
       let player = audioPlayerRef.current;
       if (!player) {
         player = new Audio(url);
+        player.playbackRate = playbackSpeed;
         audioPlayerRef.current = player;
       } else {
         player.pause();
         player.src = url;
+        player.playbackRate = playbackSpeed;
         player.currentTime = 0;
       }
+
+      player.playbackRate = playbackSpeed;
 
       player.onended = () => {
         setIsPlayingQuestion(false);
@@ -440,6 +453,7 @@ export function CandidateInterviewWorkspace({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
+      setActiveMediaStream(stream);
 
       // Generate a unique client recording/request ID for this attempt
       const clientRequestId = `${activeQuestion.slot_id}_${Date.now()}`;
@@ -1618,6 +1632,49 @@ export function CandidateInterviewWorkspace({
                 </button>
               )}
 
+              {/* Playback speed selector */}
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <label htmlFor="playback-speed-select" style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", fontWeight: 500 }}>
+                  Playback speed:
+                </label>
+                <select
+                  id="playback-speed-select"
+                  className="form-input"
+                  style={{
+                    fontSize: "12px",
+                    padding: "2px 8px",
+                    height: "32px",
+                    minHeight: "32px",
+                    width: "auto",
+                    backgroundColor: "var(--bg-surface, #ffffff)",
+                    cursor: "pointer",
+                  }}
+                  value={playbackSpeed}
+                  onChange={(e) => {
+                    const speed = parseFloat(e.target.value);
+                    setPlaybackSpeed(speed);
+                    if (audioPlayerRef.current) {
+                      audioPlayerRef.current.playbackRate = speed;
+                    }
+                  }}
+                  aria-label="Question audio playback speed"
+                >
+                  <option value={0.75}>0.75× — Slower</option>
+                  <option value={1.0}>1× — Normal</option>
+                  <option value={1.25}>1.25× — Faster</option>
+                  <option value={1.5}>1.5× — Fast</option>
+                </select>
+              </div>
+
+              {isPlayingQuestion && (
+                <VoiceAnalogDisplay
+                  isActive={true}
+                  barCount={20}
+                  height={32}
+                  barColor="#0d9488"
+                />
+              )}
+
               {questionAudioError && (
                 <span style={{ fontSize: "12px", color: "#b45309" }}>
                   {questionAudioError}
@@ -1648,23 +1705,6 @@ export function CandidateInterviewWorkspace({
               >
                 <Icon name="alert-triangle" size={16} aria-hidden="true" />
                 <span>{audioRecordingError}</span>
-              </div>
-            )}
-
-            {/* Model recommendation notice if base model */}
-            {capabilities?.model_recommendation_warning && (
-              <div
-                style={{
-                  backgroundColor: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "6px",
-                  padding: "8px 12px",
-                  fontSize: "12px",
-                  color: "#64748b",
-                  marginBottom: "16px",
-                }}
-              >
-                ℹ️ {capabilities.model_recommendation_warning}
               </div>
             )}
 
@@ -1728,10 +1768,10 @@ export function CandidateInterviewWorkspace({
                   backgroundColor: "#f0fdfa",
                   border: "1px solid #99f6e4",
                   borderRadius: "10px",
-                  padding: "28px",
+                  padding: "24px 28px",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <span
                       style={{
@@ -1751,6 +1791,24 @@ export function CandidateInterviewWorkspace({
                   <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f766e" }}>
                     {remainingSeconds}s remaining ({recordingSeconds}s / {maxRecordingSecs}s)
                   </div>
+                </div>
+
+                {/* Voice Analog Waveform Display */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    padding: "12px 0 20px 0",
+                  }}
+                >
+                  <VoiceAnalogDisplay
+                    stream={activeMediaStream}
+                    isActive={true}
+                    barCount={30}
+                    height={46}
+                    barColor="#2563eb"
+                  />
                 </div>
 
                 <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>

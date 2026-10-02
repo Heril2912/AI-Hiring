@@ -1059,20 +1059,68 @@ class LocalOpenAICompatibleProvider(BaseWordingProvider):
             clean_json_str = clean_json_str[:-3]
         clean_json_str = clean_json_str.strip()
 
+        parsed_data = None
         try:
             parsed_data = json.loads(clean_json_str)
-        except Exception as e:
-            logger.warning("Failed to parse JSON from provider MCQ response: %s", e)
+        except Exception:
+            # Fallback regex extraction for json object or array
+            import re
+            match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", content_str)
+            if match:
+                try:
+                    parsed_data = json.loads(match.group(1).strip())
+                except Exception as e:
+                    logger.warning("Failed to parse regex-extracted JSON from provider MCQ response: %s", e)
+            
+            if parsed_data is None:
+                logger.warning("Failed to parse JSON from provider MCQ response: %s", content_str[:200])
+                raise ProviderTransportError(
+                    error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
+                    safe_message="Provider MCQ response content could not be parsed into valid JSON structure.",
+                )
+
+        if isinstance(parsed_data, list):
+            parsed_data = {"questions": parsed_data}
+        elif not isinstance(parsed_data, dict):
             raise ProviderTransportError(
                 error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
-                safe_message="Provider MCQ response content could not be parsed into valid JSON structure.",
+                safe_message="Provider MCQ response root is not a JSON object or array.",
             )
 
-        if not isinstance(parsed_data, dict):
-            raise ProviderTransportError(
-                error_code=ProviderErrorCode.RESPONSE_SCHEMA_INVALID,
-                safe_message="Provider MCQ response root is not a JSON object.",
-            )
+        if "questions" not in parsed_data and any(k in parsed_data for k in ("mcqs", "items", "data")):
+            for alt_key in ("mcqs", "items", "data"):
+                if alt_key in parsed_data and isinstance(parsed_data[alt_key], list):
+                    parsed_data["questions"] = parsed_data[alt_key]
+                    break
+
+        if isinstance(parsed_data.get("questions"), list):
+            for q_dict in parsed_data["questions"]:
+                if isinstance(q_dict, dict) and "options" in q_dict:
+                    raw_opts = q_dict.get("options")
+                    if isinstance(raw_opts, list):
+                        norm_opts = []
+                        for opt_idx, o in enumerate(raw_opts):
+                            if isinstance(o, str):
+                                default_id = chr(ord("A") + opt_idx)
+                                norm_opts.append({"option_id": default_id, "text": o.strip()})
+                            elif isinstance(o, dict):
+                                o_id = str(o.get("option_id") or o.get("id") or o.get("key") or chr(ord("A") + opt_idx)).strip().upper()
+                                o_text = str(o.get("text") or o.get("label") or o.get("value") or "").strip()
+                                norm_opts.append({"option_id": o_id, "text": o_text})
+                        q_dict["options"] = norm_opts
+                    
+                    # Normalize correct_option_id
+                    corr_id = str(q_dict.get("correct_option_id") or q_dict.get("correct_option") or q_dict.get("answer") or "A").strip().upper()
+                    # If model returned text instead of ID (e.g. "A" vs the option text)
+                    matched_id = None
+                    for opt in q_dict.get("options", []):
+                        if opt["option_id"] == corr_id:
+                            matched_id = opt["option_id"]
+                            break
+                        elif opt["text"].strip().lower() == corr_id.strip().lower():
+                            matched_id = opt["option_id"]
+                            break
+                    q_dict["correct_option_id"] = matched_id or (q_dict["options"][0]["option_id"] if q_dict.get("options") else "A")
 
         try:
             structured_response = StructuredAiMcqBatchResponse.model_validate(parsed_data)

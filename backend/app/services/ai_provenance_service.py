@@ -93,7 +93,48 @@ class ReleaseEligibilityResult:
         }
 
 
-# --- Strict Server-Side Validation Functions ---
+import difflib
+import unicodedata
+
+def normalize_stem(text: str) -> str:
+    """Performs canonical normalization for question stem comparison:
+    1. Unicode normalization (NFKC)
+    2. Lowercase
+    3. Remove non-semantic punctuation
+    4. Collapse repeated whitespace and trim
+    """
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKC", str(text))
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def is_strong_stem_duplicate(stem_a: str, stem_b: str, threshold: float = 0.80) -> bool:
+    """Deterministically detects exact and strong near-duplicates between question stems."""
+    norm_a = normalize_stem(stem_a)
+    norm_b = normalize_stem(stem_b)
+    if not norm_a or not norm_b:
+        return False
+    # Exact normalized match
+    if norm_a == norm_b:
+        return True
+    # If substantial overlap, check SequenceMatcher similarity ratio
+    ratio = difflib.SequenceMatcher(None, norm_a, norm_b).ratio()
+    if ratio >= threshold:
+        return True
+    # Word token Jaccard similarity for questions of substantial length
+    words_a = set(norm_a.split())
+    words_b = set(norm_b.split())
+    if len(words_a) >= 4 and len(words_b) >= 4:
+        intersection = words_a.intersection(words_b)
+        union = words_a.union(words_b)
+        if union and (len(intersection) / len(union)) >= 0.75:
+            return True
+    return False
+
 
 def validate_conversational_question_text(
     question_text: str,
@@ -174,19 +215,15 @@ def validate_conversational_question_text(
 
     # 7. Check for duplicate questions in the same set
     if existing_question_texts:
-        norm = re.sub(r"[^\w\s]", "", lower)
         for ex in existing_question_texts:
-            ex_norm = re.sub(r"[^\w\s]", "", (ex or "").lower().strip())
-            if norm and ex_norm and (norm == ex_norm or norm in ex_norm or ex_norm in norm) and len(norm) > 25:
+            if ex and is_strong_stem_duplicate(raw, ex, threshold=0.80):
                 return ItemValidationOutcome(False, "DUPLICATE_QUESTION", "Near-duplicate question detected in the same question set.")
 
-    # 7b. Check for cross-mode duplicates against the other interview mode set
+    # 7b. Check for cross-mode duplicates against the other interview mode set for the same revision
     if cross_mode_existing_texts:
-        norm = re.sub(r"[^\w\s]", "", lower)
         for ex in cross_mode_existing_texts:
-            ex_norm = re.sub(r"[^\w\s]", "", (ex or "").lower().strip())
-            if norm and ex_norm and (norm == ex_norm or norm in ex_norm or ex_norm in norm) and len(norm) > 25:
-                return ItemValidationOutcome(False, "CROSS_MODE_QUESTION_DUPLICATE", "Exact or near-duplicate question exists in another interview mode for this job revision.")
+            if ex and is_strong_stem_duplicate(raw, ex, threshold=0.80):
+                return ItemValidationOutcome(False, "CROSS_MODE_DUPLICATE_QUESTION", "Exact or near-duplicate question exists in another interview mode for this job revision (CROSS_MODE_DUPLICATE_QUESTION).")
 
     # 8. Source requirement ID validation against job version
     if job_version and source_requirement_ids:
@@ -373,8 +410,14 @@ def evaluate_release_eligibility(
         raw_vnum = getattr(target_job_version, "version_number", None)
         target_rev = raw_vnum if isinstance(raw_vnum, int) else 1
 
-    if (ai_set.job_version_id and ai_set.job_version_id != target_job_version.job_version_id) or \
-       (ai_set.job_revision and ai_set.job_revision != target_rev):
+    # Check for revision mismatch: either job_version_id matches or job_revision matches target_rev
+    revision_matches = False
+    if ai_set.job_version_id and target_job_version.job_version_id and ai_set.job_version_id == target_job_version.job_version_id:
+        revision_matches = True
+    elif ai_set.job_revision and ai_set.job_revision == target_rev:
+        revision_matches = True
+
+    if not revision_matches:
         return ReleaseEligibilityResult(
             is_eligible=False,
             reason_code=ReleaseIneligibilityReasonCode.STALE_JOB_REVISION,

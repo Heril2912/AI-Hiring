@@ -525,3 +525,12 @@ def test_recruiter_applicant_workflow_lifecycle_and_security(client, test_db):
         json={},
     )
     assert res_withdrawn_rel.status_code == status.HTTP_400_BAD_REQUEST
+
+    # 15. Verify withdrawn application does NOT appear in recruiter evaluation candidate list
+    res_eval_cands = client.get(f"/api/v1/recruiter/evaluations/jobs/{job_1.job_id}/revisions/1/candidates")
+    assert res_eval_cands.status_code == status.HTTP_200_OK
+    eval_cands = res_eval_cands.json()
+    eval_cand_ids = [c["candidate_id"] for c in eval_cands]
+    # Candidate A (active release) is present, Candidate B (withdrawn) is completely excluded
+    assert str(cand_a_ident.identity_id) in eval_cand_ids
+    assert str(cand_b_ident.identity_id) not in eval_cand_ids

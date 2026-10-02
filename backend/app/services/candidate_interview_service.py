@@ -70,6 +70,17 @@ def _get_candidate_binding(candidate_user: UserRecord, db: Session) -> Candidate
     return binding
 
 
+def _get_candidate_identities(candidate_user: UserRecord, binding: CandidateAccountBindingRecord, db: Session) -> List[UUID]:
+    user_cand_ids = db.execute(
+        select(CandidateApplicationRecord.candidate_id).where(
+            (CandidateApplicationRecord.user_id == candidate_user.user_id)
+            | (CandidateApplicationRecord.binding_id == binding.binding_id)
+            | (CandidateApplicationRecord.candidate_id == binding.candidate_id)
+        )
+    ).scalars().all()
+    return list(set([binding.candidate_id] + [c for c in user_cand_ids if c]))
+
+
 def _compute_snapshot_hash(snapshot: List[Dict[str, Any]]) -> str:
     canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -168,6 +179,7 @@ def start_or_resume_interview_session(
 ) -> CandidateInterviewSessionResponse:
     """Starts a new official interview session or returns the existing session for the assignment."""
     binding = _get_candidate_binding(candidate_user, db)
+    cand_ids = _get_candidate_identities(candidate_user, binding, db)
 
     # 1. Fetch assignment / release
     stmt_rel = (
@@ -179,7 +191,7 @@ def start_or_resume_interview_session(
         )
         .where(
             CandidatePracticeReleaseRecord.release_id == release_id,
-            CandidatePracticeReleaseRecord.candidate_id == binding.candidate_id,
+            CandidatePracticeReleaseRecord.candidate_id.in_(cand_ids),
             CandidatePracticeReleaseRecord.organization_id == binding.organization_id,
         )
     )
@@ -195,6 +207,53 @@ def start_or_resume_interview_session(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "ASSIGNMENT_REVOKED", "message": "This interview assignment has been revoked or expired."},
         )
+
+    # 1.1 Authoritative Application Integrity Rule:
+    # Verify the release is bound to a submitted application for the candidate, job, revision, and organization
+    if release.application_id:
+        stmt_app = select(CandidateApplicationRecord).where(
+            CandidateApplicationRecord.application_id == release.application_id,
+            CandidateApplicationRecord.job_id == release.job_id,
+            CandidateApplicationRecord.status == CandidateApplicationStatus.SUBMITTED.value,
+        ).filter(
+            (CandidateApplicationRecord.candidate_id == binding.candidate_id)
+            | (CandidateApplicationRecord.binding_id == binding.binding_id)
+            | (CandidateApplicationRecord.user_id == candidate_user.user_id)
+        ).filter(
+            (CandidateApplicationRecord.job_version_id == release.job_version_id)
+            | (CandidateApplicationRecord.job_revision == release.job_revision)
+        )
+        bound_app = db.execute(stmt_app).scalar_one_or_none()
+        if not bound_app:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "INVALID_RELEASE_APPLICATION_BINDING",
+                    "message": "The application bound to this interview release is missing, non-submitted, or invalid.",
+                },
+            )
+    else:
+        # Check if an eligible submitted application exists for this job & revision
+        stmt_app_fallback = select(CandidateApplicationRecord).where(
+            CandidateApplicationRecord.job_id == release.job_id,
+            CandidateApplicationRecord.status == CandidateApplicationStatus.SUBMITTED.value,
+        ).filter(
+            (CandidateApplicationRecord.candidate_id == binding.candidate_id)
+            | (CandidateApplicationRecord.binding_id == binding.binding_id)
+            | (CandidateApplicationRecord.user_id == candidate_user.user_id)
+        ).filter(
+            (CandidateApplicationRecord.job_version_id == release.job_version_id)
+            | (CandidateApplicationRecord.job_revision == release.job_revision)
+        )
+        fallback_app = db.execute(stmt_app_fallback).scalars().first()
+        if not fallback_app:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "APPLICATION_REQUIRED_FOR_INTERVIEW",
+                    "message": "No submitted application found for this candidate and job revision.",
+                },
+            )
 
     # 2. Check for existing session (Idempotent start / resume)
     stmt_sess = (
@@ -317,6 +376,7 @@ def get_interview_session(
 ) -> CandidateInterviewSessionResponse:
     """Retrieves an official interview session with saved answers for the authenticated candidate."""
     binding = _get_candidate_binding(candidate_user, db)
+    cand_ids = _get_candidate_identities(candidate_user, binding, db)
 
     stmt = (
         select(CandidateInterviewSessionRecord)
@@ -327,7 +387,7 @@ def get_interview_session(
         )
         .where(
             CandidateInterviewSessionRecord.session_id == session_id,
-            CandidateInterviewSessionRecord.candidate_id == binding.candidate_id,
+            CandidateInterviewSessionRecord.candidate_id.in_(cand_ids),
             CandidateInterviewSessionRecord.organization_id == binding.organization_id,
         )
     )
@@ -369,13 +429,14 @@ def save_interview_answer(
 ) -> CandidateSaveAnswerResponse:
     """Saves or updates draft text or MCQ answer for one question in an in-progress session."""
     binding = _get_candidate_binding(candidate_user, db)
+    cand_ids = _get_candidate_identities(candidate_user, binding, db)
 
     stmt = (
         select(CandidateInterviewSessionRecord)
         .options(selectinload(CandidateInterviewSessionRecord.answers))
         .where(
             CandidateInterviewSessionRecord.session_id == session_id,
-            CandidateInterviewSessionRecord.candidate_id == binding.candidate_id,
+            CandidateInterviewSessionRecord.candidate_id.in_(cand_ids),
             CandidateInterviewSessionRecord.organization_id == binding.organization_id,
         )
     )
@@ -513,13 +574,14 @@ def submit_interview_session(
 ) -> CandidateSubmitInterviewResponse:
     """Atomically finalizes and submits the official interview session, making answers immutable."""
     binding = _get_candidate_binding(candidate_user, db)
+    cand_ids = _get_candidate_identities(candidate_user, binding, db)
 
     stmt = (
         select(CandidateInterviewSessionRecord)
         .options(selectinload(CandidateInterviewSessionRecord.answers))
         .where(
             CandidateInterviewSessionRecord.session_id == session_id,
-            CandidateInterviewSessionRecord.candidate_id == binding.candidate_id,
+            CandidateInterviewSessionRecord.candidate_id.in_(cand_ids),
             CandidateInterviewSessionRecord.organization_id == binding.organization_id,
         )
     )

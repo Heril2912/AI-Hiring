@@ -312,7 +312,7 @@ async def test_validation_rejects_audio_set_with_mcqs_and_cross_mode_duplicates(
 
     val_res = validate_ai_question_set(actor=recruiter_user, template_id=audio_set.ai_set_id, db=db_session)
     assert not val_res.is_valid
-    assert any("CROSS_MODE_QUESTION_DUPLICATE" in err for err in val_res.blocking_errors)
+    assert any("CROSS_MODE_DUPLICATE_QUESTION" in err or "CROSS_MODE_QUESTION_DUPLICATE" in err for err in val_res.blocking_errors)
 
 
 @pytest.mark.anyio

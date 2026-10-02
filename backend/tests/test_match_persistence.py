@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.auth import Base, UserRecord, UserRole
 from app.models.candidate import CandidateIdentityRecord, CandidateProfileRecord
+from app.models.candidate_access import CandidateApplicationRecord, CandidateApplicationStatus
 from app.models.job import (
     JobLifecycleStatus,
     JobRequirement,
@@ -179,11 +180,33 @@ def _seed_ready_job(
     return job, ver
 
 
+def _seed_application(test_db, job, ver, cand, status=CandidateApplicationStatus.SUBMITTED.value):
+    app = CandidateApplicationRecord(
+        application_id=uuid.uuid4(),
+        organization_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        user_id=uuid.uuid4(),
+        binding_id=uuid.uuid4(),
+        candidate_id=cand.identity_id,
+        job_id=job.job_id,
+        job_version_id=ver.job_version_id,
+        job_revision=ver.revision,
+        artifact_id=cand.artifact_id,
+        profile_id=cand.profile_id,
+        profile_version=cand.profile_version,
+        status=status,
+        submitted_at=datetime.now(timezone.utc),
+    )
+    test_db.add(app)
+    test_db.commit()
+    return app
+
+
 def test_match_run_and_results_persistence(test_db):
     """Test that a match run and its results are persisted correctly with all required columns."""
     recruiter = _seed_recruiter(test_db)
     job, ver = _seed_ready_job(test_db, recruiter.user_id)
     cand = _seed_candidate_profile(test_db, profile_version=1, skills=["Python"])
+    _seed_application(test_db, job, ver, cand)
 
     run, results, reused = orchestrate_match_run(
         actor=recruiter,
@@ -316,6 +339,7 @@ def test_historical_results_survive_successor_versions(test_db):
     recruiter = _seed_recruiter(test_db)
     job, ver1 = _seed_ready_job(test_db, recruiter.user_id, revision=1)
     cand_v1 = _seed_candidate_profile(test_db, profile_version=1, skills=["Python"])
+    _seed_application(test_db, job, ver1, cand_v1)
 
     run, results, _ = orchestrate_match_run(
         actor=recruiter,

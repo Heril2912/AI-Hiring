@@ -12,7 +12,10 @@ from app.models.auth import UserRecord, UserRole
 from app.models.candidate import CandidateIdentityRecord
 from app.models.candidate_access import (
     CandidateAccountBindingRecord,
+    CandidateApplicationRecord,
+    CandidateApplicationStatus,
     CandidateBindingStatus,
+    CandidateInterviewSessionRecord,
     CandidateInvitationRecord,
     CandidatePracticeReleaseRecord,
     CandidatePracticeRequestRecord,
@@ -1055,7 +1058,17 @@ def get_candidate_practice_discovery(
     if not binding:
         return CandidatePracticeDiscoveryResponse(items=[])
 
-    # 2. Query active RELEASED records for this candidate identity and organization
+    # 2. Query all candidate identity IDs associated with this candidate user
+    user_cand_ids = db.execute(
+        select(CandidateApplicationRecord.candidate_id).where(
+            (CandidateApplicationRecord.user_id == candidate_user.user_id)
+            | (CandidateApplicationRecord.binding_id == binding.binding_id)
+            | (CandidateApplicationRecord.candidate_id == binding.candidate_id)
+        )
+    ).scalars().all()
+    all_cand_ids = list(set([binding.candidate_id] + [c for c in user_cand_ids if c]))
+
+    # Query active RELEASED records for this candidate identity/user and organization
     stmt_rel = (
         select(CandidatePracticeReleaseRecord)
         .options(
@@ -1064,13 +1077,30 @@ def get_candidate_practice_discovery(
             selectinload(CandidatePracticeReleaseRecord.ai_set),
         )
         .where(
-            CandidatePracticeReleaseRecord.candidate_id == binding.candidate_id,
+            CandidatePracticeReleaseRecord.candidate_id.in_(all_cand_ids),
             CandidatePracticeReleaseRecord.organization_id == binding.organization_id,
             CandidatePracticeReleaseRecord.status == PracticeReleaseStatus.RELEASED.value,
         )
         .order_by(desc(CandidatePracticeReleaseRecord.released_at))
     )
     releases = db.execute(stmt_rel).scalars().all()
+
+    # Query latest interview session status for each release
+    release_ids = [rel.release_id for rel in releases]
+    sessions_map: Dict[UUID, CandidateInterviewSessionRecord] = {}
+    if release_ids:
+        stmt_sess = (
+            select(CandidateInterviewSessionRecord)
+            .where(
+                CandidateInterviewSessionRecord.release_id.in_(release_ids),
+                CandidateInterviewSessionRecord.candidate_id.in_(all_cand_ids),
+            )
+            .order_by(desc(CandidateInterviewSessionRecord.created_at))
+        )
+        sessions = db.execute(stmt_sess).scalars().all()
+        for s in sessions:
+            if s.release_id not in sessions_map:
+                sessions_map[s.release_id] = s
 
     items: List[CandidatePracticeJobSummary] = []
     for rel in releases:
@@ -1089,6 +1119,11 @@ def get_candidate_practice_discovery(
         conv_count = sum(1 for it in set_items if it.get("question_format", "CONVERSATION") == "CONVERSATION")
         mcq_count = sum(1 for it in set_items if it.get("question_format") == "MCQ_SINGLE_ANSWER")
 
+        sess = sessions_map.get(rel.release_id)
+        sess_status = sess.status if sess else None
+        is_sub = (sess_status == "SUBMITTED")
+        status_lbl = "Interview Submitted" if is_sub else ("In Progress" if sess_status == "IN_PROGRESS" else "Practice content ready")
+
         items.append(
             CandidatePracticeJobSummary(
                 release_id=rel.release_id,
@@ -1105,7 +1140,9 @@ def get_candidate_practice_discovery(
                 total_question_count=conv_count + mcq_count,
                 released_at=rel.released_at,
                 interview_mode=rel.interview_mode or (ai_set.interview_mode if ai_set else "TEXT") or "TEXT",
-                status_label="Practice content ready",
+                status_label=status_lbl,
+                session_status=sess_status,
+                is_submitted=is_sub,
             )
         )
 

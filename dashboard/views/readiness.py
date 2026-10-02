@@ -53,10 +53,10 @@ def render_readiness_view() -> None:
     services = [
         {"Subsystem": "FastAPI Application Core", "Status": readiness.api_status, "Scope": "HTTP API & Security Guardrails"},
         {"Subsystem": "PostgreSQL 16 Database", "Status": readiness.database_status, "Scope": "Authoritative Persistent Store"},
-        {"Subsystem": "Local LM Studio AI Engine", "Status": readiness.local_ai_status, "Scope": "Local Inference (Qwen3-4B)"},
+        {"Subsystem": "Local AI Engine", "Status": readiness.local_ai_status, "Scope": "Local Inference"},
         {"Subsystem": "Text Interview Service", "Status": readiness.text_interview_status, "Scope": "Asynchronous Candidate Messaging"},
-        {"Subsystem": "Audio Question Playback (TTS)", "Status": readiness.audio_playback_status, "Scope": "Local Piper Speech Synthesis"},
-        {"Subsystem": "Audio Speech Transcription (STT)", "Status": readiness.audio_transcription_status, "Scope": "Local whisper.cpp Zero-Retention Engine"},
+        {"Subsystem": "Audio Question Playback (TTS)", "Status": readiness.audio_playback_status, "Scope": "Local Speech Synthesis"},
+        {"Subsystem": "Audio Speech Transcription (STT)", "Status": readiness.audio_transcription_status, "Scope": "Local Zero-Retention Transcription Engine"},
     ]
 
     for s in services:

@@ -909,6 +909,26 @@ export function App() {
     portal === "candidate" ||
     pathname.startsWith("/candidate");
 
+  useEffect(() => {
+    if (isCandidateRoute) {
+      if (pathname.startsWith("/candidate/register")) {
+        document.title = "Create Account — Candidate Portal | Smart Hiring";
+      } else if (pathname.startsWith("/candidate/login")) {
+        document.title = "Sign In — Candidate Portal | Smart Hiring";
+      } else {
+        document.title = "Candidate Portal | Smart Hiring";
+      }
+    } else {
+      if (portal === "admin") {
+        document.title = "Admin Workspace | Smart Hiring";
+      } else if (portal === "recruiter") {
+        document.title = "Recruiter Workspace | Smart Hiring";
+      } else {
+        document.title = "Smart Hiring — Recruiter & Staff Portal";
+      }
+    }
+  }, [isCandidateRoute, pathname, portal]);
+
   if (isCandidateRoute) {
     const isRegister = pathname.startsWith("/candidate/register");
     const isLogin = pathname.startsWith("/candidate/login");

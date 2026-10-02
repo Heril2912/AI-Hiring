@@ -356,8 +356,24 @@ def test_audio_session_lifecycle_playback_and_transcription(client, test_db, mon
     slot_id_1 = audio_set.items[0]["slot_id"]
     slot_id_2 = audio_set.items[1]["slot_id"]
 
-    # Released practice assignment
+    # Submitted application
     app_id = uuid.uuid4()
+    app_rec = CandidateApplicationRecord(
+        application_id=app_id,
+        user_id=candidate_user.user_id,
+        candidate_id=binding.candidate_id,
+        binding_id=binding.binding_id,
+        organization_id=org_id,
+        job_id=job.job_id,
+        job_version_id=jver.job_version_id,
+        job_revision=1,
+        status=CandidateApplicationStatus.SUBMITTED.value,
+        recruiter_review_state=RecruiterReviewState.INTERVIEW_READY.value,
+    )
+    test_db.add(app_rec)
+    test_db.commit()
+
+    # Released practice assignment
     release_rec = CandidatePracticeReleaseRecord(
         release_id=uuid.uuid4(),
         organization_id=org_id,

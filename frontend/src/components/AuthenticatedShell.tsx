@@ -76,6 +76,10 @@ export function AuthenticatedShell({
       ? "Recruiter workspace"
       : "Reviewer workspace";
 
+  useEffect(() => {
+    document.title = `${displayedWorkspaceLabel} | Smart Hiring`;
+  }, [displayedWorkspaceLabel]);
+
   return (
     <div className="dashboard-app-container">
       {/* Skip to Main Content Link for Keyboard Navigation */}

@@ -369,6 +369,19 @@ def test_phase4c4_evaluation_workspace_flow(client: TestClient, test_db):
     test_db.add(match_res)
     test_db.commit()
 
+    # Add submitted application for candidate on job_a to fulfill eligibility
+    cand_app = CandidateApplicationRecord(
+        application_id=uuid.uuid4(),
+        organization_id=org_a,
+        candidate_id=cand_id.identity_id,
+        job_id=job_a.job_id,
+        job_version_id=jver_a.job_version_id,
+        job_revision=1,
+        status=CandidateApplicationStatus.SUBMITTED.value,
+    )
+    test_db.add(cand_app)
+    test_db.commit()
+
     slot_1 = str(uuid.uuid4())
     slot_2 = str(uuid.uuid4())
     slot_3 = str(uuid.uuid4())

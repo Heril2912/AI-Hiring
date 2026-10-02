@@ -50,6 +50,7 @@ export function ReleaseInterviewSetModal({
       const res = await fetchJobApplicants(detail.job_id, {
         status: "SUBMITTED",
         mode: detail.interview_mode || "TEXT",
+        revision: detail.job_revision,
         limit: 100,
       });
       setApplicants(res.items || []);

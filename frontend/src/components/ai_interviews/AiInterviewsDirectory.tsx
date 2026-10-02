@@ -116,7 +116,7 @@ export function AiInterviewsDirectory({
         msg.toLowerCase().includes("503")
       ) {
         setIsLocalAiError(true);
-        setGenerationError("Local AI is unavailable. Start the configured local model and try again.");
+        setGenerationError("The local AI service is currently unavailable.");
       } else if (
         msg.toLowerCase().includes("requirements") ||
         msg.toLowerCase().includes("not ready") ||
@@ -125,7 +125,7 @@ export function AiInterviewsDirectory({
       ) {
         setGenerationError("This job needs approved requirements before questions can be generated.");
       } else {
-        setGenerationError("Local AI is unavailable. Start the configured local model and try again.");
+        setGenerationError("The local AI service is currently unavailable.");
         setIsLocalAiError(true);
       }
     } finally {
