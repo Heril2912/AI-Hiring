@@ -16,7 +16,7 @@ import {
   JobReadinessResponse,
   JobReadinessFinding,
 } from "../../api/jobs";
-import { OccupationSearchItem } from "../../api/taxonomy";
+import { OccupationSearchItem, OccupationSkillSuggestion, getOccupationSkillSuggestions } from "../../api/taxonomy";
 import { Icon } from "../Icon";
 import { OccupationSelector } from "./OccupationSelector";
 import { RequirementCard } from "./RequirementCard";
@@ -56,6 +56,10 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
   const [jobDescriptionText, setJobDescriptionText] = useState("");
   const [occupationConceptId, setOccupationConceptId] = useState<string | null>(null);
   const [occupationTitle, setOccupationTitle] = useState<string | null>(null);
+
+  // Occupation Skill Suggestions State
+  const [suggestedSkills, setSuggestedSkills] = useState<OccupationSkillSuggestion[]>([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
 
   // Disclosures & Progressive Visibility
   const [showJobDetailsMore, setShowJobDetailsMore] = useState(false);
@@ -157,6 +161,33 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isDirty]);
 
+  // Fetch suggested skills when occupation is selected
+  useEffect(() => {
+    if (!occupationConceptId) {
+      setSuggestedSkills([]);
+      setIsLoadingSuggestions(false);
+      return;
+    }
+    let isCurrent = true;
+    setIsLoadingSuggestions(true);
+    getOccupationSkillSuggestions(occupationConceptId, 25)
+      .then((data) => {
+        if (isCurrent) {
+          setSuggestedSkills(data || []);
+        }
+      })
+      .catch(() => {
+        if (isCurrent) setSuggestedSkills([]);
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingSuggestions(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [occupationConceptId]);
+
   // Handle Occupation Selection
   const handleSelectOccupation = (item: OccupationSearchItem | null) => {
     if (item) {
@@ -166,6 +197,35 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
       setOccupationConceptId(null);
       setOccupationTitle(null);
     }
+    setIsDirty(true);
+  };
+
+  // Add a suggested skill to requirements
+  const handleAddSuggestedSkill = (sug: OccupationSkillSuggestion) => {
+    // Check if already added
+    const alreadyExists = requirements.some(
+      (r) =>
+        r.taxonomySkillConceptId === sug.conceptId ||
+        r.label.trim().toLowerCase() === sug.canonicalLabel.trim().toLowerCase()
+    );
+    if (alreadyExists) return;
+
+    const newIndex = requirements.length;
+    const newReq: RequirementItem = {
+      displayOrder: newIndex,
+      category: "SKILL",
+      label: sug.canonicalLabel,
+      taxonomySkillConceptId: sug.conceptId,
+      necessity: "PREFERRED",
+      priority: "MEDIUM",
+      minExperienceMonths: null,
+      recencyYears: null,
+      acceptedEvidenceTypes: ["EMPLOYMENT", "PROJECT", "SKILL_LIST"],
+      acceptedEquivalents: [],
+      origin: "TAXONOMY_SUGGESTED_RECRUITER_CONFIRMED",
+    };
+    setRequirements([...requirements, newReq]);
+    setExpandedReqIndex(newIndex);
     setIsDirty(true);
   };
 
@@ -908,180 +968,138 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
             </div>
           </div>
 
-          {isReadOnly ? (
-            <dl className="job-read-only-grid">
-              <div className="job-read-only-item">
-                <dt className="job-read-only-dt">Department</dt>
-                <dd className="job-read-only-dd">{department || "Not specified"}</dd>
-              </div>
-              <div className="job-read-only-item">
-                <dt className="job-read-only-dt">Location</dt>
-                <dd className="job-read-only-dd">{location || "Not specified"}</dd>
-              </div>
-              <div className="job-read-only-item">
-                <dt className="job-read-only-dt">Employment type</dt>
-                <dd className="job-read-only-dd">
-                  {employmentType === "FULL_TIME"
-                    ? "Full-time"
-                    : employmentType === "PART_TIME"
-                    ? "Part-time"
-                    : employmentType === "CONTRACT"
-                    ? "Contract"
-                    : employmentType === "INTERNSHIP"
-                    ? "Internship"
-                    : employmentType === "TEMPORARY"
-                    ? "Temporary"
-                    : employmentType || "Not specified"}
-                </dd>
-              </div>
-              <div className="job-read-only-item">
-                <dt className="job-read-only-dt">Workplace</dt>
-                <dd className="job-read-only-dd">
-                  {workplaceType === "HYBRID"
-                    ? "Hybrid"
-                    : workplaceType === "ON_SITE"
-                    ? "On-site"
-                    : workplaceType === "REMOTE"
-                    ? "Remote"
-                    : workplaceType || "Not specified"}
-                </dd>
-              </div>
-              <div className="job-read-only-item">
-                <dt className="job-read-only-dt">Openings</dt>
-                <dd className="job-read-only-dd">{openingsCount || "1"}</dd>
-              </div>
-              <div className="job-read-only-item">
-                <dt className="job-read-only-dt">Reference code</dt>
-                <dd className="job-read-only-dd">{internalReference || "None"}</dd>
-              </div>
-            </dl>
-          ) : (
-            <div className="form-fields-stack">
+          <div className="form-fields-stack">
+            <div className="form-group">
+              <label htmlFor="job-title-input" className="form-label">
+                Job title <span className="required-star">*</span>
+              </label>
+              <input
+                id="job-title-input"
+                type="text"
+                className="form-input"
+                placeholder="e.g. Frontend developer"
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  setIsDirty(true);
+                }}
+                disabled={isReadOnly}
+                required
+              />
+            </div>
+
+            <div className="form-two-col-grid">
               <div className="form-group">
-                <label htmlFor="job-title-input" className="form-label">
-                  Job title <span className="required-star">*</span>
-                </label>
+                <label htmlFor="job-dept-input" className="form-label">Department</label>
                 <input
-                  id="job-title-input"
+                  id="job-dept-input"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Frontend developer"
-                  value={title}
+                  placeholder="e.g. Product engineering"
+                  value={department}
                   onChange={(e) => {
-                    setTitle(e.target.value);
+                    setDepartment(e.target.value);
                     setIsDirty(true);
                   }}
-                  required
+                  disabled={isReadOnly}
                 />
               </div>
 
-              <div className="form-two-col-grid">
-                <div className="form-group">
-                  <label htmlFor="job-dept-input" className="form-label">Department</label>
-                  <input
-                    id="job-dept-input"
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. Product engineering"
-                    value={department}
-                    onChange={(e) => {
-                      setDepartment(e.target.value);
-                      setIsDirty(true);
-                    }}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="job-loc-input" className="form-label">Location</label>
-                  <input
-                    id="job-loc-input"
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. Ahmedabad, Gujarat"
-                    value={location}
-                    onChange={(e) => {
-                      setLocation(e.target.value);
-                      setIsDirty(true);
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="form-three-col-grid">
-                <div className="form-group">
-                  <label htmlFor="job-emp-type" className="form-label">Employment type</label>
-                  <select
-                    id="job-emp-type"
-                    className="form-input"
-                    value={employmentType}
-                    onChange={(e) => {
-                      setEmploymentType(e.target.value);
-                      setIsDirty(true);
-                    }}
-                  >
-                    <option value="FULL_TIME">Full-time</option>
-                    <option value="PART_TIME">Part-time</option>
-                    <option value="CONTRACT">Contract</option>
-                    <option value="INTERNSHIP">Internship</option>
-                    <option value="TEMPORARY">Temporary</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="job-work-type" className="form-label">Workplace type</label>
-                  <select
-                    id="job-work-type"
-                    className="form-input"
-                    value={workplaceType}
-                    onChange={(e) => {
-                      setWorkplaceType(e.target.value);
-                      setIsDirty(true);
-                    }}
-                  >
-                    <option value="HYBRID">Hybrid</option>
-                    <option value="ON_SITE">On-site</option>
-                    <option value="REMOTE">Remote</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="job-openings" className="form-label">Openings</label>
-                  <input
-                    id="job-openings"
-                    type="number"
-                    min={1}
-                    max={999}
-                    className="form-input"
-                    value={openingsCount}
-                    onChange={(e) => {
-                      setOpeningsCount(e.target.value);
-                      setIsDirty(true);
-                    }}
-                  />
-                </div>
-              </div>
-
               <div className="form-group">
-                <label htmlFor="job-ref-input" className="form-label">
-                  Reference code (optional)
-                </label>
+                <label htmlFor="job-loc-input" className="form-label">Location</label>
                 <input
-                  id="job-ref-input"
+                  id="job-loc-input"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. ENG-104"
-                  value={internalReference}
+                  placeholder="e.g. Ahmedabad, Gujarat"
+                  value={location}
                   onChange={(e) => {
-                    setInternalReference(e.target.value);
+                    setLocation(e.target.value);
                     setIsDirty(true);
                   }}
+                  disabled={isReadOnly}
                 />
-                <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", marginTop: "4px", display: "block" }}>
-                  Internal identifier used by your recruitment team.
-                </span>
               </div>
             </div>
-          )}
+
+            <div className="form-three-col-grid">
+              <div className="form-group">
+                <label htmlFor="job-emp-type" className="form-label">Employment type</label>
+                <select
+                  id="job-emp-type"
+                  className="form-input"
+                  value={employmentType}
+                  onChange={(e) => {
+                    setEmploymentType(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <option value="FULL_TIME">Full-time</option>
+                  <option value="PART_TIME">Part-time</option>
+                  <option value="CONTRACT">Contract</option>
+                  <option value="INTERNSHIP">Internship</option>
+                  <option value="TEMPORARY">Temporary</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="job-work-type" className="form-label">Workplace type</label>
+                <select
+                  id="job-work-type"
+                  className="form-input"
+                  value={workplaceType}
+                  onChange={(e) => {
+                    setWorkplaceType(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <option value="HYBRID">Hybrid</option>
+                  <option value="ON_SITE">On-site</option>
+                  <option value="REMOTE">Remote</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="job-openings" className="form-label">Openings</label>
+                <input
+                  id="job-openings"
+                  type="number"
+                  min={1}
+                  max={999}
+                  className="form-input"
+                  value={openingsCount}
+                  onChange={(e) => {
+                    setOpeningsCount(e.target.value);
+                    setIsDirty(true);
+                  }}
+                  disabled={isReadOnly}
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="job-ref-input" className="form-label">
+                Reference code (optional)
+              </label>
+              <input
+                id="job-ref-input"
+                type="text"
+                className="form-input"
+                placeholder="e.g. ENG-104"
+                value={internalReference}
+                onChange={(e) => {
+                  setInternalReference(e.target.value);
+                  setIsDirty(true);
+                }}
+                disabled={isReadOnly}
+              />
+              <span style={{ fontSize: "12px", color: "var(--text-secondary, #64748b)", marginTop: "4px", display: "block" }}>
+                Internal identifier used by your recruitment team.
+              </span>
+            </div>
+          </div>
         </section>
 
         {/* Section: About the role */}
@@ -1184,11 +1202,83 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
                   {occupationTitle ? `Selected O*NET occupation: ${occupationTitle}` : "No O*NET occupation selected for this revision."}
                 </p>
               ) : (
-                <OccupationSelector
-                  selectedConceptId={occupationConceptId}
-                  selectedTitle={occupationTitle}
-                  onSelectOccupation={handleSelectOccupation}
-                />
+                <>
+                  <OccupationSelector
+                    selectedConceptId={occupationConceptId}
+                    selectedTitle={occupationTitle}
+                    onSelectOccupation={handleSelectOccupation}
+                  />
+
+                  {occupationConceptId && (
+                    <div className="occupation-suggestions-panel" style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid var(--border-subtle)" }}>
+                      <div className="suggestions-header-line" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary)" }}>
+                          O*NET 31.0 Suggested Skills for {occupationTitle} (Click to add as requirement)
+                        </span>
+                        {isLoadingSuggestions && <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Loading suggestions...</span>}
+                      </div>
+
+                      {suggestedSkills.length > 0 ? (
+                        <div className="suggested-skills-chip-grid" style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                          {suggestedSkills.map((sug) => {
+                            const isAdded = requirements.some(
+                              (r) =>
+                                r.taxonomySkillConceptId === sug.conceptId ||
+                                r.label.trim().toLowerCase() === sug.canonicalLabel.trim().toLowerCase()
+                            );
+                            const famLabel = sug.sourceFamily === "essential"
+                              ? "Essential"
+                              : sug.sourceFamily === "transferable"
+                              ? "Transferable"
+                              : "Software";
+
+                            return (
+                              <button
+                                key={sug.conceptId}
+                                type="button"
+                                className={`btn-skill-suggestion-chip ${isAdded ? "added" : ""}`}
+                                onClick={() => handleAddSuggestedSkill(sug)}
+                                disabled={isAdded}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  padding: "4px 10px",
+                                  borderRadius: "16px",
+                                  fontSize: "12px",
+                                  border: "1px solid var(--border-subtle)",
+                                  background: isAdded ? "var(--surface-sunken)" : "var(--surface-elevated)",
+                                  color: isAdded ? "var(--text-muted)" : "var(--text-primary)",
+                                  cursor: isAdded ? "default" : "pointer",
+                                }}
+                              >
+                                <span>{sug.canonicalLabel}</span>
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    padding: "1px 5px",
+                                    borderRadius: "8px",
+                                    background: sug.sourceFamily === "essential" ? "rgba(59, 130, 246, 0.1)" : sug.sourceFamily === "transferable" ? "rgba(16, 185, 129, 0.1)" : "rgba(168, 85, 247, 0.1)",
+                                    color: sug.sourceFamily === "essential" ? "#2563eb" : sug.sourceFamily === "transferable" ? "#059669" : "#7c3aed",
+                                  }}
+                                >
+                                  {famLabel}
+                                </span>
+                                {isAdded ? <Icon name="check" size={12} /> : <Icon name="plus" size={12} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        !isLoadingSuggestions && (
+                          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                            No specific skills linked for this occupation in the O*NET catalogue.
+                          </span>
+                        )
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

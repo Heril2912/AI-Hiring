@@ -221,6 +221,56 @@
   line-height: 1.35;
 }
 
+.aiq-job-title-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aiq-recent-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.aiq-candidate-release-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.aiq-candidate-release-badge.all {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.aiq-candidate-release-badge.partial {
+  background-color: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.aiq-candidate-release-badge.unreleased {
+  background-color: #fefce8;
+  color: #854d0e;
+  border: 1px solid #fef08a;
+}
+
+.aiq-candidate-release-badge.none {
+  background-color: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
 .aiq-job-req-count {
   font-size: 15px;
   color: var(--text-secondary, #475569);

@@ -453,27 +453,6 @@ function AuthenticatedApp() {
         <>
           {activeNavTab === "analytics" ? (
             <AnalyticsLauncher />
-          ) : activeNavTab === "jobs" ? (
-            activeView === "jobs" ? (
-              <JobsDirectory
-                jobs={jobs}
-                isLoading={isLoadingJobs}
-                error={jobsError}
-                onSelectJob={handleSelectJob}
-                onCreateJob={handleCreateJob}
-                onRefresh={loadJobsList}
-              />
-            ) : (
-              <JobEditor
-                jobId={selectedJobId}
-                onNavigateBack={() => {
-                  setActiveView("jobs");
-                  loadJobsList();
-                }}
-                onJobCreated={handleJobCreated}
-                onJobUpdated={loadJobsList}
-              />
-            )
           ) : (
             <AdminWorkspace activeTab={activeNavTab} />
           )}

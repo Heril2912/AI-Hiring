@@ -165,14 +165,14 @@ export function OccupationSelector({
         <input
           type="text"
           className="form-input autocomplete-input"
-          placeholder="Search standard occupations (e.g. Software Developer, Data Scientist)..."
+          placeholder="Search O*NET occupation reference (e.g. Software Developers, Data Scientists)..."
           value={query}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => {
             if (query.trim() && (results.length > 0 || searchError)) setIsOpen(true);
           }}
-          aria-label="Search advisory occupation"
+          aria-label="Search O*NET occupation reference"
           aria-expanded={isOpen}
           aria-autocomplete="list"
         />
@@ -205,7 +205,7 @@ export function OccupationSelector({
 
           {!searchError && results.length > 0 && (
             <div className="dropdown-section">
-              <div className="dropdown-section-title">O*NET 31.0 Standard Occupations</div>
+              <div className="dropdown-section-title">O*NET 31.0 Occupations</div>
               {results.map((item, idx) => (
                 <div
                   key={item.conceptId}
@@ -231,10 +231,14 @@ export function OccupationSelector({
           {!searchError && hasSearched && results.length === 0 && (
             <div className="dropdown-empty-state">
               <span>
-                No occupation found for &quot;{query}&quot;. Try a standardized title such as &quot;Software Developer&quot;, or continue without selecting one.
+                No standard occupation found for &quot;{query}&quot;. Try a standard O*NET title such as &quot;Software Developers&quot;, or continue without selecting one.
               </span>
             </div>
           )}
+
+          <div className="dropdown-attribution-footer" style={{ padding: "6px 10px", fontSize: "10px", color: "var(--text-muted)", borderTop: "1px solid var(--border-subtle)", background: "var(--surface-sunken)" }}>
+            Includes information from the O*NET 31.0 Database by USDOL/ETA, used under CC BY 4.0. O*NET is a trademark of USDOL/ETA.
+          </div>
         </div>
       )}
     </div>

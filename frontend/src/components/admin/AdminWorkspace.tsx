@@ -26,6 +26,23 @@ interface SecurityEventItem {
   occurredAt: string;
 }
 
+interface AdminCandidateItem {
+  id: string;
+  identityId?: string | null;
+  artifactId?: string | null;
+  userId?: string | null;
+  fullName: string;
+  email: string;
+  accountEmail?: string | null;
+  resumeEmail?: string | null;
+  headline?: string | null;
+  isActive: boolean;
+  hasAccount: boolean;
+  createdAt: string;
+  applicationsCount: number;
+  interviewsCount: number;
+}
+
 interface PaginatedEvents {
   items: SecurityEventItem[];
   total: number;
@@ -71,6 +88,15 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [userError, setUserError] = useState<string | null>(null);
 
+  // Candidates state
+  const [candidates, setCandidates] = useState<AdminCandidateItem[]>([]);
+  const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
+  const [candidateError, setCandidateError] = useState<string | null>(null);
+  const [candidateSearchQuery, setCandidateSearchQuery] = useState("");
+  const [isUpdatingCandidate, setIsUpdatingCandidate] = useState<string | null>(null);
+  const [isDeletingCandidate, setIsDeletingCandidate] = useState<string | null>(null);
+
+
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createEmail, setCreateEmail] = useState("");
@@ -89,6 +115,7 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
 
   // Status feedback toast/banner
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState<string | null>(null);
 
   // Security Events state
   const [events, setEvents] = useState<SecurityEventItem[]>([]);
@@ -326,9 +353,68 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
     }
   };
 
+  const fetchCandidates = async () => {
+    try {
+      setIsLoadingCandidates(true);
+      setCandidateError(null);
+      const data = await apiFetch<AdminCandidateItem[]>("/api/v1/admin/candidates");
+      setCandidates(data || []);
+    } catch (err: any) {
+      setCandidateError(err?.message || "Failed to load candidates.");
+    } finally {
+      setIsLoadingCandidates(false);
+    }
+  };
+
+  const handleToggleCandidateActive = async (cand: AdminCandidateItem) => {
+    const newActiveState = !cand.isActive;
+    const confirmMsg = newActiveState
+      ? `Activate candidate '${cand.fullName}'?`
+      : `Deactivate candidate '${cand.fullName}'? All active candidate sessions will be terminated immediately.`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setIsUpdatingCandidate(cand.id);
+      await apiFetch(`/api/v1/admin/candidates/${cand.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: newActiveState }),
+      });
+      setActionSuccess(
+        `Candidate '${cand.fullName}' ${newActiveState ? "activated" : "deactivated"} successfully.`
+      );
+      fetchCandidates();
+    } catch (err: any) {
+      alert(err?.message || "Failed to update candidate status.");
+    } finally {
+      setIsUpdatingCandidate(null);
+    }
+  };
+
+  const handleDeleteCandidate = async (cand: AdminCandidateItem) => {
+    const confirmMsg = `Are you sure you want to permanently drop everything about candidate '${cand.fullName}' (${cand.email || "No email"})?\n\nThis will irreversibly delete all resumes, extracted profiles, job applications, interview recordings, evaluations, and user credentials.\n\nThis action cannot be undone.`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setIsDeletingCandidate(cand.id);
+      await apiFetch(`/api/v1/admin/candidates/${cand.id}`, {
+        method: "DELETE",
+      });
+      setActionSuccess(`Candidate '${cand.fullName}' and all associated records permanently dropped.`);
+      fetchCandidates();
+    } catch (err: any) {
+      alert(err?.message || "Failed to delete candidate.");
+    } finally {
+      setIsDeletingCandidate(null);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === "users") {
       fetchUsers();
+    } else if (activeTab === "candidates") {
+      fetchCandidates();
     } else if (activeTab === "events") {
       fetchSecurityEvents(0);
     } else if (activeTab === "ai_providers") {
@@ -397,6 +483,25 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
       fetchUsers();
     } catch (err: any) {
       alert(err?.message || "Failed to update user status.");
+    }
+  };
+
+  const handleDeleteUser = async (user: UserItem) => {
+    const confirmMsg = `Are you sure you want to permanently delete user '${user.displayName}' (${user.email})?\n\nThis will permanently delete the user account and any associated data.\n\nThis action cannot be undone.`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setIsDeletingUser(user.userId);
+      await apiFetch(`/api/v1/admin/users/${user.userId}`, {
+        method: "DELETE",
+      });
+      setActionSuccess(`User '${user.displayName}' permanently deleted.`);
+      fetchUsers();
+    } catch (err: any) {
+      alert(err?.message || "Failed to delete user.");
+    } finally {
+      setIsDeletingUser(null);
     }
   };
 
@@ -586,11 +691,228 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                             >
                               {u.isActive ? "Deactivate" : "Activate"}
                             </button>
+                            {!u.isActive && (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                onClick={() => handleDeleteUser(u)}
+                                disabled={isDeletingUser === u.userId}
+                                title="Permanently drop user and all associated records"
+                                style={{
+                                  backgroundColor: "#dc2626",
+                                  color: "#ffffff",
+                                  borderColor: "#dc2626",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                              >
+                                <Icon name="trash" size={13} />
+                                <span>{isDeletingUser === u.userId ? "Deleting..." : "Delete"}</span>
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
                     ))
                   )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "candidates" && (
+        <div className="admin-section-card">
+          <div className="admin-section-header">
+            <div>
+              <h2 className="admin-section-title">Candidate Directory &amp; Accounts</h2>
+              <p className="admin-section-subtitle">
+                Manage candidate accounts, access states, and permanent data deletion. Candidates manage their own credentials.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <div className="search-input-wrapper" style={{ minWidth: "260px", position: "relative" }}>
+                <Icon name="search" size={14} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--color-text-tertiary, #999)" }} />
+                <input
+                  type="text"
+                  placeholder="Search candidates..."
+                  value={candidateSearchQuery}
+                  onChange={(e) => setCandidateSearchQuery(e.target.value)}
+                  className="input-field search-input"
+                  style={{ paddingLeft: "32px", height: "36px", fontSize: "0.85rem", width: "100%", borderRadius: "6px" }}
+                  aria-label="Search candidates by name or email"
+                />
+                {candidateSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setCandidateSearchQuery("")}
+                    className="toast-close-btn"
+                    style={{ position: "absolute", right: "8px", top: "50%", transform: "translateY(-50%)" }}
+                    aria-label="Clear search"
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={fetchCandidates}
+                title="Refresh candidate list"
+              >
+                <Icon name="refresh" size={14} />
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          {candidateError && (
+            <div className="feedback-box error" role="alert">
+              <Icon name="alert-triangle" size={16} />
+              <p className="feedback-text error">{candidateError}</p>
+            </div>
+          )}
+
+          {isLoadingCandidates ? (
+            <div className="admin-table-loading">
+              <div className="loading-spinner-sm" />
+              <span>Loading candidate records...</span>
+            </div>
+          ) : (
+            <div className="admin-table-wrapper">
+              <table className="admin-data-table" aria-label="Candidates Table">
+                <thead>
+                  <tr>
+                    <th>Candidate</th>
+                    <th>Account &amp; Role</th>
+                    <th>Status</th>
+                    <th>Activity</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const query = candidateSearchQuery.trim().toLowerCase();
+                    const filtered = candidates.filter((c) =>
+                      query
+                        ? (c.fullName || "").toLowerCase().includes(query) ||
+                          (c.email || "").toLowerCase().includes(query) ||
+                          (c.accountEmail || "").toLowerCase().includes(query) ||
+                          (c.resumeEmail || "").toLowerCase().includes(query) ||
+                          (c.headline || "").toLowerCase().includes(query)
+                        : true
+                    );
+
+                    if (filtered.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={6} className="table-empty-cell">
+                            {candidateSearchQuery ? "No candidates match your search." : "No candidates found."}
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return filtered.map((cand) => (
+                      <tr key={cand.id}>
+                        <td>
+                          <div className="table-user-cell">
+                            <span className="table-user-name">{cand.fullName || "Unnamed Candidate"}</span>
+                            <span className="table-user-email">{cand.email || "No email registered"}</span>
+                            {cand.resumeEmail && cand.email && cand.resumeEmail.toLowerCase() !== cand.email.toLowerCase() && (
+                              <span style={{ fontSize: "0.75rem", color: "var(--color-text-tertiary, #888)", marginTop: "1px" }}>
+                                Resume email: {cand.resumeEmail}
+                              </span>
+                            )}
+                            {cand.headline && (
+                              <span style={{ fontSize: "0.75rem", color: "var(--color-text-tertiary, #888)", marginTop: "2px" }}>
+                                {cand.headline}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                fontSize: "0.75rem",
+                                fontWeight: 600,
+                                backgroundColor: "rgba(100, 116, 139, 0.12)",
+                                color: "#334155",
+                                width: "fit-content",
+                              }}
+                            >
+                              CANDIDATE
+                            </span>
+                            <span style={{ fontSize: "0.75rem", color: "var(--color-text-secondary, #666)" }}>
+                              {cand.hasAccount ? "Portal Account" : "Resume Profile"}
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            className={`status-pill ${
+                              cand.isActive ? "status-active" : "status-inactive"
+                            }`}
+                          >
+                            {cand.isActive ? "Active" : "Deactivated"}
+                          </span>
+                        </td>
+                        <td>
+                          <div style={{ fontSize: "0.8rem", color: "var(--color-text-secondary, #555)" }}>
+                            <span>{cand.applicationsCount} application{cand.applicationsCount === 1 ? "" : "s"}</span>
+                            <br />
+                            <span style={{ color: "var(--color-text-tertiary, #888)" }}>
+                              {cand.interviewsCount} interview{cand.interviewsCount === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="table-date-cell">
+                          {cand.createdAt ? new Date(cand.createdAt).toLocaleDateString() : "—"}
+                        </td>
+                        <td>
+                          <div className="table-actions-group">
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${
+                                cand.isActive ? "btn-secondary" : "btn-primary"
+                              }`}
+                              disabled={isUpdatingCandidate === cand.id || isDeletingCandidate === cand.id}
+                              onClick={() => handleToggleCandidateActive(cand)}
+                            >
+                              {cand.isActive ? "Deactivate" : "Activate"}
+                            </button>
+                            {!cand.isActive && (
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                disabled={isDeletingCandidate === cand.id || isUpdatingCandidate === cand.id}
+                                onClick={() => handleDeleteCandidate(cand)}
+                                title="Permanently drop candidate and all related records"
+                                style={{
+                                  backgroundColor: "#dc2626",
+                                  color: "#ffffff",
+                                  borderColor: "#dc2626",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                              >
+                                <Icon name="trash" size={13} />
+                                <span>{isDeletingCandidate === cand.id ? "Dropping..." : "Delete"}</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -1011,12 +1333,11 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                         </div>
                         <div className="local-ai-hero-item">
                           <span className="local-ai-hero-label">Selected Model</span>
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="local-ai-model-select-wrapper">
                             <select
                               className="form-select text-xs py-1"
                               value={pModel || ""}
                               onChange={(e) => handleSelectModel(e.target.value)}
-                              style={{ maxWidth: "340px", fontSize: "12px" }}
                             >
                               <option value="qwen/qwen3-4b-2507">
                                 Qwen3 4B Instruct — Recommended for question wording
@@ -1038,6 +1359,7 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                               onClick={() => handleAutoDiscoverModels()}
                               disabled={isDiscoveringModels}
                               title="Refresh models from LM Studio"
+                              style={{ whiteSpace: "nowrap" }}
                             >
                               <Icon name="refresh" size={12} />
                               <span>{isDiscoveringModels ? "..." : "Refresh"}</span>
@@ -1047,18 +1369,18 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                         <div className="local-ai-hero-item">
                           <span className="local-ai-hero-label">Question Wording</span>
                           <span className="local-ai-hero-value">
-                            <strong className={isHealthy ? "text-success" : "text-danger"}>
+                            <span className={`status-pill ${isHealthy ? "status-active" : "status-inactive"}`}>
                               {isHealthy ? "Compatible" : (pCompat === "INCOMPATIBLE" ? "Incompatible" : "Not Tested")}
-                            </strong>
+                            </span>
                           </span>
                         </div>
                         <div className="local-ai-hero-item">
                           <span className="local-ai-hero-label">Recommended Action</span>
                           <span className="local-ai-hero-value text-xs">
                             {pCompat === "INCOMPATIBLE" || (pModel && pModel.includes("thinking")) ? (
-                              <span className="text-warning">Load and select Qwen3 4B Instruct in LM Studio</span>
+                              <span className="status-warn" style={{ color: "#d97706", fontWeight: 600 }}>Load and select Qwen3 4B Instruct in LM Studio</span>
                             ) : (
-                              <span className="text-muted">Ready for bounded interview question rewording</span>
+                              <span className="text-muted" style={{ color: "#16a34a", fontWeight: 500 }}>Ready for bounded interview question rewording</span>
                             )}
                           </span>
                         </div>
@@ -1288,9 +1610,9 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
       {/* Diagnostic Report Modal Dialog */}
       {isReportModalOpen && compatibilityReport && selectedReportProfile && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
-          <div className="modal-dialog" style={{ maxWidth: "560px" }}>
-            <div className="modal-header">
-              <h3 id="report-modal-title" className="modal-title">
+          <div className="modal-dialog" style={{ maxWidth: "580px" }}>
+            <div className="modal-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid var(--border-subtle, #e2e8f0)", paddingBottom: "12px" }}>
+              <h3 id="report-modal-title" className="modal-title" style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700 }}>
                 Diagnostic Report: {selectedReportProfile.displayName}
               </h3>
               <button
@@ -1298,26 +1620,27 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                 className="modal-close-btn"
                 onClick={() => setIsReportModalOpen(false)}
                 aria-label="Close modal"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", padding: "4px" }}
               >
                 <Icon name="x" size={18} />
               </button>
             </div>
 
-            <div className="modal-form">
-              <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <strong>Status: </strong>
+            <div className="modal-form" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: compatibilityReport.is_compatible ? "#f0fdf4" : "#fef2f2", borderRadius: "8px", border: `1px solid ${compatibilityReport.is_compatible ? "#bbf7d0" : "#fecaca"}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "13px", fontWeight: 600, color: "#475569" }}>Status:</span>
                   <span className={compatibilityReport.is_compatible ? "status-pill status-active" : "status-pill status-inactive"}>
                     {compatibilityReport.is_compatible ? "COMPATIBLE / HEALTHY" : "INCOMPATIBLE"}
                   </span>
                 </div>
                 <div>
-                  <small className="text-muted">Latency: {compatibilityReport.latency_ms} ms</small>
+                  <small style={{ color: "#64748b", fontSize: "12px", fontWeight: 500 }}>Latency: {compatibilityReport.latency_ms} ms</small>
                 </div>
               </div>
 
               {compatibilityReport.safe_failure_message && (
-                <div className="feedback-box error" style={{ marginBottom: "12px" }}>
+                <div className="feedback-box error" style={{ margin: 0 }}>
                   <Icon name="alert-triangle" size={16} />
                   <p className="feedback-text">
                     <strong>{compatibilityReport.safe_failure_code}: </strong>
@@ -1326,16 +1649,41 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
                 </div>
               )}
 
-              <div className="diagnostic-checklist" style={{ fontSize: "13px", lineHeight: "1.8", background: "var(--bg-subtle, #f8f9fa)", padding: "12px", borderRadius: "6px", marginBottom: "16px" }}>
-                <div>Reachability Check: {compatibilityReport.reachability_passed ? "✓ Passed" : "✗ Failed"}</div>
-                <div>Authentication: {compatibilityReport.auth_passed ? "✓ Verified" : "✗ Failed / Not Checked"}</div>
-                <div>Model Discovery: {compatibilityReport.model_discovered ? "✓ Model Verified" : "✗ Model Not Found"}</div>
-                <div>Dry-Run Completion: {compatibilityReport.dry_run_completion_passed ? "✓ Non-streaming Verified" : "✗ Failed"}</div>
-                <div>Unicode Handling: {compatibilityReport.unicode_handling_passed ? "✓ Passed" : "✗ Failed"}</div>
+              <div className="diagnostic-checklist" style={{ fontSize: "13px", lineHeight: "1.8", background: "#f8fafc", padding: "14px 16px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "4px" }}>
+                  <span>Reachability Check</span>
+                  <span style={{ fontWeight: 600, color: compatibilityReport.reachability_passed ? "#16a34a" : "#dc2626" }}>
+                    {compatibilityReport.reachability_passed ? "✓ Passed" : "✗ Failed"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", padding: "4px 0" }}>
+                  <span>Authentication</span>
+                  <span style={{ fontWeight: 600, color: compatibilityReport.auth_passed ? "#16a34a" : "#64748b" }}>
+                    {compatibilityReport.auth_passed ? "✓ Verified" : "✗ Not Applicable"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", padding: "4px 0" }}>
+                  <span>Model Discovery</span>
+                  <span style={{ fontWeight: 600, color: compatibilityReport.model_discovered ? "#16a34a" : "#dc2626" }}>
+                    {compatibilityReport.model_discovered ? "✓ Model Verified" : "✗ Model Not Found"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", padding: "4px 0" }}>
+                  <span>Dry-Run Completion</span>
+                  <span style={{ fontWeight: 600, color: compatibilityReport.dry_run_completion_passed ? "#16a34a" : "#dc2626" }}>
+                    {compatibilityReport.dry_run_completion_passed ? "✓ Non-streaming Verified" : "✗ Failed"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", paddingTop: "4px" }}>
+                  <span>Unicode Handling</span>
+                  <span style={{ fontWeight: 600, color: compatibilityReport.unicode_handling_passed ? "#16a34a" : "#dc2626" }}>
+                    {compatibilityReport.unicode_handling_passed ? "✓ Passed" : "✗ Failed"}
+                  </span>
+                </div>
                 {compatibilityReport.discovered_model_ids && compatibilityReport.discovered_model_ids.length > 0 && (
-                  <div style={{ marginTop: "6px" }}>
-                    <strong>Discovered Models on Endpoint:</strong>
-                    <div style={{ fontFamily: "monospace", fontSize: "12px", marginTop: "2px" }}>
+                  <div style={{ marginTop: "10px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1" }}>
+                    <strong style={{ fontSize: "12px", color: "#334155" }}>Discovered Models on Endpoint:</strong>
+                    <div style={{ fontFamily: "monospace", fontSize: "11px", marginTop: "4px", background: "#ffffff", padding: "6px 8px", borderRadius: "4px", border: "1px solid #e2e8f0", wordBreak: "break-all" }}>
                       {compatibilityReport.discovered_model_ids.join(", ")}
                     </div>
                   </div>
@@ -1343,22 +1691,22 @@ export function AdminWorkspace({ activeTab = "users" }: { activeTab?: string }) 
               </div>
 
               {selectedReportProfile.modelSource && (
-                <div style={{ fontSize: "12px", color: "var(--text-muted, #666)", marginBottom: "4px" }}>
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
                   <strong>Model Source:</strong> {selectedReportProfile.modelSource}
                 </div>
               )}
               {selectedReportProfile.modelLicence && (
-                <div style={{ fontSize: "12px", color: "var(--text-muted, #666)", marginBottom: "4px" }}>
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
                   <strong>Licence:</strong> {selectedReportProfile.modelLicence}
                 </div>
               )}
               {selectedReportProfile.modelChecksum && (
-                <div style={{ fontSize: "12px", color: "var(--text-muted, #666)", marginBottom: "12px" }}>
-                  <strong>SHA-256 Checksum:</strong> <code>{selectedReportProfile.modelChecksum}</code>
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                  <strong>SHA-256 Checksum:</strong> <code style={{ fontSize: "11px" }}>{selectedReportProfile.modelChecksum}</code>
                 </div>
               )}
 
-              <div className="modal-actions">
+              <div className="modal-actions" style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
                 <button
                   type="button"
                   className="btn btn-secondary"

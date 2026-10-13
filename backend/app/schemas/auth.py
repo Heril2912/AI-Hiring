@@ -191,3 +191,25 @@ class PaginatedSecurityAuditEventsResponse(StrictSchema):
     offset: int
 
 
+class AdminCandidateResponse(StrictSchema):
+    id: str
+    identity_id: Optional[uuid.UUID] = None
+    artifact_id: Optional[uuid.UUID] = None
+    user_id: Optional[uuid.UUID] = None
+    full_name: str
+    email: str
+    account_email: Optional[str] = None
+    resume_email: Optional[str] = None
+    headline: Optional[str] = None
+    is_active: bool
+    has_account: bool
+    created_at: datetime
+    applications_count: int = 0
+    interviews_count: int = 0
+
+
+class AdminCandidateUpdateRequest(StrictSchema):
+    is_active: bool
+
+
+

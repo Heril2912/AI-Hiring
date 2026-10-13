@@ -390,7 +390,25 @@ export function AiInterviewsDirectory({
                             }}
                             className="aiq-radio-input"
                           />
-                          <span className="aiq-job-name">{job.job_title}</span>
+                          <div className="aiq-job-title-group">
+                            <span className="aiq-job-name">{job.job_title}</span>
+                            <span
+                              className={`aiq-candidate-release-badge ${
+                                (job.applied_candidate_count ?? 0) === 0
+                                  ? "none"
+                                  : (job.released_candidate_count ?? 0) === (job.applied_candidate_count ?? 0)
+                                  ? "all"
+                                  : (job.released_candidate_count ?? 0) > 0
+                                  ? "partial"
+                                  : "unreleased"
+                              }`}
+                              title={`${job.released_candidate_count ?? 0} of ${job.applied_candidate_count ?? 0} applied candidates received this ${selectedMode.toLowerCase()} interview`}
+                            >
+                              {(job.applied_candidate_count ?? 0) > 0
+                                ? `${job.released_candidate_count ?? 0}/${job.applied_candidate_count} received`
+                                : "0 applied"}
+                            </span>
+                          </div>
                         </div>
                         <span className="aiq-job-req-count">
                           {job.requirement_count}{" "}
@@ -518,7 +536,25 @@ export function AiInterviewsDirectory({
               return (
                 <div key={set.ai_set_id} className="aiq-recent-row">
                   <div className="aiq-recent-info">
-                    <span className="aiq-recent-job-title">{set.job_title}</span>
+                    <div className="aiq-recent-title-row">
+                      <span className="aiq-recent-job-title">{set.job_title}</span>
+                      <span
+                        className={`aiq-candidate-release-badge ${
+                          (set.applied_candidate_count ?? 0) === 0
+                            ? "none"
+                            : (set.released_candidate_count ?? 0) === (set.applied_candidate_count ?? 0)
+                            ? "all"
+                            : (set.released_candidate_count ?? 0) > 0
+                            ? "partial"
+                            : "unreleased"
+                        }`}
+                        title={`${set.released_candidate_count ?? 0} of ${set.applied_candidate_count ?? 0} applied candidates received this ${selectedMode.toLowerCase()} interview`}
+                      >
+                        {(set.applied_candidate_count ?? 0) > 0
+                          ? `${set.released_candidate_count ?? 0}/${set.applied_candidate_count} received`
+                          : "0 applied"}
+                      </span>
+                    </div>
                     <div className="aiq-recent-meta">
                       <span>
                         {set.generated_question_count}{" "}

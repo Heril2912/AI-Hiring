@@ -167,11 +167,11 @@ describe("Phase 4D.4: Mode-Aware Evaluation UI & Export", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /view evaluations for senior ai engineer/i }));
 
-    // Verify both TEXT and AUDIO candidate cards are displayed for the same candidate
+    // By default, Text-based mode is selected
     await waitFor(() => {
       expect(document.querySelector(".eval-badge-mode-text")).toBeInTheDocument();
-      expect(document.querySelector(".eval-badge-mode-audio")).toBeInTheDocument();
-      expect(screen.getAllByText("Jane Doe")).toHaveLength(2);
+      expect(document.querySelector(".eval-badge-mode-audio")).not.toBeInTheDocument();
+      expect(screen.getAllByText("Jane Doe")).toHaveLength(1);
     });
 
     // Test Audio-only filter pill
@@ -193,15 +193,6 @@ describe("Phase 4D.4: Mode-Aware Evaluation UI & Export", () => {
       expect(document.querySelector(".eval-badge-mode-audio")).not.toBeInTheDocument();
       expect(screen.getAllByText("Jane Doe")).toHaveLength(1);
     });
-
-    // Reset to All modes
-    const allModesBtn = screen.getByRole("button", { name: "All modes" });
-    fireEvent.click(allModesBtn);
-
-    await waitFor(() => {
-      expect(document.querySelector(".eval-badge-mode-text")).toBeInTheDocument();
-      expect(document.querySelector(".eval-badge-mode-audio")).toBeInTheDocument();
-    });
   });
 
   it("displays audio evaluation detail with transcript notice and confirmed transcript label", async () => {
@@ -212,13 +203,19 @@ describe("Phase 4D.4: Mode-Aware Evaluation UI & Export", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /view evaluations for senior ai engineer/i }));
 
+    // Switch to Audio-based filter
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Audio-based" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Audio-based" }));
+
     await waitFor(() => {
       expect(document.querySelector(".eval-badge-mode-audio")).toBeInTheDocument();
     });
 
-    // Click evaluate on the audio interview card (index 1)
+    // Click evaluate on the audio interview card
     const evalButtons = screen.getAllByRole("button", { name: /evaluate interview/i });
-    fireEvent.click(evalButtons[1]);
+    fireEvent.click(evalButtons[0]);
 
     await waitFor(() => {
       expect(candidateEvaluationsApi.getCandidateEvaluationDetail).toHaveBeenCalledWith("sess-audio-1");
@@ -256,12 +253,18 @@ describe("Phase 4D.4: Mode-Aware Evaluation UI & Export", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /view evaluations for senior ai engineer/i }));
 
+    // Switch to Audio-based filter
     await waitFor(() => {
-      expect(screen.getByText("Audio-based")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Audio-based" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Audio-based" }));
+
+    await waitFor(() => {
+      expect(document.querySelector(".eval-badge-mode-audio")).toBeInTheDocument();
     });
 
     const evalButtons = screen.getAllByRole("button", { name: /evaluate interview/i });
-    fireEvent.click(evalButtons[1]);
+    fireEvent.click(evalButtons[0]);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /download json/i })).toBeInTheDocument();

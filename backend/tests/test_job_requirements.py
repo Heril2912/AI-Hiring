@@ -126,6 +126,20 @@ def synthetic_taxonomy(tmp_path, test_db):
     with open(d / "software_skills.csv", "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(skill_rows)
 
+    essential_rows = [
+        ["O*NET-SOC Code", "Title", "Element ID", "Element Name", "Scale ID", "Data Value", "Recommend Suppress", "Not Relevant"],
+        ["15-1252.00", "Software Developers", "2.A.1.a", "Reading Comprehension", "IM", "4.0", "N", "N"],
+    ]
+    with open(d / "essential_skills.csv", "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(essential_rows)
+
+    transferable_rows = [
+        ["O*NET-SOC Code", "Title", "Element ID", "Element Name", "Scale ID", "Data Value", "Recommend Suppress", "Not Relevant"],
+        ["15-1252.00", "Software Developers", "2.B.1.a", "Critical Thinking", "IM", "4.25", "N", "N"],
+    ]
+    with open(d / "transferable_skills.csv", "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(transferable_rows)
+
     import_onet_taxonomy(source_dir=d, version="31.0", session=test_db)
     return d
 

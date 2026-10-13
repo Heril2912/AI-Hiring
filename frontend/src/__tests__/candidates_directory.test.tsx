@@ -49,7 +49,8 @@ describe("CandidatesDirectory Component", () => {
     expect(screen.getByText("Backend Architect")).toBeInTheDocument();
     expect(screen.getByText("v2")).toBeInTheDocument();
     expect(screen.getByText("v1")).toBeInTheDocument();
-    expect(screen.getByText("Needs Review")).toBeInTheDocument();
+    // Needs Review badge is reserved for the candidate's detailed profile view
+    expect(screen.queryByText("Needs Review")).toBeNull();
   });
 
   it("filters candidate list by search input", () => {

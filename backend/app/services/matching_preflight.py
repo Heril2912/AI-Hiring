@@ -467,9 +467,24 @@ def build_frozen_requisition_matching_view(
             )
             skill_obj = db.execute(stmt_skill).scalar_one_or_none()
             if skill_obj is None:
-                raise InvalidLocalTaxonomyReferenceError(
-                    f"Requirement '{r.label}' references skill concept '{r.taxonomy_skill_concept_id}' not found in active O*NET snapshot."
+                # Check if concept belonged to a previously active snapshot
+                stmt_prev_skill = select(SkillConcept).where(
+                    SkillConcept.concept_id == r.taxonomy_skill_concept_id,
                 )
+                prev_skill = db.execute(stmt_prev_skill).scalar_one_or_none()
+                if prev_skill is not None:
+                    # Look up active snapshot equivalent by normalized label or external_id
+                    stmt_active_equiv = select(SkillConcept).where(
+                        SkillConcept.snapshot_id == active_snapshot.snapshot_id,
+                        SkillConcept.normalized_label == prev_skill.normalized_label,
+                    )
+                    skill_obj = db.execute(stmt_active_equiv).scalar_one_or_none()
+                    if skill_obj is None:
+                        skill_obj = prev_skill
+                else:
+                    raise InvalidLocalTaxonomyReferenceError(
+                        f"Requirement '{r.label}' references skill concept '{r.taxonomy_skill_concept_id}' not found in active O*NET snapshot."
+                    )
 
             tax_canonical_label = skill_obj.canonical_label
             tax_external_id = skill_obj.external_id
@@ -516,6 +531,18 @@ def build_frozen_requisition_matching_view(
                 OccupationConcept.snapshot_id == active_snapshot.snapshot_id,
             )
             occ_obj = db.execute(stmt_occ).scalar_one_or_none()
+            if occ_obj is None:
+                stmt_prev_occ = select(OccupationConcept).where(
+                    OccupationConcept.concept_id == version.occupation_concept_id,
+                )
+                prev_occ = db.execute(stmt_prev_occ).scalar_one_or_none()
+                if prev_occ is not None:
+                    stmt_active_occ_equiv = select(OccupationConcept).where(
+                        OccupationConcept.snapshot_id == active_snapshot.snapshot_id,
+                        OccupationConcept.onet_soc_code == prev_occ.onet_soc_code,
+                    )
+                    occ_obj = db.execute(stmt_active_occ_equiv).scalar_one_or_none() or prev_occ
+
             if occ_obj is not None:
                 occ_title = occ_obj.canonical_title
                 occ_soc = occ_obj.onet_soc_code

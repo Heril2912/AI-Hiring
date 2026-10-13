@@ -204,20 +204,12 @@ export function AuthenticatedShell({
             <>
               <button
                 type="button"
-                className={`nav-tab-btn ${
-                  activeNavTab === "jobs" || activeNavTab === "new_job" || activeNavTab === "edit_job"
-                    ? "tab-active"
-                    : ""
-                }`}
-                aria-current={
-                  activeNavTab === "jobs" || activeNavTab === "new_job" || activeNavTab === "edit_job"
-                    ? "page"
-                    : undefined
-                }
-                onClick={() => onNavigateTab?.("jobs")}
+                className={`nav-tab-btn ${activeNavTab === "candidates" ? "tab-active" : ""}`}
+                aria-current={activeNavTab === "candidates" ? "page" : undefined}
+                onClick={() => onNavigateTab?.("candidates")}
               >
-                <Icon name="briefcase" size={15} />
-                <span>Jobs</span>
+                <Icon name="users" size={15} />
+                <span>Candidates</span>
               </button>
               <button
                 type="button"

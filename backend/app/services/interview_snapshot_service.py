@@ -178,6 +178,12 @@ def load_authoritative_job_blueprint_snapshot(
                 SkillConcept.snapshot_id == active_tax.snapshot_id,
             )
             skill_obj = db.execute(stmt_skill).scalar_one_or_none()
+            if skill_obj is None:
+                stmt_prev_skill = select(SkillConcept).where(
+                    SkillConcept.concept_id == r.taxonomy_skill_concept_id,
+                )
+                skill_obj = db.execute(stmt_prev_skill).scalar_one_or_none()
+
             if skill_obj is not None:
                 tax_label = skill_obj.canonical_label
                 tax_ext_id = skill_obj.external_id

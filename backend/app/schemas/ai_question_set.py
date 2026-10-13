@@ -29,6 +29,8 @@ class EligibleJobItemResponse(FrozenSchema):
     requirement_count: int
     current_ai_set_id: Optional[UUID] = None
     current_ai_set_status: Optional[str] = None
+    applied_candidate_count: int = 0
+    released_candidate_count: int = 0
 
 
 class EligibleJobsResponse(FrozenSchema):
@@ -183,6 +185,8 @@ class AiQuestionSetSummaryResponse(FrozenSchema):
     total_blueprint_slots: int
     conversation_count: int = 0
     mcq_count: int = 0
+    applied_candidate_count: int = 0
+    released_candidate_count: int = 0
     created_at: datetime
     updated_at: datetime
 

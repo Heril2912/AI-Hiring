@@ -28,7 +28,9 @@ export function ReleaseInterviewSetModal({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [confirmingApp, setConfirmingApp] = useState<RecruiterApplicationSummary | null>(null);
+  const [isConfirmingBulkRelease, setIsConfirmingBulkRelease] = useState<boolean>(false);
   const [isReleasing, setIsReleasing] = useState<boolean>(false);
+  const [isBulkReleasing, setIsBulkReleasing] = useState<boolean>(false);
   const [releaseActionError, setReleaseActionError] = useState<string | null>(null);
   const [releaseSuccessMsg, setReleaseSuccessMsg] = useState<string | null>(null);
 
@@ -64,6 +66,7 @@ export function ReleaseInterviewSetModal({
   useEffect(() => {
     if (isOpen && detail.job_id) {
       setConfirmingApp(null);
+      setIsConfirmingBulkRelease(false);
       setReleaseActionError(null);
       setReleaseSuccessMsg(null);
       loadApplicants();
@@ -78,6 +81,8 @@ export function ReleaseInterviewSetModal({
         e.preventDefault();
         if (confirmingApp) {
           setConfirmingApp(null);
+        } else if (isConfirmingBulkRelease) {
+          setIsConfirmingBulkRelease(false);
         } else {
           onClose();
         }
@@ -85,7 +90,7 @@ export function ReleaseInterviewSetModal({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, confirmingApp, onClose]);
+  }, [isOpen, confirmingApp, isConfirmingBulkRelease, onClose]);
 
   if (!isOpen) return null;
 
@@ -138,6 +143,70 @@ export function ReleaseInterviewSetModal({
       }
     } finally {
       setIsReleasing(false);
+    }
+  };
+
+  const handleConfirmBulkRelease = async () => {
+    if (!detail.job_id || eligibleApplicants.length === 0) return;
+    try {
+      setIsBulkReleasing(true);
+      setReleaseActionError(null);
+      setReleaseSuccessMsg(null);
+
+      const toRelease = [...eligibleApplicants];
+      let successCount = 0;
+      let failCount = 0;
+      const successfulAppIds: string[] = [];
+
+      for (const app of toRelease) {
+        try {
+          const res = await releaseApplicantInterview(
+            detail.job_id,
+            app.applicationId,
+            detail.ai_set_id
+          );
+          successCount++;
+          successfulAppIds.push(app.applicationId);
+          setApplicants((prev) =>
+            prev.map((a) =>
+              a.applicationId === app.applicationId
+                ? { ...a, interviewStatus: "RELEASED", releaseId: res.releaseId }
+                : a
+            )
+          );
+        } catch (err: any) {
+          const errMsg = err?.message || "";
+          if (errMsg.includes("already released") || err?.code === "ALREADY_RELEASED") {
+            successCount++;
+            successfulAppIds.push(app.applicationId);
+            setApplicants((prev) =>
+              prev.map((a) =>
+                a.applicationId === app.applicationId
+                  ? { ...a, interviewStatus: "RELEASED" }
+                  : a
+              )
+            );
+          } else {
+            failCount++;
+          }
+        }
+      }
+
+      setIsConfirmingBulkRelease(false);
+      if (successCount > 0) {
+        setReleaseSuccessMsg(
+          `Official interview set released to ${successCount} candidate${successCount === 1 ? "" : "s"}${
+            failCount > 0 ? ` (${failCount} failed)` : ""
+          }.`
+        );
+        if (onSuccessRelease && successfulAppIds.length > 0) {
+          onSuccessRelease(successfulAppIds[0]);
+        }
+      } else if (failCount > 0) {
+        setReleaseActionError(`Failed to release interviews to ${failCount} candidates.`);
+      }
+    } finally {
+      setIsBulkReleasing(false);
     }
   };
 
@@ -585,6 +654,119 @@ export function ReleaseInterviewSetModal({
           </div>
         )}
 
+        {/* Bulk Release Confirmation Modal Sub-dialog */}
+        {isConfirmingBulkRelease && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.4)",
+              backdropFilter: "blur(2px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1100,
+              padding: "16px",
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-bulk-release-title"
+          >
+            <div
+              style={{
+                backgroundColor: "var(--surface-base, #ffffff)",
+                borderRadius: "10px",
+                maxWidth: "500px",
+                width: "100%",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2)",
+                padding: "24px",
+                border: "1px solid var(--border-subtle, #e2e8f0)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+                <div
+                  style={{
+                    width: "36px",
+                    height: "36px",
+                    borderRadius: "50%",
+                    backgroundColor: "#ecfdf5",
+                    color: "#065f46",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Icon name="users" size={18} />
+                </div>
+                <h3 id="confirm-bulk-release-title" style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
+                  Release Interview to All Applied Candidates
+                </h3>
+              </div>
+
+              <p style={{ fontSize: "14px", color: "#475569", margin: "0 0 16px 0", lineHeight: 1.5 }}>
+                You are about to release this official sealed {isAudioMode ? "audio" : "text"} interview set to{" "}
+                <strong style={{ color: "#0f172a" }}>all {eligibleApplicants.length} eligible applied candidate{eligibleApplicants.length === 1 ? "" : "s"}</strong>.
+                Each candidate will receive access in their portal immediately.
+              </p>
+
+              <div
+                style={{
+                  backgroundColor: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "6px",
+                  padding: "12px 14px",
+                  fontSize: "13px",
+                  marginBottom: "20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                }}
+              >
+                <div>
+                  <span style={{ color: "#64748b" }}>Target Candidates:</span>{" "}
+                  <strong>{eligibleApplicants.length} eligible applicant{eligibleApplicants.length === 1 ? "" : "s"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748b" }}>Job:</span>{" "}
+                  <strong>{detail.job_title} (Rev #{detail.job_revision})</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748b" }}>Interview Mode:</span>{" "}
+                  <strong>{isAudioMode ? "Audio-based interview" : "Text-based interview"}</strong>
+                </div>
+                <div>
+                  <span style={{ color: "#64748b" }}>Question Set:</span>{" "}
+                  <strong>Version {detail.set_version} ({totalCount} questions)</strong>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setIsConfirmingBulkRelease(false)}
+                  disabled={isBulkReleasing}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleConfirmBulkRelease}
+                  disabled={isBulkReleasing}
+                >
+                  <Icon name="users" size={14} className={isBulkReleasing ? "animate-spin" : ""} />
+                  <span>{isBulkReleasing ? "Releasing to all..." : `Release to all (${eligibleApplicants.length})`}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Modal Footer */}
         <div
           style={{
@@ -596,10 +778,29 @@ export function ReleaseInterviewSetModal({
             backgroundColor: "var(--surface-subtle, #f8fafc)",
           }}
         >
-          <div style={{ fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
-            {eligibleApplicants.length} eligible applicant{eligibleApplicants.length === 1 ? "" : "s"} ready for release
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ fontSize: "12px", color: "var(--text-muted, #64748b)" }}>
+              {eligibleApplicants.length} eligible applicant{eligibleApplicants.length === 1 ? "" : "s"} ready for release
+            </span>
+            {eligibleApplicants.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-primary btn-xs"
+                onClick={() => setIsConfirmingBulkRelease(true)}
+                disabled={isBulkReleasing || isReleasing}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontWeight: 600,
+                }}
+              >
+                <Icon name="users" size={13} />
+                <span>Release to all applied ({eligibleApplicants.length})</span>
+              </button>
+            )}
           </div>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={isBulkReleasing || isReleasing}>
             Close
           </button>
         </div>

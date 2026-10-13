@@ -15,11 +15,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.auth import UserRecord, UserRole
+from app.models.candidate_access import CandidateApplicationRecord, CandidatePracticeReleaseRecord
 from app.models.interview import (
     AiInterviewQuestionSetRecord,
     InterviewQuestionRecord,
@@ -866,11 +867,29 @@ def list_ai_question_sets(
 
         m_display = "Qwen3-4B MLX" if (ai_set.model_identifier and "qwen" in ai_set.model_identifier.lower()) else (ai_set.model_identifier or "Local LLM")
 
+        eff_mode = getattr(ai_set, "interview_mode", InterviewMode.TEXT) or InterviewMode.TEXT
+        eff_mode_str = eff_mode.value if hasattr(eff_mode, "value") else str(eff_mode)
+
+        # Count submitted applications for this job
+        stmt_app_count = select(func.count(CandidateApplicationRecord.application_id)).where(
+            CandidateApplicationRecord.job_id == ai_set.job_id,
+            CandidateApplicationRecord.status == "SUBMITTED",
+        )
+        applied_cnt = db.execute(stmt_app_count).scalar() or 0
+
+        # Count candidates who received released interviews for this job and mode
+        stmt_rel_count = select(func.count(func.distinct(CandidatePracticeReleaseRecord.candidate_id))).where(
+            CandidatePracticeReleaseRecord.job_id == ai_set.job_id,
+            CandidatePracticeReleaseRecord.status == "RELEASED",
+            CandidatePracticeReleaseRecord.interview_mode == eff_mode_str,
+        )
+        released_cnt = db.execute(stmt_rel_count).scalar() or 0
+
         summaries.append(
             AiQuestionSetSummaryResponse(
                 ai_set_id=ai_set.ai_set_id,
                 set_version=ai_set.set_version,
-                interview_mode=getattr(ai_set, "interview_mode", InterviewMode.TEXT) or InterviewMode.TEXT,
+                interview_mode=eff_mode,
                 template_id=ai_set.template_id,
                 source_mode=ai_set.source_mode,
                 job_id=ai_set.job_id,
@@ -884,6 +903,8 @@ def list_ai_question_sets(
                 total_blueprint_slots=total_slots,
                 conversation_count=conv_cnt,
                 mcq_count=mcq_cnt,
+                applied_candidate_count=applied_cnt,
+                released_candidate_count=released_cnt,
                 created_at=ai_set.created_at,
                 updated_at=ai_set.updated_at,
             )
@@ -906,7 +927,7 @@ def get_eligible_jobs_for_ai_questions(
     """Retrieves organization-scoped jobs available to the recruiter for AI interview generation.
     
     Calculates readiness independently by mode.
-    Returns job_id, job_title, requirement_count, current_ai_set_id, current_ai_set_status.
+    Returns job_id, job_title, requirement_count, current_ai_set_id, current_ai_set_status, applied_candidate_count, released_candidate_count.
     """
     stmt = (
         select(JobRequisition)
@@ -928,6 +949,7 @@ def get_eligible_jobs_for_ai_questions(
     stmt = stmt.order_by(desc(JobRequisition.updated_at))
     records = db.execute(stmt).scalars().all()
     
+    mode_str = mode.value if hasattr(mode, "value") else str(mode)
     items: List[EligibleJobItemResponse] = []
     for job in records:
         if not job.versions:
@@ -963,6 +985,21 @@ def get_eligible_jobs_for_ai_questions(
         if has_valid_ai_set:
             continue
 
+        # Count submitted applications for this job
+        stmt_app_count = select(func.count(CandidateApplicationRecord.application_id)).where(
+            CandidateApplicationRecord.job_id == job.job_id,
+            CandidateApplicationRecord.status == "SUBMITTED",
+        )
+        applied_cnt = db.execute(stmt_app_count).scalar() or 0
+
+        # Count candidates who received released interviews for this job and mode
+        stmt_rel_count = select(func.count(func.distinct(CandidatePracticeReleaseRecord.candidate_id))).where(
+            CandidatePracticeReleaseRecord.job_id == job.job_id,
+            CandidatePracticeReleaseRecord.status == "RELEASED",
+            CandidatePracticeReleaseRecord.interview_mode == mode_str,
+        )
+        released_cnt = db.execute(stmt_rel_count).scalar() or 0
+
         items.append(
             EligibleJobItemResponse(
                 job_id=job.job_id,
@@ -970,6 +1007,8 @@ def get_eligible_jobs_for_ai_questions(
                 requirement_count=req_count,
                 current_ai_set_id=None,
                 current_ai_set_status=None,
+                applied_candidate_count=applied_cnt,
+                released_candidate_count=released_cnt,
             )
         )
 

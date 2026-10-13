@@ -234,10 +234,6 @@ export function CandidatesDirectory({
                     ) : (
                       <span className="badge badge-provenance-parser">Parser</span>
                     )}
-
-                    {c.reviewRequired && (
-                      <span className="badge badge-review-warn">Needs Review</span>
-                    )}
                   </div>
 
                   <span className="candidate-date">{formatDate(c.createdAt)}</span>

@@ -102,6 +102,7 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
         canonicalLabel: "Python",
         category: "Programming language",
         source: "ONET",
+        sourceFamily: "software",
         sourceVersion: "31.0",
       },
     ];
@@ -126,8 +127,10 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
       expect(taxonomyApi.searchSkills).toHaveBeenCalledWith("Python", 8);
     });
 
-    // Verify advisory dropdown shows O*NET suggestion and custom button
-    expect(await screen.findByText("O*NET 31.0 Advisory Suggestions")).toBeInTheDocument();
+    // Verify dropdown shows O*NET 31.0 Skills, Software skill family badge, and custom button
+    expect(await screen.findByText("O*NET 31.0 Skills")).toBeInTheDocument();
+    expect(screen.getByText("Software skill")).toBeInTheDocument();
+    expect(screen.getByText(/Includes information from the O\*NET 31.0 Database/)).toBeInTheDocument();
     const suggestionOption = screen.getByRole("option");
     expect(suggestionOption).toHaveTextContent("Python");
 
@@ -162,7 +165,7 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
       />
     );
 
-    const occInput = screen.getByLabelText("Search advisory occupation");
+    const occInput = screen.getByLabelText("Search O*NET occupation reference");
     fireEvent.change(occInput, { target: { value: "Software" } });
 
     await waitFor(() => {
@@ -170,6 +173,7 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
     });
 
     expect(await screen.findByText("Software Developers")).toBeInTheDocument();
+    expect(screen.getByText(/Includes information from the O\*NET 31.0 Database/)).toBeInTheDocument();
     fireEvent.click(screen.getByText("Software Developers"));
     expect(onSelectOccupation).toHaveBeenCalledWith(mockOccs[0]);
 
@@ -205,19 +209,19 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
       />
     );
 
-    const input = screen.getByLabelText("Search advisory occupation");
+    const input = screen.getByLabelText("Search O*NET occupation reference");
     fireEvent.change(input, { target: { value: "Network" } });
 
     // Must show service error notice, not "No matching occupations found"
     expect(await screen.findByText(/Taxonomy service is temporarily unavailable/i)).toBeInTheDocument();
-    expect(screen.queryByText(/No occupation found for/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No standard occupation found for/i)).not.toBeInTheDocument();
 
     // 2. Genuine no-results scenario
     vi.mocked(taxonomyApi.searchOccupations).mockResolvedValueOnce([]);
     fireEvent.change(input, { target: { value: "Backend" } });
 
-    expect(await screen.findByText(/No occupation found for/i)).toBeInTheDocument();
-    expect(screen.getByText(/Try a standardized title such as "Software Developer"/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No standard occupation found for/i)).toBeInTheDocument();
+    expect(screen.getByText(/Try a standard O\*NET title such as "Software Developers"/i)).toBeInTheDocument();
   });
 
   // =========================================================================
@@ -236,11 +240,11 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
     const occToggle = screen.getByRole("heading", { name: /Occupation reference/i });
     expect(occToggle).toBeInTheDocument();
     // Autocomplete input should not be visible before clicking toggle
-    expect(screen.queryByLabelText("Search advisory occupation")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Search O*NET occupation reference")).not.toBeInTheDocument();
 
     // Expand occupation disclosure
     fireEvent.click(occToggle);
-    expect(screen.getByLabelText("Search advisory occupation")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search O*NET occupation reference")).toBeInTheDocument();
 
     // Check Draft checks zero state: Must show neutral "No required criteria added yet.", NOT green pass
     expect(screen.getByText(/No required criteria added yet/i)).toBeInTheDocument();
@@ -365,7 +369,7 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
     );
 
     // Fill Title
-    const titleInput = screen.getByLabelText(/Job Title/);
+    const titleInput = screen.getByLabelText(/Job title/i);
     fireEvent.change(titleInput, { target: { value: "Senior Backend Developer" } });
 
     // Add Requirement
@@ -708,7 +712,7 @@ describe("Phase 2B.3: Jobs Workspace & Requirement Builder", () => {
       expect(screen.getByText(/Job approved successfully \(Revision #2\)\./)).toBeInTheDocument();
 
       // Verify title input is now disabled (read-only)
-      const titleInput = screen.getByLabelText(/Job Title/);
+      const titleInput = screen.getByLabelText(/Job title/i);
       expect(titleInput).toBeDisabled();
 
       // Normal Save draft button is gone

@@ -317,6 +317,19 @@ export function JobsDirectory({
                         </span>
                       )}
                     </span>
+
+                    {/* Subtle Release Status Indicator */}
+                    {j.publicationStatus === "RELEASED" ? (
+                      <span className="job-release-indicator released" title="Released to candidates: Live for discovery & applications">
+                        <span className="job-release-dot released" aria-hidden="true" />
+                        <span>Released</span>
+                      </span>
+                    ) : (
+                      <span className="job-release-indicator unreleased" title="Not released to candidates: Hidden from candidate portal">
+                        <span className="job-release-dot unreleased" aria-hidden="true" />
+                        <span>Not released</span>
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }} onClick={(e) => e.stopPropagation()}>

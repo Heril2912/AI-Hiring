@@ -147,6 +147,15 @@ export function TaxonomySkillAutocomplete({
     }
   };
 
+  const formatSourceFamily = (family?: string) => {
+    if (!family) return "Software skill";
+    const fam = family.toLowerCase();
+    if (fam === "essential") return "Essential skill";
+    if (fam === "transferable") return "Transferable skill";
+    if (fam === "software") return "Software skill";
+    return `${family} skill`;
+  };
+
   return (
     <div className="taxonomy-autocomplete-container" ref={containerRef}>
       <div className="autocomplete-input-wrapper">
@@ -195,7 +204,7 @@ export function TaxonomySkillAutocomplete({
 
           {!searchError && results.length > 0 && (
             <div className="dropdown-section">
-              <div className="dropdown-section-title">O*NET 31.0 Advisory Suggestions</div>
+              <div className="dropdown-section-title">O*NET 31.0 Skills</div>
               {results.map((item, idx) => (
                 <div
                   key={item.conceptId}
@@ -211,7 +220,10 @@ export function TaxonomySkillAutocomplete({
                     )}
                   </div>
                   <div className="item-meta-line">
-                    {item.category && <span className="item-category-pill">{item.category}</span>}
+                    <span className="item-category-pill">{formatSourceFamily(item.sourceFamily)}</span>
+                    {item.category && item.category !== item.sourceFamily && (
+                      <span className="item-source-tag">{item.category}</span>
+                    )}
                     <span className="item-source-tag">O*NET 31.0</span>
                   </div>
                 </div>
@@ -221,7 +233,9 @@ export function TaxonomySkillAutocomplete({
 
           {!searchError && hasSearched && results.length === 0 && (
             <div className="dropdown-empty-state">
-              <span>No O*NET skill match for &quot;{query}&quot;. Enter it as a custom requirement or change the category.</span>
+              <span>
+                No O*NET skill matches this text. Occupation titles belong in the O*NET occupation reference field. You may still add a custom requirement.
+              </span>
             </div>
           )}
 
@@ -239,8 +253,13 @@ export function TaxonomySkillAutocomplete({
               </button>
             </div>
           )}
+
+          <div className="dropdown-attribution-footer" style={{ padding: "6px 10px", fontSize: "10px", color: "var(--text-muted)", borderTop: "1px solid var(--border-subtle)", background: "var(--surface-sunken)" }}>
+            Includes information from the O*NET 31.0 Database by USDOL/ETA, used under CC BY 4.0. O*NET is a trademark of USDOL/ETA.
+          </div>
         </div>
       )}
     </div>
   );
 }
+

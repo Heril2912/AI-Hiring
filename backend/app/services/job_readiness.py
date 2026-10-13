@@ -151,6 +151,13 @@ def evaluate_job_version_readiness(
         )
         occ = db.execute(stmt).scalar_one_or_none()
         if occ is None:
+            # Fallback to check if concept exists in superseded snapshot
+            stmt_prev = select(OccupationConcept).where(
+                OccupationConcept.concept_id == version.occupation_concept_id
+            )
+            occ = db.execute(stmt_prev).scalar_one_or_none()
+
+        if occ is None:
             errors.append(
                 JobReadinessFinding(
                     code="INVALID_OCCUPATION_REFERENCE",
@@ -334,6 +341,13 @@ def evaluate_job_version_readiness(
                     )
                 )
                 skill_obj = db.execute(stmt_skill).scalar_one_or_none()
+                if skill_obj is None:
+                    # Fallback to check if concept exists in superseded snapshot
+                    stmt_prev_sk = select(SkillConcept).where(
+                        SkillConcept.concept_id == r.taxonomy_skill_concept_id
+                    )
+                    skill_obj = db.execute(stmt_prev_sk).scalar_one_or_none()
+
                 if skill_obj is None:
                     errors.append(
                         JobReadinessFinding(

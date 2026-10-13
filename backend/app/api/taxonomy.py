@@ -12,6 +12,7 @@ from app.models.auth import UserRole
 from app.models.taxonomy import (
     OccupationAlias,
     OccupationConcept,
+    OccupationSkillLink,
     SkillAlias,
     SkillConcept,
     TaxonomySnapshot,
@@ -147,6 +148,8 @@ async def search_occupations(
             matched_alias=item[4],
             source=item[3].source_provenance,
             source_version=snapshot.source_version,
+            entity_type="occupation",
+            dataset_version=snapshot.source_version,
         )
         for item in scored_items[:limit]
     ]
@@ -158,7 +161,7 @@ async def search_occupations(
     "/skills",
     response_model=List[SkillSearchItemResponse],
     status_code=status.HTTP_200_OK,
-    summary="Search Software Skills and Controlled Aliases",
+    summary="Search Skills across Essential, Transferable, Software and Controlled Aliases",
     description=(
         "Searches active skill concepts and controlled aliases using deterministic 7-tier ranking. "
         "Accessible only to RECRUITER and ADMIN."
@@ -181,7 +184,6 @@ async def search_skills(
 
     norm_q = normalize_search_query(cleaned_q)
     escaped_norm_q = _escape_like_pattern(norm_q)
-
 
     # 1. Fetch active snapshot
     stmt_snap = select(TaxonomySnapshot).where(TaxonomySnapshot.state == TaxonomySnapshotState.ACTIVE)
@@ -250,9 +252,99 @@ async def search_skills(
             matched_alias=item[4],
             category=item[3].category,
             source=item[3].source,
+            source_family=getattr(item[3], "source_family", "software") or "software",
             source_version=snapshot.source_version,
+            external_id=item[3].external_id,
+            entity_type="skill",
         )
         for item in scored_items[:limit]
     ]
 
     return results
+
+
+@router.get(
+    "/occupations/{concept_id}/skills",
+    response_model=List[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Get Associated Skill Suggestions for an Occupation",
+    description=(
+        "Returns skills linked to an exact O*NET occupation concept, deterministically ranked. "
+        "Accessible only to RECRUITER and ADMIN."
+    ),
+)
+async def get_occupation_skills(
+    concept_id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=100, description="Maximum number of skills to return"),
+    auth_ctx: AuthenticatedContext = Depends(require_recruiter_or_admin),
+    db: Session = Depends(get_db),
+):
+    # 1. Fetch active snapshot
+    stmt_snap = select(TaxonomySnapshot).where(TaxonomySnapshot.state == TaxonomySnapshotState.ACTIVE)
+    snapshot = db.execute(stmt_snap).scalar_one_or_none()
+    if snapshot is None:
+        return []
+
+    # 2. Verify occupation exists in active snapshot
+    stmt_occ = select(OccupationConcept).where(
+        OccupationConcept.concept_id == concept_id,
+        OccupationConcept.snapshot_id == snapshot.snapshot_id,
+    )
+    occ = db.execute(stmt_occ).scalar_one_or_none()
+    if occ is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "OCCUPATION_NOT_FOUND", "message": f"Occupation '{concept_id}' not found in active snapshot."},
+        )
+
+    # 3. Fetch linked skills
+    stmt_links = (
+        select(OccupationSkillLink)
+        .options(selectinload(OccupationSkillLink.skill))
+        .where(OccupationSkillLink.occupation_concept_id == concept_id)
+    )
+    links = db.execute(stmt_links).scalars().all()
+
+    # 4. Rank deterministically:
+    # 1. Relevant and not suppressed (not_relevant is False, recommend_suppress is False)
+    # 2. Importance rating descending (None -> -1.0)
+    # 3. in_demand software flag (True > False)
+    # 4. hot_technology flag (True > False)
+    # 5. Official label alphabetically
+    def sort_key(link: OccupationSkillLink):
+        is_active_rel = (not getattr(link, "not_relevant", False)) and (not getattr(link, "recommend_suppress", False))
+        importance = getattr(link, "importance_value", None) or -1.0
+        in_demand = bool(getattr(link, "in_demand", False))
+        hot_tech = bool(getattr(link, "hot_technology", False))
+        label = link.skill.canonical_label.lower() if link.skill else ""
+        return (
+            0 if is_active_rel else 1,
+            -importance,
+            0 if in_demand else 1,
+            0 if hot_tech else 1,
+            label,
+        )
+
+    sorted_links = sorted(links, key=sort_key)
+
+    results = []
+    for link in sorted_links[:limit]:
+        if not link.skill:
+            continue
+        results.append({
+            "concept_id": str(link.skill_concept_id),
+            "canonical_label": link.skill.canonical_label,
+            "category": link.skill.category,
+            "source": link.skill.source,
+            "source_family": getattr(link, "source_family", getattr(link.skill, "source_family", "software")),
+            "external_id": getattr(link, "element_id", link.skill.external_id),
+            "hot_technology": getattr(link, "hot_technology", False),
+            "in_demand": getattr(link, "in_demand", False),
+            "importance_value": getattr(link, "importance_value", None),
+            "level_value": getattr(link, "level_value", None),
+            "recommend_suppress": getattr(link, "recommend_suppress", False),
+            "not_relevant": getattr(link, "not_relevant", False),
+        })
+
+    return results
+

@@ -65,7 +65,7 @@ export const EvaluationWorkspace: React.FC = () => {
   const [candidatesLoading, setCandidatesLoading] = useState<boolean>(false);
   const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [candidateFilter, setCandidateFilter] = useState<string>("ALL");
-  const [candidateModeFilter, setCandidateModeFilter] = useState<string>("ALL");
+  const [candidateModeFilter, setCandidateModeFilter] = useState<string>("TEXT");
 
   // Level 3: Candidate Evaluation Detail
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -126,6 +126,7 @@ export const EvaluationWorkspace: React.FC = () => {
   // ---------------------------------------------------------------------------
   const selectJobForCandidates = async (job: EvaluationJobSummary) => {
     setSelectedJob(job);
+    setCandidateModeFilter("TEXT");
     setLevel(2);
     try {
       setCandidatesLoading(true);

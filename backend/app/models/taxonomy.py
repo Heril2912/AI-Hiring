@@ -272,6 +272,7 @@ class SkillConcept(Base):
         Index("ix_skill_concepts_snapshot_id", "snapshot_id"),
         Index("ix_skill_concepts_normalized_label", "normalized_label"),
         Index("ix_skill_concepts_source", "source"),
+        Index("ix_skill_concepts_source_family", "source_family"),
     )
 
     concept_id: Mapped[uuid.UUID] = mapped_column(
@@ -305,6 +306,12 @@ class SkillConcept(Base):
         nullable=False,
         default="ONET_31_0",
         server_default=text("'ONET_31_0'"),
+    )
+    source_family: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="software",
+        server_default=text("'software'"),
     )
     external_id: Mapped[Optional[str]] = mapped_column(
         String(50),
@@ -427,6 +434,12 @@ class OccupationSkillLink(Base):
         ),
         nullable=False,
     )
+    source_family: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="software",
+        server_default=text("'software'"),
+    )
     hot_technology: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -434,6 +447,24 @@ class OccupationSkillLink(Base):
         server_default=text("false"),
     )
     in_demand: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    importance_value: Mapped[Optional[float]] = mapped_column(
+        nullable=True,
+    )
+    level_value: Mapped[Optional[float]] = mapped_column(
+        nullable=True,
+    )
+    recommend_suppress: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    not_relevant: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,

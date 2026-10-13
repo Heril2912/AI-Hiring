@@ -136,6 +136,8 @@ export interface AiQuestionSetSummary {
   total_blueprint_slots: number;
   conversation_count: number;
   mcq_count: number;
+  applied_candidate_count?: number;
+  released_candidate_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -172,6 +174,8 @@ export interface EligibleJobItem {
   requirement_count: number;
   current_ai_set_id?: string | null;
   current_ai_set_status?: string | null;
+  applied_candidate_count?: number;
+  released_candidate_count?: number;
 }
 
 export interface EligibleJobsResponse {
