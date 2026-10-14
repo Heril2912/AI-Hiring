@@ -497,7 +497,7 @@ def test_phase4c4_evaluation_workspace_flow(client: TestClient, test_db):
     assert q1["question_format"] == "CONVERSATIONAL"
     assert "WAL" in q1["submitted_answer_text"]
     assert q1["ai_provisional_analysis"]["provisional_rating"] is None
-    assert q1["ai_provisional_analysis"]["analysis_status"] == "UNAVAILABLE"
+    assert q1["ai_provisional_analysis"]["analysis_status"] in ("PENDING", "UNAVAILABLE")
 
     # Check question 2 (MCQ - Correct)
     q2 = next(q for q in detail["questions"] if q["slot_id"] == slot_2)

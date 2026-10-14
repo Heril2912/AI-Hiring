@@ -85,7 +85,7 @@ class AIProvisionalAnalysisDto(StrictSchema):
     provisional_rating: Optional[int] = None  # 1 to 5
     is_insufficient_evidence: bool = False
     uncertainty_notes: Optional[str] = None
-    analysis_status: str = "READY"  # "READY", "UNAVAILABLE"
+    analysis_status: str = "PENDING"  # "READY", "UNAVAILABLE", "PENDING"
 
 
 class QuestionRubricAnchorDto(StrictSchema):

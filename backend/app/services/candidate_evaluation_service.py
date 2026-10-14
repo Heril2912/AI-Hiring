@@ -374,8 +374,18 @@ def list_job_candidates_for_evaluation(
                 match_score = round(float(mr.overall_score) * 100, 1)
 
             decomp = getattr(mr, "score_decomposition", None) or {}
-            req_matched = decomp.get("matched_requirements_count") or decomp.get("matched_count", 0) or getattr(mr, "matched_requirements_count", 0)
-            req_total = decomp.get("total_requirements_count") or decomp.get("total_count", 0) or getattr(mr, "total_requirements_count", 0)
+            req_contribs = decomp.get("requirement_contributions", [])
+            must_haves = [r for r in req_contribs if r.get("necessity") == "MUST_HAVE"]
+            if must_haves:
+                req_matched = len([r for r in must_haves if r.get("match_state") in ("MATCHED", "PARTIAL") or r.get("match_value", 0) > 0])
+                req_total = len(must_haves)
+            elif req_contribs:
+                req_matched = len([r for r in req_contribs if r.get("match_state") in ("MATCHED", "PARTIAL") or r.get("match_value", 0) > 0])
+                req_total = len(req_contribs)
+            else:
+                req_matched = decomp.get("matched_requirements_count") or decomp.get("matched_count", 0) or getattr(mr, "matched_requirements_count", 0)
+                req_total = decomp.get("total_requirements_count") or decomp.get("total_count", 0) or getattr(mr, "total_requirements_count", 0)
+
             if req_total > 0:
                 pct = round((req_matched / req_total) * 100)
                 skills_coverage = f"{req_matched} of {req_total} requirements ({pct}%)"
@@ -625,7 +635,7 @@ def _synthesize_ai_provisional_analysis(
             analysis_status="READY" if prov_rating is not None else "UNAVAILABLE",
         )
 
-    # If no LLM analysis has been run yet -> DO NOT fabricate artificial scores!
+    # If no LLM analysis has been run yet -> mark as PENDING so it is clear evaluation has not been executed yet
     return AIProvisionalAnalysisDto(
         addressed_well=[],
         missing_or_unclear=[],
@@ -635,7 +645,7 @@ def _synthesize_ai_provisional_analysis(
         provisional_rating=None,
         is_insufficient_evidence=False,
         uncertainty_notes=None,
-        analysis_status="UNAVAILABLE",
+        analysis_status="PENDING",
     )
 
 
@@ -1084,19 +1094,26 @@ def get_candidate_interview_evaluation_detail(
         if reviewed_ratings:
             aggregate_score = round(sum(reviewed_ratings) / len(reviewed_ratings), 1)
 
-    # Compute dimension averages (strictly exclude dimensions with no valid ratings)
     dim_averages = {}
     for dname, scores in dimension_totals.items():
         if scores:
             dim_averages[dname] = round(sum(scores) / len(scores), 1)
 
     reviewed_count = len([q for q in questions_dto if q.recruiter_review and q.recruiter_review.review_state != "UNREVIEWED"])
-    
+
+    has_ai_run = any(
+        q.question_format == "CONVERSATIONAL" and q.ai_provisional_analysis and q.ai_provisional_analysis.analysis_status in ("READY", "UNAVAILABLE")
+        for q in questions_dto
+    ) or any(
+        q.recruiter_review and q.recruiter_review.review_state != "UNREVIEWED"
+        for q in questions_dto
+    )
+
     if eval_record and eval_record.status == "FINALIZED":
         eval_status = "FINALIZED"
     elif is_complete:
         eval_status = "COMPLETE"
-    elif ai_evaluated_count > 0 or reviewed_count > 0:
+    elif (eval_record and eval_record.status == "IN_REVIEW") or has_ai_run:
         eval_status = "IN_REVIEW"
     else:
         eval_status = "NOT_STARTED"
@@ -1106,12 +1123,12 @@ def get_candidate_interview_evaluation_detail(
         total_questions=len(questions_dto),
         core_questions_count=core_q_count,
         supplemental_questions_count=supp_q_count,
-        ai_coverage_count=ai_evaluated_count,
-        insufficient_evidence_count=insufficient_count,
-        dimension_averages=dim_averages,
-        key_strengths=key_strengths_set[:3],
-        priority_review_areas=priority_review_set[:3],
-        aggregate_score=aggregate_score if is_complete else (eval_record.aggregate_score if eval_record else None),
+        ai_coverage_count=ai_evaluated_count if has_ai_run else 0,
+        insufficient_evidence_count=insufficient_count if has_ai_run else 0,
+        dimension_averages=dim_averages if is_complete else {},
+        key_strengths=key_strengths_set[:3] if (is_complete or has_ai_run) else [],
+        priority_review_areas=priority_review_set[:3] if (is_complete or has_ai_run) else [],
+        aggregate_score=aggregate_score if is_complete else (eval_record.aggregate_score if eval_record and eval_record.status == "FINALIZED" else None),
         is_aggregate_complete=is_complete,
         status=eval_status,
     )
@@ -1166,8 +1183,17 @@ def get_candidate_interview_evaluation_detail(
             ov_score = round(float(mr.overall_score) * 100, 1)
 
         decomp = getattr(mr, "score_decomposition", None) or {}
-        req_matched = decomp.get("matched_requirements_count") or decomp.get("matched_count", 0) or getattr(mr, "matched_requirements_count", 0)
-        req_total = decomp.get("total_requirements_count") or decomp.get("total_count", 0) or getattr(mr, "total_requirements_count", 0)
+        req_contribs = decomp.get("requirement_contributions", [])
+        must_haves = [r for r in req_contribs if r.get("necessity") == "MUST_HAVE"]
+        if must_haves:
+            req_matched = len([r for r in must_haves if r.get("match_state") in ("MATCHED", "PARTIAL") or r.get("match_value", 0) > 0])
+            req_total = len(must_haves)
+        elif req_contribs:
+            req_matched = len([r for r in req_contribs if r.get("match_state") in ("MATCHED", "PARTIAL") or r.get("match_value", 0) > 0])
+            req_total = len(req_contribs)
+        else:
+            req_matched = decomp.get("matched_requirements_count") or decomp.get("matched_count", 0) or getattr(mr, "matched_requirements_count", 0)
+            req_total = decomp.get("total_requirements_count") or decomp.get("total_count", 0) or getattr(mr, "total_requirements_count", 0)
 
         resume_ref = ResumeMatchReferenceDto(
             overall_score=ov_score,

@@ -396,6 +396,8 @@ export const EvaluationWorkspace: React.FC = () => {
               </span>
             ) : aiAnalysis && (aiAnalysis.analysis_status === "UNAVAILABLE" || aiAnalysis.status === "UNAVAILABLE") ? (
               <span className="eval-status-badge unavailable">AI analysis unavailable</span>
+            ) : aiAnalysis && (aiAnalysis.analysis_status === "PENDING" || aiAnalysis.status === "PENDING") ? (
+              <span className="eval-status-badge">AI evaluation pending</span>
             ) : aiAnalysis && aiAnalysis.provisional_rating != null ? (
               <span className="eval-status-badge ready">AI evaluated · {aiAnalysis.provisional_rating.toFixed(1)} / 5.0</span>
             ) : (
@@ -453,7 +455,14 @@ export const EvaluationWorkspace: React.FC = () => {
                   )}
                 </div>
 
-                {aiAnalysis.analysis_status === "UNAVAILABLE" || aiAnalysis.status === "UNAVAILABLE" ? (
+                {aiAnalysis.analysis_status === "PENDING" || aiAnalysis.status === "PENDING" ? (
+                  <div className="eval-ai-unavailable-notice" style={{ padding: "14px", background: "#f8fafc", borderRadius: "8px", margin: "8px 0", border: "1px dashed #cbd5e1" }}>
+                    <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <Icon name="sparkles" size={16} />
+                      AI evaluation pending. Click "Run AI analysis" to evaluate this response against the rubric.
+                    </p>
+                  </div>
+                ) : aiAnalysis.analysis_status === "UNAVAILABLE" || aiAnalysis.status === "UNAVAILABLE" ? (
                   <div className="eval-ai-unavailable-notice" style={{ padding: "14px", background: "#f8fafc", borderRadius: "8px", margin: "8px 0", border: "1px solid #e2e8f0" }}>
                     <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "8px" }}>
                       <Icon name="alert-triangle" size={16} />
@@ -1092,6 +1101,32 @@ export const EvaluationWorkspace: React.FC = () => {
       detail.overview.is_ready_to_finalize ?? detail.overview.is_aggregate_complete ?? true
     );
 
+    // AI Evaluation status flags
+    // Conversational questions require LLM execution. MCQs are graded deterministically.
+    const hasAttemptedAi = detail.questions.some(
+      (q) => {
+        const ai = q.ai_provisional_analysis || q.ai_provisional;
+        if (!ai) return false;
+        if (q.question_format === "CONVERSATIONAL") {
+          return ai.analysis_status === "READY" || ai.analysis_status === "UNAVAILABLE" || ai.provisional_rating != null;
+        }
+        return false;
+      }
+    ) || (detail.overview.questions_reviewed > 0) || isFinalized;
+
+    const hasCompletedAi = (
+      detail.overview.aggregate_score != null ||
+      detail.overview.status === "COMPLETE" ||
+      isFinalized ||
+      (
+        hasAttemptedAi &&
+        detail.questions.filter((q) => !q.is_supplemental).every((q) => {
+          const ai = q.ai_provisional_analysis || q.ai_provisional;
+          return (ai && ai.provisional_rating != null) || (q.recruiter_review && q.recruiter_review.reviewed_rating != null);
+        })
+      )
+    );
+
     // Compute the radar title based on review state
     const hasReviewedDimensions =
       detail.questions.some((q) => q.recruiter_review && q.recruiter_review.review_state !== "UNREVIEWED");
@@ -1179,7 +1214,7 @@ export const EvaluationWorkspace: React.FC = () => {
               </Button>
               {!isFinalized ? (
                 <>
-                  {detail.questions.some((q) => (q.ai_provisional_analysis || q.ai_provisional)?.analysis_status === "UNAVAILABLE" || (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating == null) && (
+                  {hasAttemptedAi && detail.questions.some((q) => (q.ai_provisional_analysis || q.ai_provisional)?.analysis_status === "UNAVAILABLE" || (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating == null) && (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -1324,13 +1359,17 @@ export const EvaluationWorkspace: React.FC = () => {
               </div>
               <div className="eval-progress-indicator">
                 <span className="eval-progress-text">
-                  {detail.questions.filter((q) => (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating != null || q.recruiter_review?.reviewed_rating != null).length} of {detail.overview.total_questions} AI analyses complete
+                  {hasAttemptedAi
+                    ? detail.questions.filter((q) => (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating != null || q.recruiter_review?.reviewed_rating != null).length
+                    : 0} of {detail.overview.total_questions} AI analyses complete
                 </span>
                 <div className="eval-progress-bar">
                   <div
                     className="eval-progress-fill"
                     style={{
-                      width: `${(detail.questions.filter((q) => (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating != null || q.recruiter_review?.reviewed_rating != null).length / (detail.overview.total_questions || 1)) * 100}%`,
+                      width: `${hasAttemptedAi
+                        ? (detail.questions.filter((q) => (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating != null || q.recruiter_review?.reviewed_rating != null).length / (detail.overview.total_questions || 1)) * 100
+                        : 0}%`,
                     }}
                   />
                 </div>
@@ -1338,60 +1377,71 @@ export const EvaluationWorkspace: React.FC = () => {
             </div>
 
             {/* Overview Metrics */}
-            <div className="eval-overview-grid">
-              <div className="eval-overview-item">
-                <span className="eval-metric-label">Deterministic core aggregate</span>
-                <span className="eval-overview-score">
-                  {detail.overview.aggregate_score !== null &&
-                    detail.overview.aggregate_score !== undefined
-                    ? `${detail.overview.aggregate_score.toFixed(1)} / 5.0`
-                    : (() => {
-                      const ratedCore = detail.questions
-                        .filter((q) => !q.is_supplemental)
-                        .map((q) => q.recruiter_review?.reviewed_rating ?? (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating)
-                        .filter((r): r is number => typeof r === "number" && !isNaN(r));
-                      if (ratedCore.length > 0) {
-                        const avg = (ratedCore.reduce((a, b) => a + b, 0) / ratedCore.length).toFixed(1);
-                        return `${avg} / 5.0`;
-                      }
-                      return "AI evaluation pending";
-                    })()}
-                </span>
-                <span className="eval-overview-detail">
-                  Includes {detail.overview.core_questions_count} core questions (excludes{" "}
-                  {detail.overview.supplemental_questions_count} supplemental).
-                </span>
+            {hasCompletedAi ? (
+              <>
+                <div className="eval-overview-grid">
+                  <div className="eval-overview-item">
+                    <span className="eval-metric-label">Deterministic core aggregate</span>
+                    <span className="eval-overview-score">
+                      {detail.overview.aggregate_score !== null &&
+                        detail.overview.aggregate_score !== undefined
+                        ? `${detail.overview.aggregate_score.toFixed(1)} / 5.0`
+                        : (() => {
+                          const ratedCore = detail.questions
+                            .filter((q) => !q.is_supplemental)
+                            .map((q) => q.recruiter_review?.reviewed_rating ?? (q.ai_provisional_analysis || q.ai_provisional)?.provisional_rating)
+                            .filter((r): r is number => typeof r === "number" && !isNaN(r));
+                          if (ratedCore.length > 0) {
+                            const avg = (ratedCore.reduce((a, b) => a + b, 0) / ratedCore.length).toFixed(1);
+                            return `${avg} / 5.0`;
+                          }
+                          return "AI evaluation pending";
+                        })()}
+                    </span>
+                    <span className="eval-overview-detail">
+                      Includes {detail.overview.core_questions_count} core questions (excludes{" "}
+                      {detail.overview.supplemental_questions_count} supplemental).
+                    </span>
+                  </div>
+
+                  {/* Key Strengths */}
+                  {(detail.overview.key_strengths?.length ?? 0) > 0 && (
+                    <div className="eval-overview-item eval-overview-strengths">
+                      <span className="eval-metric-label">Key strengths</span>
+                      <span className="eval-overview-detail">
+                        {detail.overview.key_strengths.join(", ")}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Priority Review Areas */}
+                  {(detail.overview.priority_review_areas?.length ?? 0) > 0 && (
+                    <div className="eval-overview-item eval-overview-growth">
+                      <span className="eval-metric-label">Priority growth areas</span>
+                      <span className="eval-overview-detail">
+                        {detail.overview.priority_review_areas.join(", ")}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Dimension Radar Chart */}
+                {detail.overview.dimension_averages &&
+                  Object.keys(detail.overview.dimension_averages).length > 0 && (
+                    <InterviewDimensionRadar
+                      dimensions={detail.overview.dimension_averages}
+                      title={radarTitle}
+                    />
+                  )}
+              </>
+            ) : (
+              <div style={{ padding: "1.5rem", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", marginTop: "1rem" }}>
+                <p style={{ margin: 0, fontSize: "14px", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Icon name="sparkles" size={16} />
+                  AI evaluation has not been run for this candidate yet. Click "Run AI analysis" above to generate the interview assessment.
+                </p>
               </div>
-
-              {/* Key Strengths */}
-              {(detail.overview.key_strengths?.length ?? 0) > 0 && (
-                <div className="eval-overview-item eval-overview-strengths">
-                  <span className="eval-metric-label">Key strengths</span>
-                  <span className="eval-overview-detail">
-                    {detail.overview.key_strengths.join(", ")}
-                  </span>
-                </div>
-              )}
-
-              {/* Priority Review Areas */}
-              {(detail.overview.priority_review_areas?.length ?? 0) > 0 && (
-                <div className="eval-overview-item eval-overview-growth">
-                  <span className="eval-metric-label">Priority growth areas</span>
-                  <span className="eval-overview-detail">
-                    {detail.overview.priority_review_areas.join(", ")}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Dimension Radar Chart */}
-            {detail.overview.dimension_averages &&
-              Object.keys(detail.overview.dimension_averages).length > 0 && (
-                <InterviewDimensionRadar
-                  dimensions={detail.overview.dimension_averages}
-                  title={radarTitle}
-                />
-              )}
+            )}
           </div>
         </div>
 
@@ -1417,9 +1467,23 @@ export const EvaluationWorkspace: React.FC = () => {
             </span>
           </div>
 
-          <div className="eval-card-list">
-            {detail.questions.map((q) => renderQuestionCard(q, isFinalized))}
-          </div>
+          {hasAttemptedAi ? (
+            <div className="eval-card-list">
+              {detail.questions.map((q) => renderQuestionCard(q, isFinalized))}
+            </div>
+          ) : (
+            <div style={{ padding: "2rem", background: "#f8fafc", borderRadius: "10px", border: "1px dashed #cbd5e1", textAlign: "center", margin: "1rem 0" }}>
+              <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "40px", height: "40px", borderRadius: "50%", background: "#f1f5f9", marginBottom: "0.75rem", color: "var(--text-secondary)" }}>
+                <Icon name="sparkles" size={20} />
+              </div>
+              <h3 style={{ margin: "0 0 0.5rem 0", fontSize: "16px", fontWeight: 600, color: "var(--text-primary)" }}>
+                Evaluation pending
+              </h3>
+              <p style={{ margin: "0 auto", maxWidth: "480px", fontSize: "14px", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Candidate submitted responses are hidden until evaluation is processed. Click <strong>"Run AI analysis"</strong> in the top header to run the rubric assessment.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* ===== ACTIVITY SECTION ===== */}
