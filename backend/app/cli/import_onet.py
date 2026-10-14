@@ -153,13 +153,21 @@ def import_onet_taxonomy(
         combined_hash = _compute_combined_hash(file_hashes)
         now = datetime.now(timezone.utc)
 
-        # 4. Check for existing snapshot with same version and hash
+        # 4. Check for existing snapshot with same version
         stmt = select(TaxonomySnapshot).where(
             TaxonomySnapshot.source == "ONET",
             TaxonomySnapshot.source_version == version,
-            TaxonomySnapshot.combined_sha256_hash == combined_hash,
         )
-        existing_identical_snapshot = session.execute(stmt).scalar_one_or_none()
+        existing_version_snapshots = session.execute(stmt).scalars().all()
+        existing_identical_snapshot = next((s for s in existing_version_snapshots if s.combined_sha256_hash == combined_hash), None)
+
+        if existing_version_snapshots and existing_identical_snapshot is None:
+            logger.error(
+                f"Snapshot for O*NET version {version} already exists with different content hash. Rejecting re-import.",
+                extra={"version": version, "new_hash": combined_hash},
+            )
+            print(f"Error: Snapshot for O*NET {version} already exists with different content hash.")
+            return 1
 
         if existing_identical_snapshot is not None:
             if existing_identical_snapshot.state == TaxonomySnapshotState.ACTIVE:

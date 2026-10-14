@@ -20,7 +20,7 @@ from app.services.section_detection import match_heading_candidate
 
 logger = logging.getLogger("ai_hiring.services.identity_extraction")
 
-IDENTITY_PARSER_VERSION = "identity-extract-v1.1"
+IDENTITY_PARSER_VERSION = "identity-extract-v1.2"
 
 # Bounded email pattern
 _EMAIL_RE = re.compile(
@@ -322,14 +322,19 @@ def extract_identity_and_contacts(
     # 4. Extract Phone Numbers across header/early blocks
     phone_fields: List[ExtractedField] = []
     seen_phones: Set[str] = set()
+    ambiguous_or_invalid_phone_found = False
 
     # Search in header blocks first, then fall back to all blocks
     phone_search_blocks = header_blocks if header_blocks else blocks[:5]
 
     for block in phone_search_blocks:
+        # Check if block mentions phone/mobile explicitly
+        has_phone_label = bool(re.search(r"\b(?:phone|tel|mobile|cell)\b", block.normalized_text, re.IGNORECASE))
         for match in _PHONE_RE.finditer(block.normalized_text):
             raw_phone = match.group(0).strip()
             if not _is_valid_phone_candidate(raw_phone):
+                # Found a phone-like candidate pattern that failed validity checks
+                ambiguous_or_invalid_phone_found = True
                 continue
 
             norm_phone = _normalize_phone(raw_phone)
@@ -350,6 +355,9 @@ def extract_identity_and_contacts(
                 review_status=ReviewStatus.UNREVIEWED,
             )
             phone_fields.append(phone_field)
+
+        if not phone_fields and has_phone_label:
+            ambiguous_or_invalid_phone_found = True
 
     if not phone_fields:
         warnings.append(

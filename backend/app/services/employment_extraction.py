@@ -35,7 +35,7 @@ from app.services.date_extraction import (
 
 logger = logging.getLogger("ai_hiring.services.employment_extraction")
 
-EMPLOYMENT_PARSER_VERSION = "employment-extract-v1.3"
+EMPLOYMENT_PARSER_VERSION = "employment-extract-v1.4"
 
 _ROLE_INDICATORS = {
     "engineer", "developer", "architect", "lead", "specialist", "scientist",
@@ -124,6 +124,14 @@ def _is_employment_header_candidate(line_str: str, date_matches: list) -> bool:
         return True
 
     if has_role_word and len(clean) < 60:
+        if clean.endswith("."):
+            return False
+        if clean[0].islower():
+            return False
+        if any(w in words for w in ["the", "a", "an", "to", "their", "our", "this", "these", "those"]):
+            return False
+        if len(words) > 6:
+            return False
         return True
 
     return False

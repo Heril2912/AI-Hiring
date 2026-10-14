@@ -11,6 +11,7 @@ export type ExtractedField = {
   fieldName: string;
   value: string | null;
   normalizedValue: string | null;
+  category?: string | null;
   confidence: number | null;
   confidenceBand: string;
   evidenceIds: string[];
@@ -704,24 +705,7 @@ export function CandidateProfileReview({
         </button>
 
         <div className="workspace-header-actions">
-          {historyList.length > 1 && (
-            <div className="version-select-pill">
-              <span className="version-pill-label">Version:</span>
-              <select
-                className="version-native-select"
-                value={selectedVersion}
-                onChange={(e) => handleSelectVersion(Number(e.target.value))}
-                disabled={isLoadingHistory || isCorrectionMode}
-                aria-label="Select profile version snapshot"
-              >
-                {historyList.map((h) => (
-                  <option key={h.profileVersion} value={h.profileVersion}>
-                    v{h.profileVersion} ({h.provenance === "HUMAN_CORRECTED" ? "Corrected" : "Parser"})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+
 
           {/* Compact Review Items Action */}
           {warningCount > 0 && !isCorrectionMode && (
@@ -1006,9 +990,27 @@ export function CandidateProfileReview({
               // Group skills into domains based on available metadata or standard skill classification
               const categoryMap = new Map<string, number>();
               skillsList.forEach((sk) => {
+                const skCat = (sk.category || "").toLowerCase();
                 const rawVal = (sk.value || "").toLowerCase();
-                let cat = "Technical & Domain";
-                if (/python|javascript|typescript|java|c\+\+|c#|golang|rust|ruby|php|kotlin|swift|scala|sql|bash|r\b/.test(rawVal)) {
+                let cat = "Domain/Custom Skills";
+
+                if (skCat.includes("essential")) {
+                  cat = "Essential Skills";
+                } else if (skCat.includes("transferable")) {
+                  cat = "Transferable Skills";
+                } else if (
+                  skCat.includes("software") ||
+                  skCat.includes("tool") ||
+                  skCat.includes("database") ||
+                  skCat.includes("spreadsheet") ||
+                  skCat.includes("platform")
+                ) {
+                  cat = "Software and Tools";
+                } else if (skCat.includes("custom") || skCat.includes("domain")) {
+                  cat = "Domain/Custom Skills";
+                } else if (/power\s*bi|excel|sharepoint|teams|word|outlook|jira|confluence|trello/.test(rawVal)) {
+                  cat = "Software and Tools";
+                } else if (/python|javascript|typescript|java|c\+\+|c#|golang|rust|ruby|php|kotlin|swift|scala|sql|bash|\br\b/.test(rawVal)) {
                   cat = "Programming Languages";
                 } else if (/react|vue|angular|django|fastapi|flask|spring|express|next\.js|node|laravel|rails/.test(rawVal)) {
                   cat = "Frameworks & Libraries";

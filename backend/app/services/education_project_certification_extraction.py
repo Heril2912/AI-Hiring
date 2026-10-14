@@ -67,7 +67,7 @@ from app.services.education_project_certification_rules import (
 
 logger = logging.getLogger("ai_hiring.services.education_project_certification_extraction")
 
-EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION = "ed-proj-cert-lang-extract-v1.3"
+EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION = "ed-proj-cert-lang-extract-v1.4"
 
 _ACTION_VERBS = {
     "developed", "built", "created", "managed", "designed", "led", "architected",
@@ -188,7 +188,11 @@ def extract_education_records(
                 blk = block_map[idx]
                 if _is_footer_block(blk):
                     continue
-                if section.heading and section.heading.heading_sequence_index == idx:
+                if (
+                    section.heading
+                    and section.heading.heading_sequence_index == idx
+                    and blk.normalized_text.strip().lower() == section.heading.matched_heading_text.strip().lower()
+                ):
                     continue
                 sec_blocks.append(blk)
 
@@ -209,8 +213,11 @@ def extract_education_records(
                     line_start = curr_off
                 line_end = line_start + len(line_str)
                 curr_off = line_start + line_len + 1
-                if line_str:
-                    all_lines.append((blk, line_str, line_start, line_end))
+                if not line_str:
+                    continue
+                if section.heading and line_str.lower() == section.heading.matched_heading_text.strip().lower():
+                    continue
+                all_lines.append((blk, line_str, line_start, line_end))
 
         # State machine pending record state
         class PendingEducation:
@@ -358,18 +365,22 @@ def extract_education_records(
                             field_name="end_date",
                         )
                 elif single_date:
-                    abs_start = blk.raw_text.find(line_str, l_start)
+                    if single_date.precision == DatePrecision.YEAR and single_date.year and str(single_date.year) in line_str:
+                        date_raw_text = str(single_date.year)
+                    else:
+                        date_raw_text = single_date.raw_text if single_date.raw_text else line_str
+                    abs_start = blk.raw_text.find(date_raw_text, l_start)
                     if abs_start == -1:
                         abs_start = l_start
-                    abs_end = abs_start + len(line_str)
-                    d_span = _create_evidence_span(artifact_id, blk, abs_start, abs_end)
+                    abs_end = abs_start + len(date_raw_text)
+                    d_span = _create_evidence_span(artifact_id, blk, abs_start, abs_end, date_raw_text)
                     all_evidence.append(d_span)
 
                     if current is None:
                         current = PendingEducation()
                     if not current.date_interval:
                         current.date_interval = ExtractedDateInterval(
-                            raw_text=line_str,
+                            raw_text=date_raw_text,
                             start_date=None,
                             end_date=single_date,
                             is_current=False,
@@ -379,8 +390,8 @@ def extract_education_records(
                         )
                         current.start_date_field = _build_extracted_field(None, field_name="start_date")
                         current.end_date_field = _build_extracted_field(
-                            line_str,
-                            normalized_value=f"{single_date.year:04d}" if single_date.year else line_str,
+                            date_raw_text,
+                            normalized_value=f"{single_date.year:04d}" if single_date.year else date_raw_text,
                             confidence=0.90,
                             evidence_spans=[d_span],
                             field_name="end_date",
@@ -402,8 +413,14 @@ def extract_education_records(
                     all_evidence.append(g_span)
                     current.grade_spans.append(g_span)
 
-            # Detect institution (from line or split parts)
-            for p in parts:
+            # Detect institution (from line, split parts, and comma-delimited segments)
+            inst_search_candidates = list(parts)
+            for comma_seg in line_str.split(","):
+                c_clean = comma_seg.strip()
+                if c_clean and c_clean not in inst_search_candidates:
+                    inst_search_candidates.append(c_clean)
+
+            for p in inst_search_candidates:
                 p_lower = p.lower()
                 p_words = [w.strip(".,:;/-()") for w in p_lower.split()]
                 has_inst_word = any(w in INSTITUTION_INDICATORS for w in p_words)
@@ -421,7 +438,7 @@ def extract_education_records(
                         has_inst_word = True
                         is_p_date = False
 
-                if has_inst_word or (not is_p_date and not is_p_deg and not is_p_fos and len(p) < 80 and len(p.split()) >= 2):
+                if (has_inst_word and not is_p_deg and not is_p_fos) or (not is_p_date and not is_p_deg and not is_p_fos and len(p) < 80 and len(p.split()) >= 2):
                     inst_cand = p.strip(" •·-*–—\t")
                     if " from " in inst_cand.lower():
                         from_idx = inst_cand.lower().find(" from ")

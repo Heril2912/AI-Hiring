@@ -58,7 +58,7 @@ from app.services.skill_summary_extraction import (
 logger = logging.getLogger("ai_hiring.services.profile_assembly")
 
 PROFILE_PIPELINE_VERSION = (
-    f"pipeline-v1.3[{SECTION_PARSER_VERSION}+{IDENTITY_PARSER_VERSION}+"
+    f"pipeline-v1.4[{SECTION_PARSER_VERSION}+{IDENTITY_PARSER_VERSION}+"
     f"{SKILL_SUMMARY_PARSER_VERSION}+{EMPLOYMENT_PARSER_VERSION}+"
     f"{EDUCATION_PROJECT_CERTIFICATION_PARSER_VERSION}]"
 )
@@ -247,6 +247,9 @@ def assemble_candidate_profile(
 
     ident_res = extract_identity_and_contacts(blocks, sec_res, artifact_id)
     for iw in ident_res.warnings:
+        # Completely absent optional phone number does not require verification
+        if iw.code.value == "PHONE_NOT_FOUND":
+            continue
         all_warnings.append(
             ProfileAssemblyWarning(
                 code=iw.code.value,
@@ -381,6 +384,7 @@ def assemble_candidate_profile(
                 field_name="skill",
                 value=sk.canonical_value,
                 normalized_value=sk.canonical_value,
+                category=sk.category,
                 confidence=sk.confidence,
                 confidence_band=sk.confidence_band,
                 evidence_ids=sk.evidence_ids,

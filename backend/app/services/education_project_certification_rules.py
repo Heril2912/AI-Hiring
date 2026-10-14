@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from app.schemas.education_project_certification import DegreeLevel
 
-EDUCATION_PROJECT_CERTIFICATION_RULES_VERSION = "ed-proj-cert-lang-rules-v1.1"
+EDUCATION_PROJECT_CERTIFICATION_RULES_VERSION = "ed-proj-cert-lang-rules-v1.2"
 
 # =============================================================================
 # 1. EDUCATION RULES & PATTERNS
@@ -119,6 +119,15 @@ DEGREE_DEFINITIONS: List[Tuple[re.Pattern, DegreeLevel, str]] = [
         ),
         DegreeLevel.BACHELORS,
         "Bachelor of Business Administration",
+    ),
+    # B.Com / Bachelor of Commerce
+    (
+        re.compile(
+            r"\b(?:B\.?Com(?:\.|\b)|Bachelor of Commerce)\b",
+            re.IGNORECASE,
+        ),
+        DegreeLevel.BACHELORS,
+        "Bachelor of Commerce",
     ),
     # Bachelor's (generic) / Bachelor of Arts
     (

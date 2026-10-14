@@ -40,7 +40,7 @@ class ExtractedSkillItem(StrictSchema):
     canonical_value: str
     raw_values: List[str] = Field(default_factory=list)
     resolution_status: SkillResolutionStatus
-    category: Optional[SkillCategory] = None
+    category: Optional[str] = None
     confidence: float = Field(ge=0.0, le=1.0)
     confidence_band: ConfidenceBand = ConfidenceBand.UNKNOWN
     evidence_ids: List[str] = Field(default_factory=list)

@@ -14,7 +14,7 @@ from app.schemas.section_and_identity import (
 
 logger = logging.getLogger("ai_hiring.services.section_detection")
 
-SECTION_PARSER_VERSION = "section-detect-v1.2"
+SECTION_PARSER_VERSION = "section-detect-v1.3"
 
 # Canonical heading alias map: normalized lowercase alias -> SectionType
 HEADING_ALIASES: Dict[str, SectionType] = {
@@ -36,6 +36,10 @@ HEADING_ALIASES: Dict[str, SectionType] = {
     # SKILLS
     "skills": SectionType.SKILLS,
     "skill": SectionType.SKILLS,
+    "capability profile": SectionType.SKILLS,
+    "capabilities": SectionType.SKILLS,
+    "capability": SectionType.SKILLS,
+    "tools": SectionType.SKILLS,
     "technical skills": SectionType.SKILLS,
     "technical skill": SectionType.SKILLS,
     "technical toolkit": SectionType.SKILLS,
@@ -66,6 +70,10 @@ HEADING_ALIASES: Dict[str, SectionType] = {
 
     # EDUCATION
     "education": SectionType.EDUCATION,
+    "education and development": SectionType.EDUCATION,
+    "education & development": SectionType.EDUCATION,
+    "education and training": SectionType.EDUCATION,
+    "education & training": SectionType.EDUCATION,
     "academic background": SectionType.EDUCATION,
     "academic qualifications": SectionType.EDUCATION,
     "qualifications": SectionType.EDUCATION,

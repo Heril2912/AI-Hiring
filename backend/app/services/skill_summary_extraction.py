@@ -30,11 +30,39 @@ from app.services.skill_catalog import (
     SKILL_CATALOG_VERSION,
     SkillCatalog,
     SkillDefinition,
+    load_active_onet_catalog,
 )
 
 logger = logging.getLogger("ai_hiring.services.skill_summary_extraction")
 
-SKILL_SUMMARY_PARSER_VERSION = "skill-summary-extract-v1.3"
+SKILL_SUMMARY_PARSER_VERSION = "skill-summary-extract-v1.4"
+
+# Scopes for negation and limited evidence handling
+_NEGATION_LIMITATION_RE = re.compile(
+    r"\b(?:limited\s+evidence|limited|did\s+not|not|no|without|lack\s+of|lacks)\b",
+    re.IGNORECASE,
+)
+
+_PROFICIENCY_QUALIFIER_RE = re.compile(
+    r"^(?:basic|fundamental|foundational|introductory|elementary|working\s+knowledge\s+of|familiar\s+with)\s+",
+    re.IGNORECASE,
+)
+
+
+def _is_negated_or_limited(text: str, start_pos: int) -> bool:
+    """
+    Checks if a match at start_pos is preceded in the same clause/sentence by a negation
+    or limitation marker (no, not, did not, without, limited, limited evidence, lack of, lacks).
+    """
+    sub = text[:start_pos]
+    clause_delims = [r"\.", r";", r":", r"\n\s*\n", r"\bbut\b", r"\bhowever\b", r"\balthough\b"]
+    last_delim_pos = 0
+    for d in clause_delims:
+        for m in re.finditer(d, sub, re.IGNORECASE):
+            if m.end() > last_delim_pos:
+                last_delim_pos = m.end()
+    clause_prefix = text[last_delim_pos:start_pos]
+    return bool(_NEGATION_LIMITATION_RE.search(clause_prefix))
 
 # Contact markers to avoid treating emails, phones, URLs as skills
 _EMAIL_RE = re.compile(
@@ -165,6 +193,10 @@ def _extract_skills_from_text_prose(
             raw_matched = text[pos:end_pos]
             matched_spans.append((pos, end_pos))
 
+            # Negation or limitation check: disqualify if governed by negation/limitation marker
+            if _is_negated_or_limited(text, pos):
+                continue
+
             # Determine confidence based on section and alias
             if section_name == SectionType.SKILLS.value:
                 conf = 0.98 if not is_alias else 0.95
@@ -184,14 +216,14 @@ def _extract_skills_from_text_prose(
 
 def _split_skills_section_items(
     block: ExtractionBlockData,
-) -> List[Tuple[str, int, int]]:
+) -> List[Tuple[str, int, int, bool]]:
     """
     Parses an explicit SKILLS block into delimited candidate items:
     splits on newlines, bullets, commas, semicolons, pipes.
-    Returns: List of (item_text, start_offset, end_offset)
+    Returns: List of (item_text, start_offset, end_offset, is_negated: bool)
     """
     text = block.normalized_text
-    candidates: List[Tuple[str, int, int]] = []
+    candidates: List[Tuple[str, int, int, bool]] = []
 
     # First split into lines to respect line-level structure
     lines = text.split("\n")
@@ -211,15 +243,15 @@ def _split_skills_section_items(
         colon_idx = line.find(":")
         working_line = line
         line_offset_adj = 0
+        is_line_limited = False
         if colon_idx != -1 and colon_idx < 30:
             prefix = line[:colon_idx].strip().lower()
-            # If prefix looks like a skill category header (e.g. "Languages:", "Frontend:", "Databases:")
+            if any(lim in prefix for lim in ["limited evidence", "limited", "lack", "no evidence", "not evidenced", "lacks", "without"]):
+                is_line_limited = True
             working_line = line[colon_idx + 1:]
             line_offset_adj = colon_idx + 1
 
         # Tokenize line by delimiters: comma, semicolon, pipe, bullets (•, -, *, ·)
-        # Note: Do NOT split on '.' because of .NET, Node.js, etc.
-        # Do NOT split on '+' or '#' because of C++, C#
         item_regex = re.compile(r"[,;|•·*]|\s-\s|^\s*-\s*")
         parts: List[Tuple[int, int]] = []
         last_pos = 0
@@ -244,7 +276,13 @@ def _split_skills_section_items(
             abs_start = line_raw_start + line_offset_adj + item_in_line_start
             abs_end = abs_start + len(item_trimmed)
 
-            candidates.append((item_trimmed, abs_start, abs_end))
+            is_item_negated = (
+                is_line_limited
+                or _is_negated_or_limited(working_line, p_start)
+                or bool(_NEGATION_LIMITATION_RE.search(item_trimmed))
+            )
+
+            candidates.append((item_trimmed, abs_start, abs_end, is_item_negated))
 
     return candidates
 
@@ -425,7 +463,7 @@ def extract_skills_and_summary(
     and Phase 1D.1 section detection result.
     """
     if catalog is None:
-        catalog = DEFAULT_SKILL_CATALOG
+        catalog = load_active_onet_catalog()
 
     evidence_spans: List[EvidenceSpan] = []
     warnings: List[SkillSummaryWarning] = []
@@ -599,25 +637,33 @@ def extract_skills_and_summary(
     for block in skills_blocks:
         # Check if block has heading on first line
         items = _split_skills_section_items(block)
-        for item_text, char_start, char_end in items:
+        for item_text, char_start, char_end, is_negated in items:
+            if is_negated:
+                continue
+
             # Skip if this is a section heading itself (e.g. "Technical Skills:")
             if item_text.lower().strip(":") in _SECTION_OR_META_TERMS:
                 continue
 
+            # Check for proficiency qualifier (e.g. "basic SQL")
+            qualifier_m = _PROFICIENCY_QUALIFIER_RE.match(item_text)
+            lookup_text = _PROFICIENCY_QUALIFIER_RE.sub("", item_text).strip() if qualifier_m else item_text
+
             # 1. Lookup in catalog
-            lookup = catalog.lookup_exact_or_alias(item_text)
+            lookup = catalog.lookup_exact_or_alias(lookup_text)
             if lookup:
                 defn, is_alias, canon_name = lookup
-                res_status = SkillResolutionStatus.RESOLVED_ALIAS if is_alias else SkillResolutionStatus.RESOLVED_EXACT
-                conf = 0.98 if not is_alias else 0.95
+                res_status = SkillResolutionStatus.RESOLVED_ALIAS if (is_alias or qualifier_m) else SkillResolutionStatus.RESOLVED_EXACT
+                conf = 0.90 if qualifier_m else (0.98 if not is_alias else 0.95)
                 span = create_evidence_span(block, char_start, char_end, item_text)
                 evidence_spans.append(span)
+                cat_val = defn.category.value if hasattr(defn.category, "value") else str(defn.category)
                 skill_occurrences.append(
                     (
                         canon_name,
                         item_text,
                         res_status,
-                        defn.category,
+                        cat_val,
                         conf,
                         span,
                         block.extraction_method.value,
@@ -656,12 +702,13 @@ def extract_skills_and_summary(
                             if is_alias
                             else SkillResolutionStatus.RESOLVED_EXACT
                         )
+                        cat_val = defn.category.value if hasattr(defn.category, "value") else str(defn.category)
                         skill_occurrences.append(
                             (
                                 canon_name,
                                 raw_m,
                                 res_status,
-                                defn.category,
+                                cat_val,
                                 conf,
                                 span,
                                 block.extraction_method.value,
@@ -670,7 +717,7 @@ def extract_skills_and_summary(
                         )
                 else:
                     # 3. Retain defensible unknown items as UNRESOLVED
-                    if _is_unresolved_candidate_defensible(item_text):
+                    if _is_unresolved_candidate_defensible(item_text) and not _NEGATION_LIMITATION_RE.search(item_text):
                         span = create_evidence_span(block, char_start, char_end, item_text)
                         evidence_spans.append(span)
                         skill_occurrences.append(
@@ -694,8 +741,8 @@ def extract_skills_and_summary(
                             )
                         )
 
-    # 3B. Descriptive Sections (EXPERIENCE, PROJECTS, SUMMARY)
-    for sec_type in (SectionType.EXPERIENCE, SectionType.PROJECTS, SectionType.SUMMARY):
+    # 3B. Descriptive Sections (EXPERIENCE, PROJECTS, SUMMARY, EDUCATION)
+    for sec_type in (SectionType.EXPERIENCE, SectionType.PROJECTS, SectionType.SUMMARY, SectionType.EDUCATION):
         sec_blocks = sections_by_type.get(sec_type, [])
         for block in sec_blocks:
             matches = _extract_skills_from_text_prose(

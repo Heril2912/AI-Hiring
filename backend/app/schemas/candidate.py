@@ -49,6 +49,7 @@ class ExtractedField(StrictSchema):
     field_name: str
     value: str | None = None
     normalized_value: str | None = None
+    category: str | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     confidence_band: ConfidenceBand = ConfidenceBand.UNKNOWN
     evidence_ids: list[str] = Field(default_factory=list)
