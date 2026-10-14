@@ -1,16 +1,30 @@
 import React, { useState } from "react";
-import { createDashboardSession } from "../../api/client";
+import { createDashboardSession, ApiError } from "../../api/client";
+import { useOptionalAuth } from "../../context/AuthContext";
 import { Icon } from "../Icon";
 
 export function AnalyticsLauncher() {
   const [isLaunching, setIsLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const auth = useOptionalAuth();
 
   const handleLaunch = async () => {
     try {
       setIsLaunching(true);
       setError(null);
-      const data = await createDashboardSession();
+      let data;
+      try {
+        data = await createDashboardSession();
+      } catch (err: any) {
+        if (err instanceof ApiError && err.code === "CSRF_DENIED" && auth?.refreshSession) {
+          // Attempt to refresh the session token and retry once
+          await auth.refreshSession();
+          data = await createDashboardSession();
+        } else {
+          throw err;
+        }
+      }
+
       if (data?.launch_url) {
         // Open local Streamlit dashboard in new tab or navigate
         window.open(data.launch_url, "_blank", "noopener,noreferrer");

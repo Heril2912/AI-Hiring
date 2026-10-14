@@ -41,6 +41,7 @@ export function RequirementGapReportView({
   const [selectedStateFilter, setSelectedStateFilter] = useState<string>("ALL");
   const [selectedNecessityFilter, setSelectedNecessityFilter] = useState<string>("ALL");
   const [onlyReviewRequired, setOnlyReviewRequired] = useState<boolean>(false);
+  const [donutScope, setDonutScope] = useState<"ALL" | "MUST_HAVE" | "PREFERRED">("ALL");
 
   // Active evidence modal/drawer state
   const [isDownloadingJson, setIsDownloadingJson] = useState<boolean>(false);
@@ -383,6 +384,274 @@ export function RequirementGapReportView({
           </div>
         )}
       </div>
+
+      {/* 3B. Non-Bar Visual 1: Evidence Coverage Donut & Visual 2: Requirement Status Grid */}
+      {rawItems.length > 0 && (() => {
+        // Filter items based on donutScope ("ALL", "MUST_HAVE", "PREFERRED")
+        const scopeItems = rawItems.filter((it: any) => {
+          const nec = it.necessity || it.requirement_type;
+          if (donutScope === "MUST_HAVE") return nec === "MUST_HAVE";
+          if (donutScope === "PREFERRED") return nec === "PREFERRED";
+          return true;
+        });
+
+        // Exclude NOT_APPLICABLE from coverage denominator
+        const applicableItems = scopeItems.filter((it: any) => {
+          const state = it.gapState || it.reconciled_state || it.gap_state;
+          return state !== "NOT_APPLICABLE";
+        });
+
+        const totalEvaluated = applicableItems.length;
+
+        let countFound = 0;
+        let countPartial = 0;
+        let countVerify = 0;
+        let countNotFound = 0;
+
+        applicableItems.forEach((it: any) => {
+          const state = it.gapState || it.reconciled_state || it.gap_state;
+          if (state === "COVERED") {
+            countFound += 1;
+          } else if (state === "PARTIALLY_COVERED") {
+            countPartial += 1;
+          } else if (state === "UNVERIFIED" || state === "CONFLICTING_REVIEW_REQUIRED") {
+            countVerify += 1;
+          } else {
+            countNotFound += 1;
+          }
+        });
+
+        const pctFound = totalEvaluated > 0 ? Math.round((countFound / totalEvaluated) * 100) : 0;
+        const pctPartial = totalEvaluated > 0 ? Math.round((countPartial / totalEvaluated) * 100) : 0;
+        const pctVerify = totalEvaluated > 0 ? Math.round((countVerify / totalEvaluated) * 100) : 0;
+        const pctNotFound = totalEvaluated > 0 ? Math.round((countNotFound / totalEvaluated) * 100) : 0;
+
+        // Degree stops for CSS conic gradient
+        const degFound = totalEvaluated > 0 ? (countFound / totalEvaluated) * 360 : 0;
+        const degPartial = totalEvaluated > 0 ? (countPartial / totalEvaluated) * 360 : 0;
+        const degVerify = totalEvaluated > 0 ? (countVerify / totalEvaluated) * 360 : 0;
+
+        const donutGradStops = totalEvaluated > 0 ? [
+          `var(--gap-covered) 0deg ${degFound}deg`,
+          `var(--gap-unverified) ${degFound}deg ${degFound + degPartial}deg`,
+          `var(--gap-unverified) ${degFound + degPartial}deg ${degFound + degPartial + degVerify}deg`,
+          `var(--gap-partial) ${degFound + degPartial + degVerify}deg 360deg`,
+        ].join(", ") : "#ebe7dc 0deg 360deg";
+
+        // Group requirements for Requirement Status Grid
+        const requiredTiles = rawItems.filter((it: any) => (it.necessity || it.requirement_type) === "MUST_HAVE");
+        const preferredTiles = rawItems.filter((it: any) => (it.necessity || it.requirement_type) === "PREFERRED");
+
+        const getTileStatusMeta = (it: any) => {
+          const state = it.gapState || it.reconciled_state || it.gap_state;
+          if (state === "COVERED") {
+            return { label: "Evidence found", color: "var(--gap-covered)", bg: "var(--gap-covered-bg)", border: "var(--gap-covered-border)" };
+          }
+          if (state === "PARTIALLY_COVERED") {
+            return { label: "Partial evidence", color: "var(--gap-unverified)", bg: "var(--gap-unverified-bg)", border: "var(--gap-unverified-border)" };
+          }
+          if (state === "UNVERIFIED" || state === "CONFLICTING_REVIEW_REQUIRED") {
+            return { label: "Needs verification", color: "var(--gap-unverified)", bg: "var(--gap-unverified-bg)", border: "var(--gap-unverified-border)" };
+          }
+          if (state === "NOT_APPLICABLE") {
+            return { label: "Excluded", color: "#6d7772", bg: "#f3f0e6", border: "#cbc8ba" };
+          }
+          return { label: "Not evidenced", color: "var(--gap-partial)", bg: "var(--gap-partial-bg)", border: "var(--gap-partial-border)" };
+        };
+
+        return (
+          <div className="skill-gap-visuals-panel" aria-label="Evidence Visual Summaries">
+            {/* Visual A: Evidence Coverage Donut */}
+            <div className="visual-analytics-card" role="region" aria-label="Evidence Coverage Donut Chart">
+              <div className="chart-header">
+                <div>
+                  <h4 className="chart-title">Evidence Coverage Breakdown</h4>
+                  <p className="chart-subtitle">
+                    Distribution of requirement evidence for {donutScope === "MUST_HAVE" ? "required criteria" : donutScope === "PREFERRED" ? "preferred criteria" : "all evaluated criteria"} (excluding not-applicable items)
+                  </p>
+                </div>
+                {prefTotal > 0 && (
+                  <div className="skill-gap-scope-pills" role="group" aria-label="Filter donut scope">
+                    <button
+                      type="button"
+                      className={`skill-gap-scope-btn ${donutScope === "ALL" ? "active" : ""}`}
+                      onClick={() => setDonutScope("ALL")}
+                      aria-pressed={donutScope === "ALL"}
+                    >
+                      All ({rawItems.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`skill-gap-scope-btn ${donutScope === "MUST_HAVE" ? "active" : ""}`}
+                      onClick={() => setDonutScope("MUST_HAVE")}
+                      aria-pressed={donutScope === "MUST_HAVE"}
+                    >
+                      Required Only
+                    </button>
+                    <button
+                      type="button"
+                      className={`skill-gap-scope-btn ${donutScope === "PREFERRED" ? "active" : ""}`}
+                      onClick={() => setDonutScope("PREFERRED")}
+                      aria-pressed={donutScope === "PREFERRED"}
+                    >
+                      Preferred Only
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="skill-gap-donut-row">
+                <div
+                  className="skill-gap-donut-wheel"
+                  style={{ background: `conic-gradient(${donutGradStops})` }}
+                  role="img"
+                  aria-label={`Donut chart: ${totalEvaluated} evaluated criteria. ${countFound} (${pctFound}%) evidence found, ${countPartial} (${pctPartial}%) partial, ${countVerify} (${pctVerify}%) needs verification, ${countNotFound} (${pctNotFound}%) not evidenced.`}
+                >
+                  <div className="skill-gap-donut-hole">
+                    <span className="doughnut-center-count">{totalEvaluated}</span>
+                    <span className="doughnut-center-label">Evaluated Criteria</span>
+                  </div>
+                </div>
+
+                <div className="skill-gap-legend-list" role="list" aria-label="Evidence status breakdown">
+                  <div className="skill-gap-legend-row" role="listitem">
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span className="legend-swatch swatch-solid-teal" />
+                      <span className="legend-label-text">Evidence found:</span>
+                    </div>
+                    <span className="legend-count-val">{countFound} ({pctFound}%)</span>
+                  </div>
+                  {countPartial > 0 && (
+                    <div className="skill-gap-legend-row" role="listitem">
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span className="legend-swatch swatch-diagonal-indigo" />
+                        <span className="legend-label-text">Partial evidence:</span>
+                      </div>
+                      <span className="legend-count-val">{countPartial} ({pctPartial}%)</span>
+                    </div>
+                  )}
+                  {countVerify > 0 && (
+                    <div className="skill-gap-legend-row" role="listitem">
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span className="legend-swatch swatch-dotted-amber" />
+                        <span className="legend-label-text">Needs verification:</span>
+                      </div>
+                      <span className="legend-count-val">{countVerify} ({pctVerify}%)</span>
+                    </div>
+                  )}
+                  <div className="skill-gap-legend-row" role="listitem">
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span className="legend-swatch swatch-solid-slate" />
+                      <span className="legend-label-text">Not evidenced:</span>
+                    </div>
+                    <span className="legend-count-val">{countNotFound} ({pctNotFound}%)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Visual B: Requirement Status Grid */}
+            <div className="visual-analytics-card" role="region" aria-label="Requirement Status Grid">
+              <div className="chart-header">
+                <div>
+                  <h4 className="chart-title">Requirement Status Grid</h4>
+                  <p className="chart-subtitle">
+                    Interactive overview of individual job requirements grouped by necessity
+                  </p>
+                </div>
+              </div>
+
+              <div className="skill-gap-grid-section">
+                {/* Required Criteria Group */}
+                {requiredTiles.length > 0 && (
+                  <div>
+                    <h5 className="skill-gap-group-title">
+                      <span>Required Criteria ({requiredTiles.length})</span>
+                    </h5>
+                    <div className="skill-gap-tiles-wrap" style={{ marginTop: "8px" }} role="list" aria-label="Required requirements status list">
+                      {requiredTiles.map((tile: any, idx: number) => {
+                        const meta = getTileStatusMeta(tile);
+                        const name = tile.requirementName || (tile as any).requirement_name || tile.category || `Criterion #${idx + 1}`;
+                        const labelText = `${name}: ${meta.label} (Required)`;
+                        return (
+                          <div
+                            key={tile.itemId || tile.requirementId || `req-tile-${idx}`}
+                            role="listitem"
+                            tabIndex={0}
+                            className="skill-gap-tile"
+                            aria-label={labelText}
+                            title={labelText}
+                            style={{ borderColor: meta.border, backgroundColor: meta.bg }}
+                          >
+                            <span className="skill-gap-tile-dot" style={{ backgroundColor: meta.color }} />
+                            <span className="skill-gap-tile-name">{name}</span>
+                            <span className="skill-gap-tile-status" style={{ color: meta.color }}>
+                              • {meta.label}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Preferred Criteria Group */}
+                {preferredTiles.length > 0 && (
+                  <div style={{ marginTop: "10px" }}>
+                    <h5 className="skill-gap-group-title">
+                      <span>Preferred Criteria ({preferredTiles.length})</span>
+                    </h5>
+                    <div className="skill-gap-tiles-wrap" style={{ marginTop: "8px" }} role="list" aria-label="Preferred requirements status list">
+                      {preferredTiles.map((tile: any, idx: number) => {
+                        const meta = getTileStatusMeta(tile);
+                        const name = tile.requirementName || (tile as any).requirement_name || tile.category || `Criterion #${idx + 1}`;
+                        const labelText = `${name}: ${meta.label} (Preferred)`;
+                        return (
+                          <div
+                            key={tile.itemId || tile.requirementId || `pref-tile-${idx}`}
+                            role="listitem"
+                            tabIndex={0}
+                            className="skill-gap-tile"
+                            aria-label={labelText}
+                            title={labelText}
+                            style={{ borderColor: meta.border, backgroundColor: meta.bg }}
+                          >
+                            <span className="skill-gap-tile-dot" style={{ backgroundColor: meta.color }} />
+                            <span className="skill-gap-tile-name">{name}</span>
+                            <span className="skill-gap-tile-status" style={{ color: meta.color }}>
+                              • {meta.label}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Text legend for keyboard accessibility */}
+                <div className="skill-gap-grid-legend" role="list" aria-label="Status grid legend">
+                  <span className="skill-gap-grid-legend-item" role="listitem">
+                    <span className="legend-swatch swatch-solid-teal" />
+                    <span>Evidence found</span>
+                  </span>
+                  <span className="skill-gap-grid-legend-item" role="listitem">
+                    <span className="legend-swatch swatch-diagonal-indigo" />
+                    <span>Partial evidence</span>
+                  </span>
+                  <span className="skill-gap-grid-legend-item" role="listitem">
+                    <span className="legend-swatch swatch-dotted-amber" />
+                    <span>Needs verification</span>
+                  </span>
+                  <span className="skill-gap-grid-legend-item" role="listitem">
+                    <span className="legend-swatch swatch-solid-slate" />
+                    <span>Not evidenced</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 4. Visualization: Category Evidence Coverage Chart */}
       {rawItems.length > 0 && (

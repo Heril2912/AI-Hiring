@@ -568,7 +568,7 @@ export function CandidateComparisonView({
                     type="checkbox"
                     checked={isSelected}
                     disabled={!hasProfile}
-                    onChange={() => {}}
+                    onChange={() => { }}
                     aria-label={`Select candidate ${c.fullName || c.originalFilename}`}
                   />
                   <div className="candidate-select-info">
@@ -884,18 +884,7 @@ export function CandidateComparisonView({
                                 <Icon name="badge-check" size={13} />
                                 <span>{buttonLabel}</span>
                               </button>
-                              {onOpenInterviewWorkspace && (
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => onOpenInterviewWorkspace(jobId, candidateDetail?.artifactId || item.profileId)}
-                                  aria-label={`Open interview workspace for ${candidateName}`}
-                                  style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
-                                >
-                                  <Icon name="sparkles" size={13} />
-                                  <span>Interview Plan</span>
-                                </button>
-                              )}
+
                               <button
                                 type="button"
                                 className="btn-link-action"

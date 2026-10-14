@@ -450,9 +450,9 @@ export function OverallEvidenceCompositionChart({ results }: OverallEvidenceComp
   const gradStops = [
     `var(--gap-covered) 0deg ${degFound}deg`,
     `var(--gap-unverified) ${degFound}deg ${degFound + degPartial}deg`,
-    `var(--gap-partial) ${degFound + degPartial}deg ${degFound + degPartial + degVerify}deg`,
-    `var(--gap-not-evidenced) ${degFound + degPartial + degVerify}deg ${degFound + degPartial + degVerify + degNotFound}deg`,
-    `var(--gap-not-applicable) ${degFound + degPartial + degVerify + degNotFound}deg 360deg`,
+    `var(--gap-unverified) ${degFound + degPartial}deg ${degFound + degPartial + degVerify}deg`,
+    `var(--gap-partial) ${degFound + degPartial + degVerify}deg ${degFound + degPartial + degVerify + degNotFound}deg`,
+    `#6d7772 ${degFound + degPartial + degVerify + degNotFound}deg 360deg`,
   ].join(", ");
 
   const conicStyle = {
