@@ -96,7 +96,7 @@ def _render_mode_interviews(interviews: list, mode: str) -> None:
     if mode == "AUDIO":
         st.markdown(
             """
-            <div style="padding: 0.75rem 1rem; background: #E2ECE9; border: 1px solid #B8D5CD; border-radius: 4px; font-size: 0.85rem; color: #174F4A; margin: 1rem 0;">
+            <div style="padding: 0.85rem 1rem; background: #FFFFFF; border: 1px solid #D6DCD7; border-left: 3px solid #174F4A; border-radius: 6px; font-size: 0.95rem; color: #202824; margin: 1rem 0;">
                 <strong>Audio Privacy Guarantee:</strong> Voice evaluations are strictly derived from accepted whisper.cpp transcript text.
                 No acoustic, tone, pitch, pronunciation, confidence, hesitation, or personality analysis is performed.
             </div>

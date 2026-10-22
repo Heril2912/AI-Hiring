@@ -20,7 +20,7 @@ def render_page_header(
             <div class="dashboard-eyebrow">{eyebrow}</div>
             <h1 class="dashboard-title">{title}</h1>
             {f'<div class="dashboard-subtitle">{subtitle}</div>' if subtitle else ''}
-            {f'<div style="font-size:0.75rem; color:#6C7A75; margin-top:0.3rem;">Data generated: {time_str}</div>' if time_str else ''}
+            {f'<div style="font-size:0.85rem; color:#52605A; margin-top:0.3rem;">Data generated: {time_str}</div>' if time_str else ''}
         </div>
         """,
         unsafe_allow_html=True,
@@ -60,10 +60,10 @@ def render_sidebar_workspace_link() -> None:
     st.sidebar.markdown(
         f"""
         <div style="padding: 0.5rem 0;">
-            <a href="{workspace_url}" target="_self" class="mineral-link" style="display:inline-flex; align-items:center; gap:6px;">
+            <a href="{workspace_url}" target="_self" class="mineral-link" style="display:inline-flex; align-items:center; gap:6px; font-size:0.95rem;">
                 <span>← Return to Workspace</span>
             </a>
-            <div style="font-size: 0.72rem; color: #6C7A75; margin-top: 0.25rem;">
+            <div style="font-size: 0.85rem; color: #52605A; margin-top: 0.25rem;">
                 Back to React recruitment platform
             </div>
         </div>
@@ -77,16 +77,16 @@ def render_expired_session_screen() -> None:
     workspace_url = get_return_to_workspace_url()
     st.markdown(
         f"""
-        <div style="max-width: 550px; margin: 60px auto; padding: 2rem; background: #FCFBF6; border: 1px solid #D6D1C4; border-radius: 6px; text-align: center;">
-            <div style="font-size: 0.8rem; font-weight: 700; color: #5C2438; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem;">
+        <div style="max-width: 550px; margin: 60px auto; padding: 2rem; background: #FFFFFF; border: 1px solid #D6DCD7; border-radius: 6px; text-align: center;">
+            <div style="font-size: 0.85rem; font-weight: 700; color: #654A32; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">
                 Session Notice
             </div>
-            <h2 style="font-size: 1.5rem; color: #202927; margin-bottom: 0.75rem;">Dashboard Access Required</h2>
-            <p style="font-size: 0.95rem; color: #4A5652; line-height: 1.5; margin-bottom: 1.5rem;">
+            <h2 style="font-size: 1.5rem; font-weight: 600; color: #202824; margin-bottom: 0.75rem;">Dashboard Access Required</h2>
+            <p style="font-size: 1rem; color: #52605A; line-height: 1.5; margin-bottom: 1.5rem;">
                 This analytics dashboard requires a valid single-use ticket or active recruitment session.
                 Please launch analytics directly from the recruitment workspace.
             </p>
-            <a href="{workspace_url}" target="_self" style="display: inline-block; background: #174F4A; color: #FFFFFF; padding: 0.6rem 1.25rem; border-radius: 4px; text-decoration: none; font-weight: 600;">
+            <a href="{workspace_url}" target="_self" style="display: inline-block; background: #174F4A; color: #FFFFFF; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 1rem;">
                 Return to Recruitment Workspace
             </a>
         </div>

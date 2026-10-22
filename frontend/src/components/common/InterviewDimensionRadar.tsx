@@ -142,8 +142,8 @@ function RadarSVG({
           <polygon
             key={`grid-${lvl}`}
             points={polygonPoints(lvl)}
-            fill={lvl === gridLevels.length ? "#f8fafc" : "none"}
-            stroke="#cbd5e1"
+            fill={lvl === gridLevels.length ? "var(--bg-surface-subtle, #F0F2EF)" : "none"}
+            stroke="var(--border-subtle, #D6DCD7)"
             strokeWidth="1"
             strokeDasharray={lvl < gridLevels.length ? "3,3" : "none"}
           />
@@ -161,7 +161,7 @@ function RadarSVG({
               y1={center}
               x2={x}
               y2={y}
-              stroke="#94a3b8"
+              stroke="var(--border-control, #7B857F)"
               strokeWidth="1"
             />
           );
@@ -170,8 +170,8 @@ function RadarSVG({
         {/* Data Polygon */}
         <polygon
           points={dataPointsStr}
-          fill="rgba(79, 91, 213, 0.2)"
-          stroke="var(--accent-primary)"
+          fill="rgba(23, 79, 74, 0.15)"
+          stroke="var(--accent-primary, #174F4A)"
           strokeWidth="2.5"
         />
 
@@ -188,7 +188,7 @@ function RadarSVG({
                 cx={p.x}
                 cy={p.y}
                 r={4.5}
-                fill="var(--accent-primary)"
+                fill="var(--accent-primary, #174F4A)"
                 stroke="#ffffff"
                 strokeWidth="2"
               />
@@ -197,9 +197,9 @@ function RadarSVG({
                 y={ly}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize="10"
+                fontSize="12"
                 fontWeight="600"
-                fill="#1e293b"
+                fill="var(--text-primary, #202824)"
               >
                 {p.name.length > 18 ? `${p.name.slice(0, 16)}…` : p.name}
               </text>

@@ -42,7 +42,7 @@ def render_readiness_view() -> None:
     # Informational notice
     st.markdown(
         f"""
-        <div style="padding: 1rem; background: #FCFBF6; border: 1px solid #D6D1C4; border-radius: 6px; margin-bottom: 1.5rem;">
+        <div style="padding: 1rem; background: #FFFFFF; border: 1px solid #D6DCD7; border-radius: 6px; margin-bottom: 1.5rem; color: #202824; font-size: 1rem;">
             <strong>System Status:</strong> {readiness.user_safe_message}
         </div>
         """,
@@ -66,8 +66,8 @@ def render_readiness_view() -> None:
         with col_status:
             st.markdown(render_status_badge(s["Status"]), unsafe_allow_html=True)
         with col_scope:
-            st.markdown(f"<span style='color:#5A6561; font-size:0.85rem;'>{s['Scope']}</span>", unsafe_allow_html=True)
-        st.markdown("<hr style='margin: 0.5rem 0; border: none; border-top: 1px solid #EBE7DD;' />", unsafe_allow_html=True)
+            st.markdown(f"<span style='color:#52605A; font-size:0.95rem;'>{s['Scope']}</span>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin: 0.5rem 0; border: none; border-top: 1px solid #D6DCD7;' />", unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

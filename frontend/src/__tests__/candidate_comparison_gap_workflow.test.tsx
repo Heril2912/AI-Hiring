@@ -141,7 +141,7 @@ describe('CandidateComparisonView Gap Workflow', () => {
     expect(screen.getAllByText(/3 of 5/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/2 of 5/i).length).toBeGreaterThan(0);
 
-    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /^review\b|review evidence|view gap report/i });
     expect(buttons.length).toBe(2); // Charlie has no resultId -> Summary unavailable
     expect(screen.getAllByText('Summary unavailable').length).toBeGreaterThan(0);
   });
@@ -195,7 +195,7 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /^review\b|review evidence|view gap report/i });
     fireEvent.click(buttons[0]); // Click Alice
 
     await waitFor(() => {
@@ -253,7 +253,7 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /^review\b|review evidence|view gap report/i });
     fireEvent.click(buttons[1]); // Click Bob
 
     await waitFor(() => {
@@ -281,7 +281,7 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /^review\b|review evidence|view gap report/i });
     fireEvent.click(buttons[0]);
     fireEvent.click(buttons[0]); // Second click while processing
 
@@ -307,7 +307,7 @@ describe('CandidateComparisonView Gap Workflow', () => {
       />
     );
 
-    const buttons = screen.getAllByRole('button', { name: /review evidence|view gap report/i });
+    const buttons = screen.getAllByRole('button', { name: /^review\b|review evidence|view gap report/i });
     fireEvent.click(buttons[0]);
 
     await waitFor(() => {

@@ -766,7 +766,7 @@ export function JobEditor({ jobId, onNavigateBack, onJobCreated, onJobUpdated, o
                 </span>
               </span>
             ) : isReadOnly ? (
-              <span className="badge badge-warning" style={{ background: "rgba(234, 179, 8, 0.12)", color: "#ca8a04", borderColor: "rgba(234, 179, 8, 0.3)" }}>
+              <span className="badge badge-warning">
                 <Icon name="lock" size={12} />
                 <span>Not released</span>
               </span>

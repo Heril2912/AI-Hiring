@@ -784,7 +784,7 @@ export function CandidateInterviewWorkspace({
                   aria-hidden="true"
                 />
                 <span>
-                  Speech-to-Text: <strong>{sttReady ? "Ready (whisper.cpp)" : "Unavailable"}</strong>
+                  Transcription: <strong>{sttReady ? "Ready" : "Unavailable"}</strong>
                 </span>
               </div>
 
@@ -796,7 +796,7 @@ export function CandidateInterviewWorkspace({
                   aria-hidden="true"
                 />
                 <span>
-                  Question Speech: <strong>{ttsReady ? "Ready (Piper TTS)" : "Unavailable"}</strong>
+                  Question playback: <strong>{ttsReady ? "Ready" : "Unavailable"}</strong>
                 </span>
               </div>
 
@@ -826,7 +826,7 @@ export function CandidateInterviewWorkspace({
             </div>
 
             {!allRuntimesReady && capabilities?.unavailable_reason && (
-              <div style={{ marginTop: "12px", fontSize: "12px", color: "#92400e", backgroundColor: "#fffbeb", padding: "8px 12px", borderRadius: "6px", border: "1px solid #fde68a" }}>
+              <div style={{ marginTop: "12px", fontSize: "14px", color: "var(--status-warn, #76551f)", backgroundColor: "var(--bg-surface-raised, #ffffff)", padding: "10px 14px", borderRadius: "6px", border: "1px solid var(--border-subtle, #d6dcd7)" }}>
                 <Icon name="info" size={14} style={{ marginRight: "6px", verticalAlign: "middle" }} aria-hidden="true" />
                 {capabilities.unavailable_reason}
               </div>
@@ -836,28 +836,28 @@ export function CandidateInterviewWorkspace({
           {/* Privacy & Zero-Retention Notice */}
           <div
             style={{
-              backgroundColor: "#eff6ff",
-              border: "1px solid #bfdbfe",
-              borderRadius: "8px",
-              padding: "16px 20px",
+              backgroundColor: "var(--bg-surface-raised, #ffffff)",
+              border: "1px solid var(--border-subtle, #d6dcd7)",
+              borderRadius: "6px",
+              padding: "18px 22px",
               marginBottom: "24px",
               display: "flex",
               flexDirection: "column",
-              gap: "10px",
-              fontSize: "13px",
-              color: "#1e3a8a",
+              gap: "12px",
+              fontSize: "15px",
+              color: "var(--text-primary, #202824)",
               lineHeight: 1.5,
             }}
           >
-            <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-              <Icon name="shield" size={16} style={{ color: "#2563eb", flexShrink: 0, marginTop: "2px" }} aria-hidden="true" />
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+              <Icon name="shield" size={18} style={{ color: "var(--accent-primary, #174f4a)", flexShrink: 0, marginTop: "2px" }} aria-hidden="true" />
               <div>
                 <strong>Zero Audio Retention Policy:</strong> Your spoken recording is processed entirely locally on the server for transcription and immediately deleted. Raw audio files, waveforms, or acoustic pitch/emotion metrics are never saved or sent to any cloud service.
               </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
-              <Icon name="file-text" size={16} style={{ color: "#2563eb", flexShrink: 0, marginTop: "2px" }} aria-hidden="true" />
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+              <Icon name="file-text" size={18} style={{ color: "var(--accent-primary, #174f4a)", flexShrink: 0, marginTop: "2px" }} aria-hidden="true" />
               <div>
                 <strong>Transcript Confirmation:</strong> You will review the generated transcript before deciding to accept it as your official answer or record again. Only the confirmed transcript text is evaluated.
               </div>
@@ -872,20 +872,20 @@ export function CandidateInterviewWorkspace({
                 alignItems: "flex-start",
                 gap: "12px",
                 cursor: "pointer",
-                padding: "12px 14px",
-                borderRadius: "8px",
-                backgroundColor: micAcknowledged ? "#f0fdf4" : "var(--surface-muted, #f8fafc)",
-                border: micAcknowledged ? "1px solid #bbf7d0" : "1px solid var(--border-subtle, #e2e8f0)",
-                transition: "all 0.15s ease",
+                padding: "14px 16px",
+                borderRadius: "6px",
+                backgroundColor: "var(--bg-surface-raised, #ffffff)",
+                border: micAcknowledged ? "1px solid var(--border-medium, #7b857f)" : "1px solid var(--border-subtle, #d6dcd7)",
+                transition: "border-color 0.15s ease",
               }}
             >
               <input
                 type="checkbox"
                 checked={micAcknowledged}
                 onChange={(e) => setMicAcknowledged(e.target.checked)}
-                style={{ marginTop: "3px", accentColor: "#2563eb" }}
+                style={{ marginTop: "3px", accentColor: "var(--accent-primary, #174f4a)" }}
               />
-              <span style={{ fontSize: "13px", color: "var(--text-primary, #0f172a)", lineHeight: 1.5 }}>
+              <span style={{ fontSize: "15px", color: "var(--text-primary, #202824)", lineHeight: 1.5 }}>
                 I understand that my microphone will be used solely for local transcription of my responses, and raw voice recordings are not retained.
               </span>
             </label>
@@ -899,10 +899,10 @@ export function CandidateInterviewWorkspace({
           )}
 
           {/* Actions */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "16px", paddingTop: "24px", borderTop: "1px solid var(--border-subtle, #d6dcd7)", marginTop: "24px" }}>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-secondary btn-md"
               onClick={onExit}
               disabled={isStartingAudio}
             >
@@ -911,10 +911,10 @@ export function CandidateInterviewWorkspace({
 
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-primary btn-md"
               disabled={!canStart}
               onClick={handleStartAudioInterview}
-              style={{ minWidth: "200px" }}
+              style={{ minWidth: "220px" }}
             >
               {isStartingAudio ? "Starting Interview..." : "Start Audio Interview"}
             </button>
@@ -931,9 +931,11 @@ export function CandidateInterviewWorkspace({
           <Icon name="alert-triangle" size={18} aria-hidden="true" />
           <span>{error}</span>
         </div>
-        <button type="button" className="btn btn-secondary" onClick={onExit}>
-          Return to Interviews
-        </button>
+        <div style={{ marginTop: "24px" }}>
+          <button type="button" className="btn btn-secondary btn-md" onClick={onExit}>
+            Return to Interviews
+          </button>
+        </div>
       </div>
     );
   }
@@ -1064,14 +1066,16 @@ export function CandidateInterviewWorkspace({
             The hiring team will review your application and interview submission.
           </p>
 
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onExit}
-            style={{ minWidth: "180px" }}
-          >
-            Return to Interviews
-          </button>
+          <div style={{ paddingTop: "20px", borderTop: "1px solid var(--border-subtle, #d6dcd7)", marginTop: "24px" }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-md"
+              onClick={onExit}
+              style={{ minWidth: "180px" }}
+            >
+              Return to Interviews
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1728,7 +1732,7 @@ export function CandidateInterviewWorkspace({
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "#4f46e5",
+                    color: "var(--accent-primary, #174F4A)",
                     marginBottom: "14px",
                   }}
                 >
@@ -1750,8 +1754,6 @@ export function CandidateInterviewWorkspace({
                     gap: "8px",
                     padding: "10px 24px",
                     fontSize: "15px",
-                    backgroundColor: "#4f46e5",
-                    borderColor: "var(--accent-primary)",
                     whiteSpace: "nowrap",
                   }}
                 >
@@ -1916,8 +1918,6 @@ export function CandidateInterviewWorkspace({
                     onClick={handleAcceptTranscript}
                     disabled={saveState === "saving"}
                     style={{
-                      backgroundColor: "#4f46e5",
-                      borderColor: "var(--accent-primary)",
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -2017,8 +2017,6 @@ export function CandidateInterviewWorkspace({
                     display: "inline-flex",
                     alignItems: "center",
                     gap: "8px",
-                    backgroundColor: "#4f46e5",
-                    borderColor: "var(--accent-primary)",
                     whiteSpace: "nowrap",
                   }}
                 >

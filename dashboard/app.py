@@ -41,10 +41,10 @@ def main():
     st.sidebar.markdown(
         """
         <div style="padding: 1rem 0 0.5rem 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #5A6561; text-transform: uppercase; letter-spacing: 0.08em;">
+            <div style="font-size: 0.8rem; font-weight: 700; color: #52605A; text-transform: uppercase; letter-spacing: 0.05em;">
                 Editorial Mineral
             </div>
-            <div style="font-size: 1.25rem; font-weight: 700; color: #174F4A;">
+            <div style="font-size: 1.25rem; font-weight: 600; color: #174F4A;">
                 Smart Analytics
             </div>
         </div>

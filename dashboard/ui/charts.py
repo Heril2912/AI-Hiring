@@ -11,8 +11,8 @@ def create_pipeline_horizontal_bar_chart(df: pd.DataFrame) -> alt.Chart:
         alt.Chart(df)
         .mark_bar(color="#174F4A", cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
         .encode(
-            x=alt.X("count:Q", title="Candidate Count", axis=alt.Axis(grid=True, gridColor="#E2DDD2")),
-            y=alt.Y("stage:N", title=None, sort=None, axis=alt.Axis(labelFontSize=13, labelColor="#202927")),
+            x=alt.X("count:Q", title="Candidate Count", axis=alt.Axis(grid=True, gridColor="#D6DCD7", labelColor="#202824", titleColor="#202824", labelFontSize=13, titleFontSize=14)),
+            y=alt.Y("stage:N", title=None, sort=None, axis=alt.Axis(labelFontSize=14, labelColor="#202824")),
             tooltip=["stage", "count", "description"],
         )
         .properties(height=260)
@@ -38,12 +38,12 @@ def create_match_distribution_chart(df: pd.DataFrame) -> alt.Chart:
                 bin=alt.Bin(maxbins=10, step=10),
                 scale=alt.Scale(domain=[0, 100]),
                 title="Compatibility Score (%)",
-                axis=alt.Axis(labelColor="#202927", titleColor="#202927", labelFontSize=11, titleFontSize=12),
+                axis=alt.Axis(labelColor="#202824", titleColor="#202824", labelFontSize=13, titleFontSize=14),
             ),
             y=alt.Y(
                 "count():Q",
                 title="Candidate Count",
-                axis=alt.Axis(tickMinStep=1, labelColor="#202927", titleColor="#202927", labelFontSize=11, titleFontSize=12, grid=True, gridColor="#E2DDD2"),
+                axis=alt.Axis(tickMinStep=1, labelColor="#202824", titleColor="#202824", labelFontSize=13, titleFontSize=14, grid=True, gridColor="#D6DCD7"),
             ),
             tooltip=[
                 alt.Tooltip("count():Q", title="Candidate Count"),
@@ -64,18 +64,18 @@ def create_missing_criteria_chart(df: pd.DataFrame) -> alt.Chart:
 
     chart = (
         alt.Chart(df)
-        .mark_bar(color="#806022", cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
+        .mark_bar(color="#76551F", cornerRadiusTopRight=3, cornerRadiusBottomRight=3)
         .encode(
             x=alt.X(
                 "count:Q",
                 title="Candidates Missing Evidence",
-                axis=alt.Axis(tickMinStep=1, grid=True, gridColor="#E2DDD2", labelColor="#202927", titleColor="#202927", labelFontSize=11, titleFontSize=12),
+                axis=alt.Axis(tickMinStep=1, grid=True, gridColor="#D6DCD7", labelColor="#202824", titleColor="#202824", labelFontSize=13, titleFontSize=14),
             ),
             y=alt.Y(
                 "criterion:N",
                 title=None,
                 sort="-x",
-                axis=alt.Axis(labelLimit=300, labelFontSize=12, labelColor="#202927"),
+                axis=alt.Axis(labelLimit=300, labelFontSize=13, labelColor="#202824"),
             ),
             tooltip=[
                 alt.Tooltip("criterion:N", title="Required Criterion"),

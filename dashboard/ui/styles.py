@@ -5,50 +5,50 @@ EDITORIAL_MINERAL_CSS = """
 <style>
 /* Base typography and background overrides */
 html, body, [data-testid="stAppViewContainer"] {
-    background-color: #F3F0E6;
-    color: #202927;
+    background-color: #F6F7F5;
+    color: #202824;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 [data-testid="stSidebar"] {
-    background-color: #FCFBF6;
-    border-right: 1px solid #D6D1C4;
+    background-color: #FFFFFF;
+    border-right: 1px solid #D6DCD7;
 }
 
 /* Header section */
 .dashboard-header-container {
     padding: 1.5rem 0 1rem 0;
-    border-bottom: 1px solid #D6D1C4;
+    border-bottom: 1px solid #D6DCD7;
     margin-bottom: 1.5rem;
 }
 
 .dashboard-eyebrow {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #5A6561;
+    letter-spacing: 0.05em;
+    color: #52605A;
     margin-bottom: 0.25rem;
 }
 
 .dashboard-title {
     font-size: 1.85rem;
-    font-weight: 700;
+    font-weight: 600;
     color: #174F4A;
     margin: 0;
     line-height: 1.2;
 }
 
 .dashboard-subtitle {
-    font-size: 0.95rem;
-    color: #4A5652;
+    font-size: 1rem;
+    color: #52605A;
     margin-top: 0.35rem;
 }
 
 /* Metric Cards */
 .mineral-card {
-    background-color: #FCFBF6;
-    border: 1px solid #D6D1C4;
+    background-color: #FFFFFF;
+    border: 1px solid #D6DCD7;
     border-radius: 6px;
     padding: 1.25rem 1rem;
     margin-bottom: 1rem;
@@ -56,9 +56,9 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 .mineral-card-label {
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    color: #5A6561;
+    color: #52605A;
     margin-bottom: 0.35rem;
 }
 
@@ -70,54 +70,54 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 
 .mineral-card-hint {
-    font-size: 0.75rem;
-    color: #6C7A75;
+    font-size: 0.8rem;
+    color: #52605A;
     margin-top: 0.35rem;
 }
 
 /* Status Badges */
 .mineral-badge {
     display: inline-block;
-    padding: 0.2rem 0.6rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
     font-weight: 600;
 }
 
 .badge-available {
-    background-color: #E2ECE9;
-    color: #1B5E20;
-    border: 1px solid #B8D5CD;
+    background-color: #F0F2EF;
+    color: #174F4A;
+    border: 1px solid #D6DCD7;
 }
 
 .badge-attention {
-    background-color: #FBF4E4;
-    color: #8A6414;
-    border: 1px solid #ECD9A9;
+    background-color: #F0F2EF;
+    color: #76551F;
+    border: 1px solid #76551F;
 }
 
 .badge-unavailable {
-    background-color: #F4EAEF;
-    color: #5C2438;
-    border: 1px solid #DEBCCB;
+    background-color: #F0F2EF;
+    color: #654A32;
+    border: 1px solid #654A32;
 }
 
 /* Links and actions */
 a.mineral-link {
-    color: #174F4A;
+    color: #35566F;
     text-decoration: underline;
     font-weight: 600;
 }
 
 a.mineral-link:hover {
-    color: #0E3632;
+    color: #174F4A;
 }
 
 /* Tables styling */
 [data-testid="stDataFrame"] {
-    border: 1px solid #D6D1C4;
+    border: 1px solid #D6DCD7;
     border-radius: 6px;
-    background-color: #FCFBF6;
+    background-color: #FFFFFF;
 }
 </style>
 """

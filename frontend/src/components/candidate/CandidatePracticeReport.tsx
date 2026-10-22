@@ -148,8 +148,8 @@ export function CandidatePracticeReport({ sessionId, onExit, onPracticeAgain }: 
             <polygon
               key={`grid-${lvl}`}
               points={polygonPoints(lvl)}
-              fill={lvl === 4 ? "#f8fafc" : "none"}
-              stroke="#cbd5e1"
+              fill={lvl === 4 ? "var(--bg-surface-subtle, #F0F2EF)" : "none"}
+              stroke="var(--border-subtle, #D6DCD7)"
               strokeWidth="1"
               strokeDasharray={lvl < 4 ? "3,3" : "none"}
             />
@@ -160,14 +160,14 @@ export function CandidatePracticeReport({ sessionId, onExit, onPracticeAgain }: 
             const angle = i * angleStep - Math.PI / 2;
             const x = center + radius * Math.cos(angle);
             const y = center + radius * Math.sin(angle);
-            return <line key={`axis-${i}`} x1={center} y1={center} x2={x} y2={y} stroke="#94a3b8" strokeWidth="1" />;
+            return <line key={`axis-${i}`} x1={center} y1={center} x2={x} y2={y} stroke="var(--border-control, #7B857F)" strokeWidth="1" />;
           })}
 
           {/* Data Polygon */}
           <polygon
             points={dataPointsStr}
-            fill="rgba(79, 70, 229, 0.2)"
-            stroke="#4f46e5"
+            fill="rgba(23, 79, 74, 0.15)"
+            stroke="var(--accent-primary, #174F4A)"
             strokeWidth="2.5"
           />
 
@@ -180,15 +180,15 @@ export function CandidatePracticeReport({ sessionId, onExit, onPracticeAgain }: 
 
             return (
               <g key={`point-${i}`}>
-                <circle cx={p.x} cy={p.y} r={5} fill="#4f46e5" stroke="#ffffff" strokeWidth="2" />
+                <circle cx={p.x} cy={p.y} r={5} fill="var(--accent-primary, #174F4A)" stroke="#ffffff" strokeWidth="2" />
                 <text
                   x={lx}
                   y={ly}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  fontSize="11"
+                  fontSize="12"
                   fontWeight="600"
-                  fill="#1e293b"
+                  fill="var(--text-primary, #202824)"
                 >
                   {p.name.length > 18 ? `${p.name.slice(0, 16)}...` : p.name}
                 </text>
@@ -423,7 +423,7 @@ export function CandidatePracticeReport({ sessionId, onExit, onPracticeAgain }: 
                     style={{
                       height: "100%",
                       width: `${pct}%`,
-                      backgroundColor: score >= 3.5 ? "#0d9488" : score >= 2.5 ? "#4f46e5" : score >= 1.5 ? "#d97706" : "#94a3b8",
+                      backgroundColor: score >= 3.5 ? "var(--color-primary, #174F4A)" : score >= 2.5 ? "#35566F" : score >= 1.5 ? "var(--color-warning, #76551F)" : "var(--border-control, #7B857F)",
                       borderRadius: "4px",
                     }}
                   />
@@ -474,7 +474,7 @@ export function CandidatePracticeReport({ sessionId, onExit, onPracticeAgain }: 
                   }}
                 >
                   <div>
-                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#4f46e5", textTransform: "uppercase" }}>
+                    <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--accent-primary, #174F4A)", textTransform: "uppercase" }}>
                       Question {q.sequence_number} • {q.competency_name}
                     </span>
                     <div style={{ fontSize: "14px", fontWeight: 600, color: "#0f172a", marginTop: "2px" }}>
@@ -629,7 +629,7 @@ export function CandidatePracticeReport({ sessionId, onExit, onPracticeAgain }: 
       )}
 
       {/* Next Practice Action Plan */}
-      <div className="practice-report-card" style={{ borderLeft: "4px solid #4f46e5" }}>
+      <div className="practice-report-card" style={{ borderLeft: "4px solid var(--accent-primary, #174F4A)" }}>
         <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a", marginBottom: "12px" }}>
           Next Practice Plan
         </h2>

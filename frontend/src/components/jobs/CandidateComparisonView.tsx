@@ -738,13 +738,13 @@ export function CandidateComparisonView({
                     const rowState = isLegacy ? "unavailable" : (rowStates[item.resultId]?.status || "idle");
                     const isRowBusy = rowState === "checking" || rowState === "preparing";
 
-                    let buttonLabel = "Review evidence";
+                    let buttonLabel = "Review";
                     if (isLegacy || rowState === "unavailable") {
                       buttonLabel = "Summary unavailable";
                     } else if (rowState === "checking") {
-                      buttonLabel = "Checking evidence…";
+                      buttonLabel = "Checking…";
                     } else if (rowState === "preparing") {
-                      buttonLabel = "Preparing evidence…";
+                      buttonLabel = "Preparing…";
                     } else if (rowState === "retry") {
                       buttonLabel = "Try again";
                     }
@@ -812,11 +812,11 @@ export function CandidateComparisonView({
                           </td>
                           <td>
                             <div style={{ display: "flex", flexDirection: "column" }}>
-                              <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                              <span style={{ fontWeight: 600, fontSize: "14.5px", color: "var(--text-primary)" }}>
                                 {candidateName}
                               </span>
                               {candidateHeadline && (
-                                <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                                <span style={{ fontSize: "12.5px", color: "var(--text-secondary)" }}>
                                   {candidateHeadline}
                                 </span>
                               )}
@@ -824,47 +824,47 @@ export function CandidateComparisonView({
                           </td>
                           <td>
                             <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                              <span className="score-cell-value" style={{ fontSize: "15px", fontWeight: 700, color: "var(--text-primary)" }}>
+                              <span className="score-cell-value" style={{ fontSize: "17px", fontWeight: 700, color: "var(--text-primary)" }}>
                                 {overallScore}%
                               </span>
-                              <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                              <span style={{ fontSize: "12.5px", color: "var(--text-secondary)" }}>
                                 Overall match
                               </span>
                             </div>
                           </td>
                           <td>
                             {isSummaryUnavailable ? (
-                              <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                              <span style={{ fontSize: "13.5px", color: "var(--text-secondary)" }}>
                                 Summary unavailable
                               </span>
                             ) : (
                               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: "12px", color: "var(--text-primary)", fontWeight: 600 }}>
+                                  <span style={{ fontSize: "13.5px", color: "var(--text-primary)", fontWeight: 600 }}>
                                     Required skills: {reqSkillMatched} of {reqSkillTotal}
                                   </span>
-                                  <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                                  <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
                                     ({reqFound} of {reqTotal} required criteria have supporting resume evidence)
                                   </span>
                                 </div>
 
                                 {isZeroSkillWithPositiveScore && (
-                                  <div style={{ fontSize: "11px", color: "var(--text-secondary)", background: "var(--bg-surface-subtle)", padding: "4px 8px", borderRadius: "4px", marginTop: "2px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                                    <Icon name="info" size={12} className="text-muted" />
+                                  <div style={{ fontSize: "12px", color: "var(--text-secondary)", background: "var(--bg-surface-subtle)", padding: "4px 8px", borderRadius: "4px", marginTop: "2px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                    <Icon name="info" size={13} className="text-muted" />
                                     <span>The score comes from non-skill criteria; no required skill evidence was found.</span>
                                   </div>
                                 )}
 
                                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
                                   {reqVerification > 0 && (
-                                    <span style={{ fontSize: "11px", color: "var(--gap-partial)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
-                                      <Icon name="alert-circle" size={11} />
+                                    <span style={{ fontSize: "12px", color: "var(--gap-partial)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                      <Icon name="alert-circle" size={13} />
                                       <span>{reqVerification} require verification</span>
                                     </span>
                                   )}
                                   {reqPartial > 0 && (
-                                    <span style={{ fontSize: "11px", color: "var(--gap-unverified)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
-                                      <Icon name="clock" size={11} />
+                                    <span style={{ fontSize: "12px", color: "var(--gap-unverified)", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                      <Icon name="clock" size={13} />
                                       <span>{reqPartial} ha{reqPartial === 1 ? "s" : "ve"} partial evidence</span>
                                     </span>
                                   )}
@@ -881,7 +881,7 @@ export function CandidateComparisonView({
                                 disabled={isRowBusy || rowState === "unavailable" || isLegacy}
                                 aria-label={`${buttonLabel} for ${candidateName}`}
                               >
-                                <Icon name="badge-check" size={13} />
+                                <Icon name="badge-check" size={15} />
                                 <span>{buttonLabel}</span>
                               </button>
 
@@ -899,7 +899,7 @@ export function CandidateComparisonView({
                                     return next;
                                   });
                                 }}
-                                style={{ fontSize: "11px", textDecoration: "none" }}
+                                style={{ fontSize: "12.5px", textDecoration: "none" }}
                                 aria-expanded={isExpanded}
                               >
                                 {isExpanded ? "Hide score breakdown ▲" : "Score breakdown ▼"}
@@ -907,7 +907,7 @@ export function CandidateComparisonView({
                               {isLegacy && (
                                 <span
                                   style={{
-                                    fontSize: "11px",
+                                    fontSize: "12px",
                                     color: "var(--text-secondary)",
                                     maxWidth: "260px",
                                     textAlign: "right",

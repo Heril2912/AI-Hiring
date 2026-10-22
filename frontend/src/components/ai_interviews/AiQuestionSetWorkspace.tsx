@@ -599,7 +599,7 @@ export function AiQuestionSetWorkspace({
                   : "draft"
               }`}
             >
-              {isApproved && !isLegacy && <Icon name="lock" size={11} />}
+              {isApproved && !isLegacy && <Icon name="lock" size={13} />}
               {isLegacy
                 ? "Legacy set (Ineligible)"
                 : isApproved
@@ -615,17 +615,17 @@ export function AiQuestionSetWorkspace({
             <span
               className="badge"
               style={{
-                fontSize: "12px",
+                fontSize: "13px",
                 display: "inline-flex",
                 alignItems: "center",
-                gap: "5px",
+                gap: "6px",
                 backgroundColor: "#eef1fc",
                 color: "#3730a3",
-                padding: "3px 8px",
+                padding: "4px 10px",
                 borderRadius: "6px",
               }}
             >
-              <Icon name="sparkles" size={12} />
+              <Icon name="sparkles" size={14} />
               <span>AI-generated question set</span>
             </span>
 
@@ -634,18 +634,18 @@ export function AiQuestionSetWorkspace({
               <span
                 className="badge"
                 style={{
-                  fontSize: "12px",
+                  fontSize: "13px",
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: "5px",
+                  gap: "6px",
                   backgroundColor: "#ecfdf5",
                   color: "#065f46",
                   border: "1px solid #a7f3d0",
-                  padding: "3px 8px",
+                  padding: "4px 10px",
                   borderRadius: "6px",
                 }}
               >
-                <Icon name="users" size={12} />
+                <Icon name="users" size={14} />
                 <span>
                   {releaseStats.eligibleCount} eligible applicant{releaseStats.eligibleCount === 1 ? "" : "s"} · {releaseStats.releasedCount} interview{releaseStats.releasedCount === 1 ? "" : "s"} released
                 </span>
@@ -662,7 +662,7 @@ export function AiQuestionSetWorkspace({
             onClick={() => setShowProvenanceDrawer(!showProvenanceDrawer)}
             title="View safe model provenance and revision details"
           >
-            <Icon name="info" size={15} />
+            <Icon name="info" size={16} />
             <span>Provenance Details</span>
           </button>
 
@@ -672,7 +672,7 @@ export function AiQuestionSetWorkspace({
             onClick={() => setIsPreviewModalOpen(true)}
             title="Preview candidate-safe view of this interview set"
           >
-            <Icon name="eye" size={15} />
+            <Icon name="eye" size={16} />
             <span>Candidate Preview</span>
           </button>
 
@@ -684,7 +684,7 @@ export function AiQuestionSetWorkspace({
               disabled={isRegeneratingStale}
               title="Regenerate interview questions based on the latest approved job revision & requirements"
             >
-              <Icon name="sparkles" size={15} className={isRegeneratingStale ? "animate-spin" : ""} />
+              <Icon name="sparkles" size={16} className={isRegeneratingStale ? "animate-spin" : ""} />
               <span>{isRegeneratingStale ? "Regenerating..." : "Regenerate for latest job version"}</span>
             </button>
           )}
@@ -696,7 +696,7 @@ export function AiQuestionSetWorkspace({
               onClick={() => setIsReleaseModalOpen(true)}
               title="Release this sealed interview set to eligible applicants"
             >
-              <Icon name={detail.interview_mode === "AUDIO" ? "mic" : "user-check"} size={15} />
+              <Icon name={detail.interview_mode === "AUDIO" ? "mic" : "user-check"} size={16} />
               <span>Release Interview Set</span>
             </button>
           )}
